@@ -1,0 +1,16 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+pydantic
+pydantic-settings
+bcrypt
+pyjwt
+python-multipart
+deepface
+tf-keras
+# For PyTorch and related deps for anti-spoofing, we'll try installing them here first.
+# If there are conflicts, we'll split them.
+torch
+torchvision
+numpy<2
+opencv-python
