@@ -1,0 +1,187 @@
+{
+  "model_name": "NTU-ROSE RawNet2",
+  "checkpoint_file": "pre_trained_DF_RawNet2.pth",
+  "checkpoint_source": "NTU-ROSE RawNet2 / ASVspoof 2021 Baseline (ICASSP 2021)",
+  "training_protocol": "ASVspoof 2019 Logical Access (LA) train partition",
+  "evaluation_protocol": "ASVspoof 2019 Logical Access (LA) evaluation protocol",
+  "evaluation_dataset": "SpeechAntiSpoofingBenchmarks/ASVspoof2019_LA (Shard 0)",
+  "evaluation_subset_size": 1000,
+  "selection_seed": 42,
+  "bonafide_count": 500,
+  "spoof_count": 500,
+  "attack_categories_tested": [
+    "A07",
+    "A08",
+    "A09",
+    "A10",
+    "A11",
+    "A12",
+    "A13",
+    "A14",
+    "A15",
+    "A16",
+    "A17",
+    "A18",
+    "A19"
+  ],
+  "attack_sample_counts": {
+    "A07": 39,
+    "A08": 39,
+    "A09": 39,
+    "A10": 39,
+    "A11": 39,
+    "A12": 39,
+    "A13": 38,
+    "A14": 38,
+    "A15": 38,
+    "A16": 38,
+    "A17": 38,
+    "A18": 38,
+    "A19": 38
+  },
+  "hardware": {
+    "gpu_name": "NVIDIA GeForce RTX 3050 Laptop GPU",
+    "cuda_available": true,
+    "device": "cuda:0",
+    "pytorch_version": "2.14.0+cu126"
+  },
+  "timing": {
+    "cold_start_model_load_s": 0.5284006000001682,
+    "total_eval_time_s": 25.450970800000505,
+    "inference_mean_ms": 23.571394400058125,
+    "inference_median_ms": 22.217149999960384,
+    "inference_p95_ms": 30.268220000561996,
+    "inference_min_ms": 19.18149999983143,
+    "inference_max_ms": 67.99990000035905
+  },
+  "score_statistics": {
+    "bonafide": {
+      "mean": -3.0773145293273245,
+      "std": 3.479589054888866,
+      "median": -1.382376492023468,
+      "min": -12.067190170288086,
+      "max": -1.1324817933200393e-05
+    },
+    "spoof": {
+      "mean": -5.974783519223973,
+      "std": 3.4149800906708503,
+      "median": -6.258537530899048,
+      "min": -12.292386054992676,
+      "max": -0.00023231192608363926
+    }
+  },
+  "metrics": {
+    "eer_percent": 32.60000000001033,
+    "eer_threshold": -4.4516396522602015,
+    "roc_auc": 0.7339,
+    "at_eer_threshold": {
+      "threshold": -4.4516396522602015,
+      "apcer_percent": 32.6,
+      "bpcer_percent": 32.4,
+      "acer_percent": 32.5,
+      "bonafide_detection_rate_percent": 67.6,
+      "spoof_rejection_rate_percent": 67.39999999999999
+    },
+    "at_default_threshold": {
+      "threshold": -0.6931471805599453,
+      "apcer_percent": 11.600000000000001,
+      "bpcer_percent": 57.4,
+      "acer_percent": 34.5,
+      "bonafide_detection_rate_percent": 42.6,
+      "spoof_rejection_rate_percent": 88.4
+    },
+    "attack_breakdown": {
+      "A07": {
+        "sample_count": 39,
+        "apcer_at_eer_threshold": 0.38461538461538464,
+        "spoof_rejection_at_eer_threshold": 0.6153846153846154,
+        "apcer_at_default_threshold": 0.07692307692307693,
+        "spoof_rejection_at_default_threshold": 0.9230769230769231
+      },
+      "A08": {
+        "sample_count": 39,
+        "apcer_at_eer_threshold": 0.41025641025641024,
+        "spoof_rejection_at_eer_threshold": 0.5897435897435898,
+        "apcer_at_default_threshold": 0.05128205128205128,
+        "spoof_rejection_at_default_threshold": 0.9487179487179487
+      },
+      "A09": {
+        "sample_count": 39,
+        "apcer_at_eer_threshold": 0.0,
+        "spoof_rejection_at_eer_threshold": 1.0,
+        "apcer_at_default_threshold": 0.0,
+        "spoof_rejection_at_default_threshold": 1.0
+      },
+      "A10": {
+        "sample_count": 39,
+        "apcer_at_eer_threshold": 0.48717948717948717,
+        "spoof_rejection_at_eer_threshold": 0.5128205128205128,
+        "apcer_at_default_threshold": 0.20512820512820512,
+        "spoof_rejection_at_default_threshold": 0.7948717948717949
+      },
+      "A11": {
+        "sample_count": 39,
+        "apcer_at_eer_threshold": 0.3333333333333333,
+        "spoof_rejection_at_eer_threshold": 0.6666666666666667,
+        "apcer_at_default_threshold": 0.02564102564102564,
+        "spoof_rejection_at_default_threshold": 0.9743589743589743
+      },
+      "A12": {
+        "sample_count": 39,
+        "apcer_at_eer_threshold": 0.38461538461538464,
+        "spoof_rejection_at_eer_threshold": 0.6153846153846154,
+        "apcer_at_default_threshold": 0.07692307692307693,
+        "spoof_rejection_at_default_threshold": 0.9230769230769231
+      },
+      "A13": {
+        "sample_count": 38,
+        "apcer_at_eer_threshold": 0.18421052631578946,
+        "spoof_rejection_at_eer_threshold": 0.8157894736842105,
+        "apcer_at_default_threshold": 0.02631578947368421,
+        "spoof_rejection_at_default_threshold": 0.9736842105263158
+      },
+      "A14": {
+        "sample_count": 38,
+        "apcer_at_eer_threshold": 0.15789473684210525,
+        "spoof_rejection_at_eer_threshold": 0.8421052631578947,
+        "apcer_at_default_threshold": 0.0,
+        "spoof_rejection_at_default_threshold": 1.0
+      },
+      "A15": {
+        "sample_count": 38,
+        "apcer_at_eer_threshold": 0.4473684210526316,
+        "spoof_rejection_at_eer_threshold": 0.5526315789473684,
+        "apcer_at_default_threshold": 0.13157894736842105,
+        "spoof_rejection_at_default_threshold": 0.868421052631579
+      },
+      "A16": {
+        "sample_count": 38,
+        "apcer_at_eer_threshold": 0.5263157894736842,
+        "spoof_rejection_at_eer_threshold": 0.4736842105263158,
+        "apcer_at_default_threshold": 0.3157894736842105,
+        "spoof_rejection_at_default_threshold": 0.6842105263157895
+      },
+      "A17": {
+        "sample_count": 38,
+        "apcer_at_eer_threshold": 0.2631578947368421,
+        "spoof_rejection_at_eer_threshold": 0.736842105263158,
+        "apcer_at_default_threshold": 0.18421052631578946,
+        "spoof_rejection_at_default_threshold": 0.8157894736842105
+      },
+      "A18": {
+        "sample_count": 38,
+        "apcer_at_eer_threshold": 0.5,
+        "spoof_rejection_at_eer_threshold": 0.5,
+        "apcer_at_default_threshold": 0.2894736842105263,
+        "spoof_rejection_at_default_threshold": 0.7105263157894737
+      },
+      "A19": {
+        "sample_count": 38,
+        "apcer_at_eer_threshold": 0.15789473684210525,
+        "spoof_rejection_at_eer_threshold": 0.8421052631578947,
+        "apcer_at_default_threshold": 0.13157894736842105,
+        "spoof_rejection_at_default_threshold": 0.868421052631579
+      }
+    }
+  }
+}

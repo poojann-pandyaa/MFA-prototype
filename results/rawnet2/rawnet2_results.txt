@@ -1,0 +1,68 @@
+===========================================================================
+      RAWNET2 ANTI-SPOOFING / PRESENTATION ATTACK DETECTION REPORT
+===========================================================================
+
+Model Architecture  : NTU-ROSE RawNet2 (17,621,410 parameters)
+Pretrained Weights  : pre_trained_DF_RawNet2.pth (67.25 MB)
+Training Protocol   : ASVspoof 2019 LA train partition
+Evaluation Protocol : ASVspoof 2019 LA evaluation protocol
+Evaluation Dataset  : 1,000 utterances (500 BONAFIDE + 500 SPOOF)
+Deterministic Seed  : 42
+Evaluation Manifest : results/rawnet2/evaluation_manifest.csv
+Hardware Device     : NVIDIA GeForce RTX 3050 Laptop GPU (cuda:0)
+
+---------------------------------------------------------------------------
+PAD & ANTI-SPOOFING ERROR METRICS
+---------------------------------------------------------------------------
+Equal Error Rate (EER)           : 32.60%
+Experimental EER Threshold       : -4.4516
+ROC-AUC                          : 0.7339
+
+Performance at Experimental EER Threshold:
+  - APCER (Spoof false acceptance)  : 32.60%
+  - BPCER (Bona fide false reject)  : 32.40%
+  - ACER (Average error rate)       : 32.50%
+  - Spoof Rejection Rate            : 67.40%
+  - Bona Fide Acceptance Rate       : 67.60%
+
+Performance at Default Argmax Threshold (-0.6931):
+  - APCER (Spoof false acceptance)  : 11.60%
+  - BPCER (Bona fide false reject)  : 57.40%
+  - ACER (Average error rate)       : 34.50%
+  - Spoof Rejection Rate            : 88.40%
+  - Bona Fide Acceptance Rate       : 42.60%
+
+---------------------------------------------------------------------------
+SCORE DISTRIBUTIONS (BONAFIDE Log-Probability)
+---------------------------------------------------------------------------
+Bona Fide Mean ± Std : -3.0773 ± 3.4796
+Bona Fide Range      : [-12.0672, -0.0000]
+Spoof Mean ± Std     : -5.9748 ± 3.4150
+Spoof Range          : [-12.2924, -0.0002]
+
+---------------------------------------------------------------------------
+ATTACK-SPECIFIC BREAKDOWN (A07 - A19)
+---------------------------------------------------------------------------
+Attack  Samples   Spoof Rejection @ EER    APCER @ EER    
+A07     39           61.54%               38.46%
+A08     39           58.97%               41.03%
+A09     39          100.00%                0.00%
+A10     39           51.28%               48.72%
+A11     39           66.67%               33.33%
+A12     39           61.54%               38.46%
+A13     38           81.58%               18.42%
+A14     38           84.21%               15.79%
+A15     38           55.26%               44.74%
+A16     38           47.37%               52.63%
+A17     38           73.68%               26.32%
+A18     38           50.00%               50.00%
+A19     38           84.21%               15.79%
+
+---------------------------------------------------------------------------
+INFERENCE LATENCY PROFILE
+---------------------------------------------------------------------------
+Cold-Start Load Time : 0.5284 s
+Mean Per-File Latency: 23.57 ms
+Median Latency       : 22.22 ms
+P95 Latency          : 30.27 ms
+Min / Max Latency    : 19.18 ms / 68.00 ms

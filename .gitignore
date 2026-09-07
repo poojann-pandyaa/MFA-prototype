@@ -1,0 +1,43 @@
+# Byte-compiled
+__pycache__/
+*.py[cod]
+
+# Virtual Environments
+.venv/
+venv/
+env/
+ENV/
+
+# Model Caches
+.cache/
+cache/
+huggingface/
+speechbrain/
+pretrained_models/
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Model Weights (NEVER COMMIT)
+*.pth
+*.pt
+*.ckpt
+*.onnx
+*.bin
+
+# Biometric Audio Data (STRICT PRIVACY)
+*.wav
+*.m4a
+*.flac
+*.mp3
+*.aac
+*.ogg
+data/
+
+# Logs & Temp
+*.log
+temp/
+tmp/

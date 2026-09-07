@@ -1,0 +1,18 @@
+# RawNet2 Configuration
+# Upstream Source: https://github.com/NTU-ROSE/RawNet2
+# Original Baseline: https://github.com/asvspoof-challenge/2021/tree/main/LA/Baseline-RawNet2
+
+optimizer: Adam 
+amsgrad: 1   # for adam optim
+
+# Model architecture hyperparameters
+model:
+  nb_samp: 64600                                # ~4.0375 seconds at 16 kHz
+  first_conv: 1024                              # Filter length for SincConv
+  in_channels: 1                                # Mono audio
+  filts: [20, [20, 20], [20, 128], [128, 128]]  # SincConv filters & residual block channels
+  blocks: [2, 4]                                # Residual block counts
+  nb_fc_node: 1024                              # Pre-classification linear layer dimension
+  gru_node: 1024                                # GRU hidden state dimension
+  nb_gru_layer: 3                               # GRU layer depth
+  nb_classes: 2                                 # [0: SPOOF, 1: BONAFIDE]

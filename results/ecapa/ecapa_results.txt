@@ -1,0 +1,81 @@
+================================================================================
+  PAIRWISE SPEAKER VERIFICATION BENCHMARK REPORT: ECAPA-TDNN
+================================================================================
+
+1. TRIAL SUMMARY
+--------------------------------------------------------------------------------
+Total Trials Evaluated   : 60
+Genuine Trials (P1/P1, P2/P2) : 30
+Impostor Trials (P1/P2, P2/P1): 30
+
+2. GLOBAL COSINE SIMILARITY STATISTICS
+--------------------------------------------------------------------------------
+Genuine Scores  : Mean=0.612469 | Median=0.601389 | Std=0.166676
+                  Min =0.310537 | Max   =1.000000
+Impostor Scores : Mean=0.123372 | Median=0.120235 | Std=0.051640
+                  Min =0.021849 | Max   =0.223424
+Lowest Genuine Score  : 0.310537
+Highest Impostor Score: 0.223424
+Observed Separation Gap: +0.087113
+
+3. THRESHOLD & ERROR METRICS
+--------------------------------------------------------------------------------
+Equal Error Rate (EER)   : 0.00%
+EER Score Threshold      : 0.224389
+
+4. INFERENCE LATENCY BENCHMARK
+--------------------------------------------------------------------------------
+Model Cold-Start Loading Time: 1.485 s
+Mean Enrollment Extraction   : 166.33 ms
+Mean Verification Extraction : 34.72 ms
+Median Verification Latency  : 34.91 ms
+P95 Verification Latency     : 39.70 ms
+Min Verification Latency     : 28.20 ms
+Max Verification Latency     : 40.23 ms
+
+5. PER-SPEAKER ANALYSIS
+--------------------------------------------------------------------------------
+  P1_genuine          : Mean=0.591320 | Std=0.147928 | Min=0.310537 | Max=0.827946
+  P2_genuine          : Mean=0.633617 | Std=0.181065 | Min=0.382702 | Max=1.000000
+  P1_to_P2_impostor   : Mean=0.127916 | Std=0.050497 | Min=0.053418 | Max=0.223424
+  P2_to_P1_impostor   : Mean=0.118829 | Std=0.052365 | Min=0.021849 | Max=0.177105
+
+6. QUALITY & CONDITION BREAKDOWN
+--------------------------------------------------------------------------------
+  [P1 Genuine by Quality/Condition]:
+    - HQ      : Mean=0.740265 | Std=0.045329 | Min=0.696832 | Max=0.827946
+    - LQ      : Mean=0.618044 | Std=0.027943 | Min=0.582975 | Max=0.651354
+    - Hindi   : Mean=0.390349 | Std=0.060237 | Min=0.310537 | Max=0.456047
+    - Noisy   : Mean=0.467678 | Std=0.011587 | Min=0.455111 | Max=0.483068
+  [P2 Genuine by Quality/Condition]:
+    - HQ      : Mean=0.562619 | Std=0.071236 | Min=0.479164 | Max=0.653217
+    - LQ      : Mean=0.820283 | Std=0.128990 | Min=0.684075 | Max=1.000000
+    - Hindi   : Mean=0.493472 | Std=0.014367 | Min=0.473154 | Max=0.503700
+    - Noisy   : Mean=0.471429 | Std=0.068489 | Min=0.382702 | Max=0.549433
+  [Impostor Trials by Quality/Condition]:
+    - HQ      : Mean=0.151746 | Std=0.052450 | Min=0.061191 | Max=0.223424
+    - LQ      : Mean=0.129767 | Std=0.036441 | Min=0.059474 | Max=0.173273
+    - Hindi   : Mean=0.065113 | Std=0.038278 | Min=0.021849 | Max=0.122890
+    - Noisy   : Mean=0.129479 | Std=0.032393 | Min=0.081117 | Max=0.160519
+
+7. INDIVIDUAL ENROLLMENT RECORDING ANALYSIS
+--------------------------------------------------------------------------------
+  P1_enrollment_01.wav:
+    Genuine  (N=5): Mean=0.573970 | Min=0.310537 | Max=0.723721
+    Impostor (N=5): Mean=0.114883 | Min=0.053418 | Max=0.219559
+  P1_enrollment_02.wav:
+    Genuine  (N=5): Mean=0.568890 | Min=0.404463 | Max=0.705068
+    Impostor (N=5): Mean=0.110684 | Min=0.059474 | Max=0.178425
+  P1_enrollment_03.wav:
+    Genuine  (N=5): Mean=0.631101 | Min=0.456047 | Max=0.827946
+    Impostor (N=5): Mean=0.158180 | Min=0.111294 | Max=0.223424
+  P2_enrollment_01.wav:
+    Genuine  (N=5): Mean=0.671589 | Min=0.503700 | Max=1.000000
+    Impostor (N=5): Mean=0.105972 | Min=0.021849 | Max=0.173273
+  P2_enrollment_02.wav:
+    Genuine  (N=5): Mean=0.671572 | Min=0.473154 | Max=1.000000
+    Impostor (N=5): Mean=0.132909 | Min=0.048071 | Max=0.172390
+  P2_enrollment_03.wav:
+    Genuine  (N=5): Mean=0.557690 | Min=0.382702 | Max=0.738949
+    Impostor (N=5): Mean=0.117605 | Min=0.033155 | Max=0.177105
+================================================================================
