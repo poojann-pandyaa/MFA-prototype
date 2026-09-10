@@ -5,3 +5,12 @@ __pycache__/
 .env
 .DS_Store
 mfa_demo.db
+backend/.secret_key
+
+# Training checkpoints/artifacts (large, reproducible, user-specific) -
+# NOTE: backend/models/*.onnx (the served PAD model) IS committed, since
+# it's small (~2MB) and lets the app run without installing torch.
+ml/checkpoints/
+ml/data/synthetic_images/
+ml/data/manifest_synthetic.csv
+*.pt

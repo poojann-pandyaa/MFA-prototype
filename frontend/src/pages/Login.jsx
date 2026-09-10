@@ -13,6 +13,7 @@ const Login = () => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [riskInfo, setRiskInfo] = useState(null);
+  const [sessionId, setSessionId] = useState(null);
 
   // Generate or retrieve device ID
   const getDeviceId = () => {
@@ -35,10 +36,12 @@ const Login = () => {
         device_identifier: getDeviceId()
       });
       
-      const { require_step2, access_token, risk_score } = response.data;
+      const { require_step2, access_token, risk_score, session_id } = response.data;
       setRiskInfo(risk_score);
 
       if (require_step2) {
+        // Proof step 1 (password) succeeded - required by /login/step2.
+        setSessionId(session_id);
         setStep(2);
       } else {
         // Low risk, direct login
@@ -62,7 +65,8 @@ const Login = () => {
       const response = await axios.post(`${API_URL}/login/step2`, {
         username,
         face_image_b64: faceImageB64,
-        device_identifier: getDeviceId()
+        device_identifier: getDeviceId(),
+        session_id: sessionId
       });
       
       if (response.data.access_token) {
