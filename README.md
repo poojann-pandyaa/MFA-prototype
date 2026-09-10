@@ -18,11 +18,12 @@ A modular, research-grounded **Voice Biometric Authentication** system designed 
 6. [Model Checkpoint Configuration](#6-model-checkpoint-configuration)
 7. [Running the Synthetic Demo](#7-running-the-synthetic-demo)
 8. [Enrollment & Verification Workflow](#8-enrollment--verification-workflow)
-9. [Benchmark Results Summary](#9-benchmark-results-summary)
-10. [Research Qualifications & Limitations](#10-research-qualifications--limitations)
-11. [Security & Privacy Guidelines](#11-security--privacy-guidelines)
-12. [Repository Structure](#12-repository-structure)
-13. [Attribution & References](#13-attribution--references)
+9. [1:N Open-Set Identification](#9-1n-open-set-identification)
+10. [Benchmark Results Summary](#10-benchmark-results-summary)
+11. [Research Qualifications & Limitations](#11-research-qualifications--limitations)
+12. [Security & Privacy Guidelines](#12-security--privacy-guidelines)
+13. [Repository Structure](#13-repository-structure)
+14. [Attribution & References](#14-attribution--references)
 
 ---
 
@@ -34,7 +35,7 @@ However, voice authentication faces a critical threat: **presentation attacks** 
 
 This repository implements a **two-stage verification pipeline** that pairs:
 1. **RawNet2** for **Presentation Attack Detection (PAD)**: detecting bona fide human speech vs. synthetic spoof attacks.
-2. **ECAPA-TDNN** for **Speaker Verification**: matching the acoustic voiceprint against enrolled identity profiles.
+2. **ECAPA-TDNN** for **Speaker Verification & Identification**: matching the acoustic voiceprint against a single claimed identity (1:1) or against the full set of enrolled identities (1:N open-set).
 
 ---
 
@@ -79,8 +80,8 @@ The two models maintain strictly separated concerns:
   - Targets presentation attacks such as TTS and Voice Conversion.
   - **Does NOT determine speaker identity**.
 - **ECAPA-TDNN**:
-  - **Speaker verification**.
-  - Extracts 192-dimensional speaker embeddings and calculates cosine similarity against an enrolled voiceprint.
+  - **Speaker verification (1:1)** and **speaker identification (1:N open-set)**.
+  - Extracts 192-dimensional speaker embeddings and calculates cosine similarity, either against a single claimed voiceprint (1:1) or against every enrolled voiceprint in a `SpeakerGallery` (1:N).
   - **Does NOT perform anti-spoofing**.
 
 ---
@@ -147,8 +148,11 @@ Per security best practices, **large model weights are not committed to Git**.
 This repository includes a standalone integration script that uses synthetic waveforms to verify the end-to-end pipeline without requiring private recordings:
 
 ```bash
-python demo.py
+python demo.py                  # 1:1 verification flow
+python demo_identification.py   # 1:N open-set identification flow
 ```
+
+`demo_identification.py` enrols four synthetic identities into a `SpeakerGallery`, identifies a probe from each without any identity claim, and then demonstrates that a probe from an **unenrolled** speaker is rejected rather than mapped to its nearest neighbour.
 
 > [!NOTE]
 > **Synthetic Demo Disclaimer**:  
@@ -188,7 +192,80 @@ else:
 
 ---
 
-## 9. Benchmark Results Summary
+## 9. 1:N Open-Set Identification
+
+Section 8 covers **1:1 verification**: an identity is claimed up front, and the system answers *"is this claimed user U?"*. The system also supports **1:N open-set identification**, where no identity is claimed and the system answers *"which of the N enrolled users is this, if any?"*.
+
+### 9.1 Usage
+
+```python
+from src.extractors import SpeakerVerifier
+from src.gallery import SpeakerGallery
+from src.pipeline import VoiceBiometricPipeline
+
+verifier = SpeakerVerifier(identification_threshold=0.30, identification_margin=0.05)
+pipeline = VoiceBiometricPipeline(speaker_verifier=verifier)
+
+# 1. Build the gallery of enrolled identities
+gallery = SpeakerGallery()
+for user_id, recordings in enrolled_users.items():
+    enrollment = verifier.enroll(recordings)
+    gallery.enroll_speaker(user_id, enrollment["voiceprint"])
+
+# 2. Identify an unknown probe against all N enrolments
+result = pipeline.identify_factor(gallery=gallery, test_audio="path/to/probe.wav")
+
+if result["voice_factor_passed"]:
+    print(f"Identified as {result['identified_speaker_id']}")
+else:
+    print(f"Rejected: {result['rejection_reason']}")
+```
+
+### 9.2 Open-Set Rejection
+
+A nearest-neighbour search **always** returns a closest match, including for a speaker who was never enrolled. Accepting an identification therefore requires **two** independent conditions to hold:
+
+| Condition | Test | Rejects |
+| :--- | :--- | :--- |
+| **Absolute match** | `top1_score >= identification_threshold` | Probes from speakers who are not enrolled at all |
+| **Ranking margin** | `(top1_score - top2_score) >= identification_margin` | Probes sitting near-equidistant between two enrolments |
+
+Failing the first yields `REJECTED_NO_MATCH`; failing the second yields `REJECTED_AMBIGUOUS`. A single-speaker gallery has no top-2 score, so the margin condition is vacuously satisfied and the decision reduces to the absolute threshold.
+
+### 9.3 Why the 1:N Threshold Is Stricter
+
+A 1:1 comparison draws **one** score from the impostor distribution. A 1:N search draws **N**. Treating those comparisons as independent, the chance that at least one enrolled identity is falsely matched grows as:
+
+```
+FMR(1:N)  ~=  1 - (1 - FAR(1:1))^N
+```
+
+A 1% 1:1 FAR becomes roughly a **22% per-attempt** false-match rate across a 25-speaker gallery. `metrics.effective_false_match_rate()` computes this estimate. This is why `identification_threshold` (0.30) defaults stricter than the 1:1 `threshold` (0.25), and why the threshold must be re-tuned as the gallery grows.
+
+> [!WARNING]
+> The default `identification_threshold=0.30` is an **interim** value derived from the existing 2-speaker Phase 1 benchmark (lowest genuine score = 0.3105). It has **not** been validated on a multi-speaker gallery. It must be recalibrated against a proper multi-speaker evaluation set before any 1:N accuracy figure is reported.
+
+### 9.4 Identification Metrics
+
+1:N systems are not scored with FAR/FRR/EER. `src/metrics.py` provides:
+
+| Metric | Function | Meaning |
+| :--- | :--- | :--- |
+| **Rank-N accuracy** | `rank_n_accuracy()` | Fraction of probes whose true identity appears in the top-N candidates (closed-set) |
+| **CMC curve** | `cmc_curve()` | Rank-1..Rank-N accuracy as a monotonically non-decreasing curve |
+| **DIR** | `open_set_identification_rates()` | Genuine probes both accepted **and** correctly identified |
+| **FPIR** | `open_set_identification_rates()` | Unenrolled probes wrongly accepted as some enrolled identity |
+| **Misidentification rate** | `open_set_identification_rates()` | Genuine probes accepted under the **wrong** identity |
+
+The misidentification rate has **no 1:1 analogue**: in 1:1 a wrong-identity accept is simply a false accept, but in 1:N a probe can be accepted under a different enrolled user's ID. That case is counted as a failure, not a success.
+
+### 9.5 Effect on Stage 1
+
+None. RawNet2 presentation attack detection is speaker-agnostic, so it is unaffected by gallery size and still early-exits before any gallery search is performed.
+
+---
+
+## 10. Benchmark Results Summary
 
 ### ECAPA-TDNN Speaker Verification (Phase 1 Benchmark)
 Evaluated across 60 pairwise trials (30 genuine, 30 impostor) under varying acoustic conditions:
@@ -210,17 +287,21 @@ Evaluated on a deterministic 1,000-utterance subset (500 bona fide, 500 spoof) a
 
 ---
 
-## 10. Research Qualifications & Limitations
+## 11. Research Qualifications & Limitations
 
 1. **Not a Production Security Guarantee**:
    - The 0.00% observed EER for ECAPA reflects performance on our controlled research benchmark. It is **not** an absolute guarantee of zero false accepts in production.
    - RawNet2 is an established research baseline. Its 32.60% EER highlights known domain-mismatch challenges when raw time-domain models encounter varied microphone hardware and ambient room noise.
-2. **Defense-in-Depth**:
+2. **1:N Identification Is Not Yet Benchmarked**:
+   - The Phase 1 benchmark covers **2 speakers** scored as 1:1 genuine/impostor pairs. Rank-1 accuracy, CMC and DIR@FPIR are **not** computable from it.
+   - The default `identification_threshold=0.30` is therefore an interim value, not a validated operating point. A multi-speaker evaluation set is required before reporting any 1:N accuracy figure.
+   - Open-set false-match risk grows with gallery size (see Section 9.3); a threshold validated at N=5 does not remain valid at N=500.
+3. **Defense-in-Depth**:
    - Voice biometrics should operate as one factor in an adaptive multi-factor ecosystem, never as a sole authentication mechanism.
 
 ---
 
-## 11. Security & Privacy Guidelines
+## 12. Security & Privacy Guidelines
 
 - **Zero Biometric Audio in Repository**: In compliance with privacy principles, this repository contains zero human voice recordings (`.wav`, `.m4a`, etc.).
 - **Sanitized Research Artifacts**: All committed benchmark CSVs contain anonymized tokens and public ASVspoof identifiers, with zero local paths or personally identifying references.
@@ -228,7 +309,7 @@ Evaluated on a deterministic 1,000-utterance subset (500 bona fide, 500 spoof) a
 
 ---
 
-## 12. Repository Structure
+## 13. Repository Structure
 
 ```
 Voice Biometric Authentication/
@@ -236,13 +317,14 @@ Voice Biometric Authentication/
 ├── src/
 │   ├── __init__.py
 │   ├── pipeline.py                 # 2-stage authentication pipeline orchestration
-│   ├── metrics.py                  # Cosine similarity & voiceprint averaging
+│   ├── metrics.py                  # Cosine similarity, voiceprint averaging & 1:N metrics
+│   ├── gallery.py                  # SpeakerGallery: enrolled-identity store for 1:N search
 │   ├── audio_utils.py              # Audio loading, resampling (16 kHz), metadata
 │   │
 │   ├── extractors/
 │   │   ├── __init__.py
 │   │   ├── base.py                 # Abstract Base Class for extractors
-│   │   └── ecapa_tdnn.py           # ECAPA-TDNN extractor & SpeakerVerifier
+│   │   └── ecapa_tdnn.py           # ECAPA-TDNN extractor, SpeakerVerifier (verify + identify)
 │   │
 │   └── anti_spoofing/
 │       ├── __init__.py
@@ -273,7 +355,8 @@ Voice Biometric Authentication/
 │
 ├── tests/                          # Automated unit & integration tests
 │
-├── demo.py                         # Synthetic-audio end-to-end integration demo
+├── demo.py                         # Synthetic-audio 1:1 verification demo
+├── demo_identification.py          # Synthetic-audio 1:N open-set identification demo
 ├── requirements.txt                # Clean dependency manifest
 ├── .gitignore                      # Comprehensive exclusion rules
 └── README.md                       # Repository documentation
@@ -281,7 +364,7 @@ Voice Biometric Authentication/
 
 ---
 
-## 13. Attribution & References
+## 14. Attribution & References
 
 - **RawNet2**: NTU-ROSE / EURECOM. Hemlata Tak et al., *"End-to-End anti-spoofing with RawNet2"*, IEEE ICASSP 2021. Upstream code: [https://github.com/NTU-ROSE/RawNet2](https://github.com/NTU-ROSE/RawNet2).
 - **ECAPA-TDNN**: SpeechBrain. Ravanelli et al., *"SpeechBrain: A General-Purpose Speech Toolkit"*, 2021. Checkpoint: `speechbrain/spkrec-ecapa-voxceleb`.

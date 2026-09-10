@@ -23,6 +23,7 @@ except ImportError:
     from speechbrain.pretrained import EncoderClassifier
 
 from src.extractors.base import BaseSpeakerExtractor
+from src.gallery import SpeakerGallery
 from src.metrics import compute_cosine_similarity, average_embeddings
 
 
@@ -127,19 +128,36 @@ class SpeakerVerifier:
     def __init__(
         self,
         extractor: Optional[ECAPATDNNExtractor] = None,
-        threshold: float = 0.25
+        threshold: float = 0.25,
+        identification_threshold: float = 0.30,
+        identification_margin: float = 0.05
     ):
         """
         Initialize SpeakerVerifier.
 
         Args:
             extractor: Pre-initialized ECAPATDNNExtractor instance. If None, initialized automatically.
-            threshold: Cosine similarity decision threshold (default: 0.25,
-                       chosen based on Phase 1 benchmark separation gap:
+            threshold: Cosine similarity decision threshold for 1:1 verification
+                       (default: 0.25, chosen based on Phase 1 benchmark separation gap:
                        highest impostor = 0.2234, lowest genuine = 0.3105).
+            identification_threshold: Acceptance threshold for 1:N open-set identification.
+                       Deliberately STRICTER than the 1:1 threshold: an identification
+                       attempt draws N scores from the impostor distribution instead of
+                       one, so the probability that at least one enrolled identity is
+                       falsely matched grows roughly as 1 - (1 - FAR)**N with gallery
+                       size. See metrics.effective_false_match_rate().
+
+                       WARNING: 0.30 is an interim value derived from the existing
+                       2-speaker Phase 1 benchmark (lowest genuine = 0.3105). It MUST be
+                       recalibrated on a multi-speaker evaluation set before any claim
+                       about 1:N accuracy is reported.
+            identification_margin: Minimum required gap between the top-1 and top-2
+                       candidate scores for an identification to be accepted.
         """
         self.extractor = extractor or ECAPATDNNExtractor()
         self.threshold = threshold
+        self.identification_threshold = identification_threshold
+        self.identification_margin = identification_margin
 
     def enroll(
         self,
@@ -211,4 +229,107 @@ class SpeakerVerifier:
             "cosine_similarity": float(similarity),
             "threshold": float(thr),
             "inference_time_ms": float(inf_time_s * 1000.0)
+        }
+
+    def identify(
+        self,
+        gallery: SpeakerGallery,
+        test_audio: Union[str, Path, np.ndarray, torch.Tensor],
+        threshold: Optional[float] = None,
+        margin: Optional[float] = None,
+        top_k: int = 5
+    ) -> Dict[str, Union[bool, float, str, None, List]]:
+        """
+        Perform 1:N OPEN-SET speaker identification against a gallery of enrolments.
+
+        Unlike verify(), no identity is claimed up front. The probe utterance is
+        scored against every enrolled voiceprint, and the system answers
+        "which enrolled user is this, if any?".
+
+        Open-set rejection applies two independent conditions; BOTH must hold
+        for an identification to be accepted:
+
+          1. Absolute match:  top-1 cosine similarity >= threshold.
+             Rejects probes from speakers who are not enrolled at all, which a
+             pure nearest-neighbour search would otherwise map to whichever
+             enrolled identity happens to be closest.
+
+          2. Ranking margin:  (top-1 score - top-2 score) >= margin.
+             Rejects probes that sit near-equidistant between two enrolments.
+             Without this a probe scoring 0.41 vs 0.40 against two different
+             users would be confidently identified as the first.
+
+        A single-speaker gallery has no top-2 score, so condition 2 is
+        vacuously satisfied and the decision reduces to condition 1.
+
+        Args:
+            gallery: SpeakerGallery holding the enrolled identities to search.
+            test_audio: Probe recording path or 16 kHz waveform array.
+            threshold: Optional override for the open-set acceptance threshold.
+            margin: Optional override for the required top-1/top-2 separation.
+            top_k: Number of ranked candidates to include in the result.
+
+        Returns:
+            Dict containing:
+                - identified: True if an enrolled identity was accepted
+                - identified_speaker_id: matched speaker_id, or None
+                - decision: 'IDENTIFIED', 'REJECTED_NO_MATCH',
+                            'REJECTED_AMBIGUOUS' or 'REJECTED_EMPTY_GALLERY'
+                - rejection_reason: None, or the condition that failed
+                - top1_score / top2_score / score_margin
+                - candidates: ranked top-k list from the gallery search
+                - gallery_size, threshold, margin, inference_time_ms
+        """
+        thr = self.identification_threshold if threshold is None else threshold
+        mrg = self.identification_margin if margin is None else margin
+
+        test_emb, inf_time_s = self.extractor.extract_embedding(test_audio)
+        candidates = gallery.search(test_emb, top_k=top_k)
+
+        base_result = {
+            "gallery_size": len(gallery),
+            "threshold": float(thr),
+            "margin": float(mrg),
+            "candidates": candidates,
+            "inference_time_ms": float(inf_time_s * 1000.0),
+        }
+
+        if not candidates:
+            return {
+                **base_result,
+                "identified": False,
+                "identified_speaker_id": None,
+                "decision": "REJECTED_EMPTY_GALLERY",
+                "rejection_reason": "NO_ENROLLED_IDENTITIES",
+                "top1_score": None,
+                "top2_score": None,
+                "score_margin": None,
+            }
+
+        top1_score = float(candidates[0]["cosine_similarity"])
+        top2_score = float(candidates[1]["cosine_similarity"]) if len(candidates) > 1 else None
+        score_margin = None if top2_score is None else top1_score - top2_score
+
+        if top1_score < thr:
+            decision = "REJECTED_NO_MATCH"
+            rejection_reason = "NO_ENROLLED_SPEAKER_ABOVE_THRESHOLD"
+            identified_speaker_id = None
+        elif score_margin is not None and score_margin < mrg:
+            decision = "REJECTED_AMBIGUOUS"
+            rejection_reason = "INSUFFICIENT_MARGIN_BETWEEN_TOP_CANDIDATES"
+            identified_speaker_id = None
+        else:
+            decision = "IDENTIFIED"
+            rejection_reason = None
+            identified_speaker_id = str(candidates[0]["speaker_id"])
+
+        return {
+            **base_result,
+            "identified": identified_speaker_id is not None,
+            "identified_speaker_id": identified_speaker_id,
+            "decision": decision,
+            "rejection_reason": rejection_reason,
+            "top1_score": top1_score,
+            "top2_score": top2_score,
+            "score_margin": score_margin,
         }

@@ -44,6 +44,7 @@ import torch
 
 from src.anti_spoofing import RawNet2Detector
 from src.extractors import ECAPATDNNExtractor, SpeakerVerifier
+from src.gallery import SpeakerGallery
 
 
 class VoiceBiometricPipeline:
@@ -179,6 +180,114 @@ class VoiceBiometricPipeline:
             "stage_failed": stage_failed,
             "pad_result": pad_result,
             "verification_result": ver_result,
+            "total_pipeline_latency_ms": total_latency_ms,
+            "policy_notice": policy_notice
+        }
+
+    def identify_factor(
+        self,
+        gallery: SpeakerGallery,
+        test_audio: Union[str, Path, np.ndarray],
+        pad_threshold: Optional[float] = None,
+        identification_threshold: Optional[float] = None,
+        identification_margin: Optional[float] = None,
+        top_k: int = 5
+    ) -> Dict[str, Union[str, bool, float, Dict, None]]:
+        """
+        Execute 2-stage voice factor authentication in 1:N OPEN-SET IDENTIFICATION mode.
+
+        This is the 1:N counterpart of authenticate_factor(). No identity is claimed
+        in advance: the probe is searched against all N enrolled voiceprints and the
+        pipeline answers "which enrolled user is this, if any?".
+
+        Stage 1: Presentation Attack Detection (RawNet2) -- identical to the 1:1 flow.
+                 RawNet2 is speaker-agnostic, so it is unaffected by gallery size and
+                 still early-exits before any gallery search is performed.
+        Stage 2: Open-set identification (ECAPA-TDNN + SpeakerGallery).
+
+        Args:
+            gallery: SpeakerGallery of enrolled identities to search.
+            test_audio: 16 kHz probe recording path or 1D waveform array.
+            pad_threshold: Optional override for the PAD threshold.
+            identification_threshold: Optional override for the open-set acceptance threshold.
+            identification_margin: Optional override for the top-1/top-2 margin.
+            top_k: Number of ranked candidates to report.
+
+        Returns:
+            Dict containing:
+            - voice_factor_passed: bool
+            - factor_status: 'PASSED' or 'REJECTED'
+            - identified_speaker_id: matched speaker_id, or None
+            - rejection_reason: None or specific failure cause
+            - pad_result: RawNet2 detailed metrics (or None if detector absent)
+            - identification_result: ECAPA/gallery detail (or None if spoofed)
+            - total_pipeline_latency_ms: cumulative time in ms
+            - policy_notice: reminder that a voice factor pass != full authorization
+        """
+        t0 = time.perf_counter()
+        thr_pad = self.pad_threshold if pad_threshold is None else pad_threshold
+
+        # -------------------------------------------------------------
+        # Stage 1: Presentation Attack Detection (RawNet2)
+        # -------------------------------------------------------------
+        pad_result = None
+        if self.pad_detector is not None:
+            pad_result = self.pad_detector.predict(test_audio, threshold=thr_pad)
+            if pad_result["predicted_label"] == "SPOOF":
+                total_latency_ms = (time.perf_counter() - t0) * 1000.0
+                return {
+                    "voice_factor_passed": False,
+                    "factor_status": "REJECTED",
+                    "identified_speaker_id": None,
+                    "rejection_reason": "PRESENTATION_ATTACK_DETECTED",
+                    "stage_failed": "STAGE_1_PAD",
+                    "pad_result": pad_result,
+                    "identification_result": None,
+                    "total_pipeline_latency_ms": total_latency_ms,
+                    "policy_notice": (
+                        "Voice factor REJECTED due to presentation attack. "
+                        "Gallery search was bypassed."
+                    )
+                }
+
+        # -------------------------------------------------------------
+        # Stage 2: Open-Set Speaker Identification (ECAPA-TDNN over gallery)
+        # -------------------------------------------------------------
+        ident_result = self.verifier.identify(
+            gallery=gallery,
+            test_audio=test_audio,
+            threshold=identification_threshold,
+            margin=identification_margin,
+            top_k=top_k
+        )
+
+        total_latency_ms = (time.perf_counter() - t0) * 1000.0
+        voice_factor_passed = bool(ident_result["identified"])
+
+        if voice_factor_passed:
+            factor_status = "PASSED"
+            stage_failed = None
+            policy_notice = (
+                "A successful voice factor only indicates that the voice authentication "
+                "factor passed; it does not by itself constitute final user authentication "
+                "or authorization. Final decision rests with the Adaptive MFA engine. "
+                "An identified speaker_id is a biometric claim, not an authenticated session."
+            )
+        else:
+            factor_status = "REJECTED"
+            stage_failed = "STAGE_2_SPEAKER_IDENTIFICATION"
+            policy_notice = (
+                "Voice factor REJECTED: no enrolled identity was confidently matched."
+            )
+
+        return {
+            "voice_factor_passed": voice_factor_passed,
+            "factor_status": factor_status,
+            "identified_speaker_id": ident_result["identified_speaker_id"],
+            "rejection_reason": ident_result["rejection_reason"],
+            "stage_failed": stage_failed,
+            "pad_result": pad_result,
+            "identification_result": ident_result,
             "total_pipeline_latency_ms": total_latency_ms,
             "policy_notice": policy_notice
         }
