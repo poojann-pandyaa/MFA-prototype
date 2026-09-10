@@ -1,0 +1,9 @@
+# Training-only dependencies. Deliberately NOT part of backend/requirements.txt -
+# the server never needs torch/torchvision at runtime (see backend/services/pad_onnx.py
+# and backend/anti_spoofing/export_onnx.py for why).
+torch
+torchvision
+opencv-python==4.11.0.86
+numpy<2
+onnxruntime
+onnxscript  # required by torch.onnx.export's dynamo-based exporter (torch>=2.x)

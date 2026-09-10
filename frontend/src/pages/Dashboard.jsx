@@ -18,22 +18,31 @@ const Dashboard = () => {
       return;
     }
     
-    // Minimal way to get username from token for demo
+    // Minimal way to get username from token for demo (display only - the
+    // server derives identity from the verified token, not this value)
     try {
       const payload = JSON.parse(atob(token.split('.')[1]));
       setUsername(payload.sub);
-      fetchHistory(payload.sub);
+      fetchHistory(token);
     } catch (e) {
       navigate('/login');
     }
   }, [navigate]);
 
-  const fetchHistory = async (user) => {
+  const fetchHistory = async (token) => {
     try {
-      const response = await axios.get(`${API_URL}/history/${user}`);
+      // No username in the URL: the server identifies the caller from the
+      // bearer token, so this can only ever return the caller's own data.
+      const response = await axios.get(`${API_URL}/history`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
       setHistory(response.data);
     } catch (err) {
       console.error("Failed to fetch history");
+      if (err.response?.status === 401) {
+        localStorage.removeItem('mfa_token');
+        navigate('/login');
+      }
     } finally {
       setLoading(false);
     }

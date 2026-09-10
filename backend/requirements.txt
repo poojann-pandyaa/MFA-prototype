@@ -8,9 +8,15 @@ pyjwt
 python-multipart
 deepface
 tf-keras
-# For PyTorch and related deps for anti-spoofing, we'll try installing them here first.
-# If there are conflicts, we'll split them.
-torch
-torchvision
 numpy<2
-opencv-python
+# Pinned: an unpinned install can resolve to opencv-python 5.x here, which
+# ships without cv2.CascadeClassifier / cv2.dnn.readNetFromCaffe in this
+# environment and silently breaks both DeepFace's detector and our own
+# RetinaFace bbox detector.
+opencv-python==4.11.0.86
+onnxruntime
+# NOTE: torch/torchvision are intentionally NOT a serving dependency.
+# They're only needed once, to convert the vendored anti-spoofing .pth
+# weights to ONNX - see backend/anti_spoofing/export_onnx.py. The server
+# runs that model via onnxruntime instead, which is lighter and faster to
+# start (no PyTorch import in the request path).
