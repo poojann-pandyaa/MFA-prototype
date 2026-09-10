@@ -128,6 +128,37 @@ def test_ambiguous_match_between_two_enrolments_is_rejected(verifier):
     assert result["top1_score"] >= result["threshold"]
 
 
+def test_top_k_cannot_weaken_the_decision(verifier):
+    # Regression: top_k is a REPORTING parameter. Fetching only one candidate must
+    # not skip the top-1/top-2 margin test, which would silently accept an
+    # ambiguous probe that top_k=5 correctly rejects.
+    g = SpeakerGallery(embedding_dim=EMBEDDING_DIM)
+    shared = verifier.enroll([speaker_audio(8, 0)])["voiceprint"]
+    g.enroll_speaker("user_twin_a", shared)
+    g.enroll_speaker("user_twin_b", shared)
+
+    decisions = {}
+    for k in (1, 2, 5):
+        result = verifier.identify(g, speaker_audio(8, utterance=3), top_k=k)
+        decisions[k] = result["decision"]
+        # Only the reported candidate list is truncated.
+        assert len(result["candidates"]) == min(k, len(g))
+        # The margin is always computed, regardless of top_k.
+        assert result["score_margin"] is not None
+
+    assert set(decisions.values()) == {"REJECTED_AMBIGUOUS"}, decisions
+
+
+def test_top_k_does_not_change_identified_speaker(verifier, gallery):
+    baseline = verifier.identify(gallery, speaker_audio(3, utterance=7), top_k=5)
+    for k in (1, 2, 3, 10):
+        result = verifier.identify(gallery, speaker_audio(3, utterance=7), top_k=k)
+        assert result["identified_speaker_id"] == baseline["identified_speaker_id"]
+        assert result["decision"] == baseline["decision"]
+        assert result["top1_score"] == pytest.approx(baseline["top1_score"])
+        assert result["top2_score"] == pytest.approx(baseline["top2_score"])
+
+
 def test_empty_gallery_is_rejected(verifier):
     result = verifier.identify(SpeakerGallery(embedding_dim=EMBEDDING_DIM), speaker_audio(1))
 

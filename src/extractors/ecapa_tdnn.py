@@ -267,7 +267,10 @@ class SpeakerVerifier:
             test_audio: Probe recording path or 16 kHz waveform array.
             threshold: Optional override for the open-set acceptance threshold.
             margin: Optional override for the required top-1/top-2 separation.
-            top_k: Number of ranked candidates to include in the result.
+            top_k: Number of ranked candidates to REPORT. This affects reporting
+                   only: the top-2 score needed by the margin test is always
+                   retrieved regardless of top_k, so top_k=1 cannot weaken the
+                   accept/reject decision.
 
         Returns:
             Dict containing:
@@ -284,7 +287,13 @@ class SpeakerVerifier:
         mrg = self.identification_margin if margin is None else margin
 
         test_emb, inf_time_s = self.extractor.extract_embedding(test_audio)
-        candidates = gallery.search(test_emb, top_k=top_k)
+
+        # The margin test needs the top-2 score, so always retrieve at least two
+        # candidates for the DECISION even when the caller only wants one
+        # REPORTED. Otherwise top_k=1 would silently disable the ambiguity check.
+        search_k = None if top_k is None else max(int(top_k), 2)
+        scored = gallery.search(test_emb, top_k=search_k)
+        candidates = scored if top_k is None else scored[:top_k]
 
         base_result = {
             "gallery_size": len(gallery),
@@ -294,7 +303,7 @@ class SpeakerVerifier:
             "inference_time_ms": float(inf_time_s * 1000.0),
         }
 
-        if not candidates:
+        if not scored:
             return {
                 **base_result,
                 "identified": False,
@@ -306,8 +315,8 @@ class SpeakerVerifier:
                 "score_margin": None,
             }
 
-        top1_score = float(candidates[0]["cosine_similarity"])
-        top2_score = float(candidates[1]["cosine_similarity"]) if len(candidates) > 1 else None
+        top1_score = float(scored[0]["cosine_similarity"])
+        top2_score = float(scored[1]["cosine_similarity"]) if len(scored) > 1 else None
         score_margin = None if top2_score is None else top1_score - top2_score
 
         if top1_score < thr:
@@ -321,7 +330,7 @@ class SpeakerVerifier:
         else:
             decision = "IDENTIFIED"
             rejection_reason = None
-            identified_speaker_id = str(candidates[0]["speaker_id"])
+            identified_speaker_id = str(scored[0]["speaker_id"])
 
         return {
             **base_result,
