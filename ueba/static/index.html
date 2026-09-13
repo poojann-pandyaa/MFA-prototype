@@ -1,0 +1,786 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UEBA — Behavioural Authentication</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1419; --panel: #1a2027; --line: #2a343f;
+    --text: #e6edf3; --muted: #8b98a5; --accent: #4a9eff;
+    --ok: #3fb950; --warn: #d29922; --bad: #f85149;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 14px; line-height: 1.5;
+  }
+  .wrap { max-width: 940px; margin: 0 auto; padding: 24px 20px 60px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 0 0 12px; font-weight: 600; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
+  nav { display: flex; gap: 4px; margin-bottom: 24px;
+        border-bottom: 1px solid var(--line); }
+  nav button {
+    background: none; border: none; color: var(--muted); padding: 10px 16px;
+    cursor: pointer; font-size: 14px; border-bottom: 2px solid transparent;
+  }
+  nav button.on { color: var(--text); border-bottom-color: var(--accent); }
+  .panel { background: var(--panel); border: 1px solid var(--line);
+           border-radius: 8px; padding: 20px; margin-bottom: 16px; }
+  label { display: block; font-size: 12px; color: var(--muted);
+          margin-bottom: 5px; }
+  input, select {
+    width: 100%; background: #0d1117; border: 1px solid var(--line);
+    color: var(--text); padding: 9px 11px; border-radius: 6px;
+    font-size: 14px; font-family: inherit;
+  }
+  input:focus, select:focus { outline: none; border-color: var(--accent); }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+         margin-bottom: 12px; }
+  button.go {
+    background: var(--accent); color: #fff; border: none; padding: 10px 20px;
+    border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500;
+  }
+  button.go:disabled { background: #30363d; color: var(--muted);
+                       cursor: not-allowed; }
+  .phrase {
+    font-family: ui-monospace, Menlo, monospace; font-size: 17px;
+    background: #0d1117; padding: 14px; border-radius: 6px;
+    border: 1px solid var(--line); letter-spacing: 0.4px; margin-bottom: 12px;
+  }
+  .dots { display: flex; gap: 6px; margin: 14px 0; }
+  .dot { width: 26px; height: 5px; border-radius: 3px; background: #30363d; }
+  .dot.done { background: var(--ok); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: var(--muted); font-weight: 500;
+       padding: 7px 8px; border-bottom: 1px solid var(--line); font-size: 12px; }
+  td { padding: 7px 8px; border-bottom: 1px solid var(--line); }
+  .pill { display: inline-block; padding: 2px 9px; border-radius: 20px;
+          font-size: 11px; font-weight: 600; }
+  .LOW { background: rgba(63,185,80,.15); color: var(--ok); }
+  .MEDIUM { background: rgba(210,153,34,.15); color: var(--warn); }
+  .HIGH { background: rgba(248,81,73,.15); color: var(--bad); }
+  .NOT_PROVIDED, .INSUFFICIENT_DATA { background: #21262d; color: var(--muted); }
+  .WARMING_UP { background: rgba(210,153,34,.15); color: var(--warn); }
+  .OK { background: rgba(63,185,80,.15); color: var(--ok); }
+  .note { font-size: 12px; color: var(--muted); margin-top: 10px;
+          line-height: 1.6; }
+  .err { color: var(--bad); font-size: 13px; margin-top: 10px; }
+  .big { font-size: 30px; font-weight: 600; margin: 6px 0; }
+  .mono { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+  .track { border: 1px dashed var(--line); border-radius: 6px; padding: 16px;
+           margin-bottom: 14px; }
+  /* The submit target moves between rounds. With a fixed position the
+     pointer barely travels -- enrollment measured a path efficiency of
+     0.094, meaning idle drift rather than purposeful movement, and all
+     ten segments looked alike. Moving the target forces a real traversal
+     each round and produces genuine between-round variance. */
+  .arena { position: relative; height: 150px; margin: 14px 0;
+           border: 1px dashed var(--line); border-radius: 6px;
+           background: #0d1117; }
+  .arena .go { position: absolute; transition: none; }
+  .arena-hint { position: absolute; top: 8px; left: 12px; font-size: 11px;
+                color: var(--muted); }
+  .tracepad { position: relative; width: 100%; height: 210px;
+              background: #0d1117; border: 1px solid var(--line);
+              border-radius: 6px; cursor: crosshair; touch-action: none; }
+  .tracepad svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .stat { display: flex; justify-content: space-between; padding: 4px 0;
+          font-size: 12px; }
+  .stat span:first-child { color: var(--muted); }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useRef, useEffect, useCallback } = React;
+const API = "";
+
+/* ------------------------------------------------------------------ */
+/* Capture hooks                                                       */
+/*                                                                     */
+/* Collection needs no library. The browser gives keydown/keyup and    */
+/* mousemove with timestamps; dwell is one subtraction, flight is two. */
+/* ------------------------------------------------------------------ */
+
+function useKeystroke() {
+  const down = useRef({});
+  const events = useRef([]);
+
+  const onKeyDown = (e) => {
+    if (down.current[e.key] !== undefined) return;   // ignore auto-repeat
+    down.current[e.key] = performance.now();
+  };
+
+  const onKeyUp = (e) => {
+    const t = down.current[e.key];
+    if (t === undefined) return;
+    events.current.push({ key: e.key, down: t, up: performance.now() });
+    delete down.current[e.key];
+  };
+
+  const reset = () => { events.current = []; down.current = {}; };
+  const get = () => events.current.slice();
+
+  return { onKeyDown, onKeyUp, reset, get,
+           count: () => events.current.length };
+}
+
+function useMouse(active) {
+  const points = useRef([]);
+  const clicks = useRef([]);
+  const clickDown = useRef(null);
+
+  useEffect(() => {
+    if (!active) return;
+    let last = 0;
+    const onMove = (e) => {
+      const t = performance.now();
+      // Throttle to ~60Hz. Browsers coalesce mousemove differently across
+      // machines; sampling at a fixed rate keeps traces comparable.
+      if (t - last < 16) return;
+      last = t;
+      points.current.push({ x: e.clientX, y: e.clientY, t: Math.round(t * 100) / 100 });
+    };
+    const onDown = () => { clickDown.current = performance.now(); };
+    const onUp = () => {
+      if (clickDown.current !== null) {
+        clicks.current.push({ down: clickDown.current, up: performance.now() });
+        clickDown.current = null;
+      }
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [active]);
+
+  const reset = () => { points.current = []; clicks.current = []; };
+
+  // Take the current trace and start a fresh one. Called after each
+  // typing round so every round yields a separate pointer sample --
+  // separate interactions with pauses between them, which is what makes
+  // the measured variance real between-session variance.
+  const snapshot = () => {
+    const pts = points.current.slice();
+    points.current = [];
+    return pts;
+  };
+
+  return { points, clicks, reset, snapshot };
+}
+
+function useSession() {
+  const start = useRef(Date.now() / 1000);
+  const actions = useRef([]);
+  const mark = useCallback(() => { actions.current.push(Date.now() / 1000); }, []);
+  const payload = () => ({
+    start: start.current,
+    end: Date.now() / 1000,
+    actions: actions.current.slice(),
+  });
+  return { mark, payload, count: () => actions.current.length };
+}
+
+/* ------------------------------------------------------------------ */
+/* Shape tracing                                                       */
+/*                                                                     */
+/* Free-form pointer movement failed because every trace is a          */
+/* different path, leaving only aggregate statistics to compare.       */
+/* A fixed shape applies the same constraint that makes keystroke      */
+/* work: progress 40% along the path is comparable to progress 40%     */
+/* along the path, so what remains after the task is the person.       */
+/* ------------------------------------------------------------------ */
+
+function TracePad({ shape, onComplete, label }) {
+  const ref = useRef(null);
+  const [drawing, setDrawing] = useState(false);
+  const [drawn, setDrawn] = useState([]);
+  const pts = useRef([]);
+
+  const toNorm = (e) => {
+    const r = ref.current.getBoundingClientRect();
+    return {
+      x: (e.clientX - r.left) / r.width,
+      y: (e.clientY - r.top) / r.height,
+      t: Math.round(performance.now() * 100) / 100,
+    };
+  };
+
+  const start = (e) => {
+    pts.current = [toNorm(e)];
+    setDrawn([toNorm(e)]);
+    setDrawing(true);
+  };
+
+  const move = (e) => {
+    if (!drawing) return;
+    const p = toNorm(e);
+    pts.current.push(p);
+    if (pts.current.length % 3 === 0) setDrawn(pts.current.slice());
+  };
+
+  const end = () => {
+    if (!drawing) return;
+    setDrawing(false);
+    const trace = pts.current.slice();
+    setDrawn([]);
+    pts.current = [];
+    if (trace.length >= 40) onComplete(trace);
+  };
+
+  const path = shape.map(([x, y], i) =>
+    `${i === 0 ? "M" : "L"} ${x * 100} ${y * 100}`).join(" ");
+  const userPath = drawn.map((p, i) =>
+    `${i === 0 ? "M" : "L"} ${p.x * 100} ${p.y * 100}`).join(" ");
+
+  return (
+    <div>
+      <label>{label}</label>
+      <div className="tracepad" ref={ref}
+           onMouseDown={start} onMouseMove={move}
+           onMouseUp={end} onMouseLeave={end}>
+        <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+          <path d={path} fill="none" stroke="#2a343f" strokeWidth="2.5"
+                vectorEffect="non-scaling-stroke" />
+          <circle cx={shape[0][0] * 100} cy={shape[0][1] * 100} r="1.6"
+                  fill="#3fb950" vectorEffect="non-scaling-stroke" />
+          <circle cx={shape[shape.length-1][0] * 100}
+                  cy={shape[shape.length-1][1] * 100} r="1.6"
+                  fill="#f85149" vectorEffect="non-scaling-stroke" />
+          {userPath && <path d={userPath} fill="none" stroke="#4a9eff"
+                             strokeWidth="2" vectorEffect="non-scaling-stroke" />}
+        </svg>
+      </div>
+      <p className="note">
+        Hold the button down and trace from the green dot to the red one.
+        Follow the line as closely as you can — how you track it, where you
+        speed up, and how you handle the corners is what identifies you.
+      </p>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Enrollment                                                          */
+/* ------------------------------------------------------------------ */
+
+function Enroll({ session }) {
+  const [phrase, setPhrase] = useState("");
+  const [reps, setReps] = useState(10);
+  const [meta, setMeta] = useState({ discarded: 2, mousePointsRequired: 90 });
+  const [userId, setUserId] = useState("");
+  const [typed, setTyped] = useState("");
+  const [samples, setSamples] = useState([]);
+  const [segments, setSegments] = useState([]);
+  const [traces, setTraces] = useState([]);
+  const [practice, setPractice] = useState(0);
+  const [phase, setPhase] = useState("practice");
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState("");
+  const [mouseCount, setMouseCount] = useState(0);
+
+  const kb = useKeystroke();
+  const mouse = useMouse(true);
+  const inputRef = useRef(null);
+  const [target, setTarget] = useState({ top: 60, left: 40 });
+
+  // Move the submit target to a new random position. Called after every
+  // round so no two rounds share a pointer path.
+  const moveTarget = () => setTarget({
+    top: 45 + Math.random() * 70,
+    left: 20 + Math.random() * 65,        // percentage of arena width
+  });
+
+  useEffect(() => {
+    fetch(API + "/enroll/phrase").then(r => r.json()).then(d => {
+      setPhrase(d.phrase); setReps(d.repetitions); setMeta(d);
+    });
+  }, []);
+
+  // Live pointer counter. Without it, enrollment can silently fail to
+  // build a mouse template and the user only finds out by querying the
+  // API afterwards.
+  useEffect(() => {
+    const id = setInterval(() => setMouseCount(
+      segments.reduce((n, s) => n + s.length, 0) + mouse.points.current.length
+    ), 400);
+    return () => clearInterval(id);
+  }, [segments]);
+
+  const PRACTICE_ROUNDS = 3;
+
+  const submitPractice = () => {
+    if (typed !== phrase) { setError("Text does not match. Type it exactly."); return; }
+    kb.reset(); setTyped(""); setError("");
+    const n = practice + 1;
+    setPractice(n);
+    if (n >= PRACTICE_ROUNDS) setPhase("enroll");
+    moveTarget();
+    inputRef.current?.focus();
+  };
+
+  const submitSample = () => {
+    if (typed !== phrase) { setError("Text does not match. Type it exactly."); return; }
+    const ev = kb.get();
+    if (ev.length < 6) { setError("Not enough keystrokes captured."); return; }
+    setSamples(s => [...s, ev]);
+    setSegments(g => [...g, mouse.snapshot()]);
+    kb.reset(); setTyped(""); setError("");
+    session.mark();
+    moveTarget();
+    inputRef.current?.focus();
+  };
+
+  const finish = async () => {
+    setError("");
+    const res = await fetch(API + "/enroll", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        userId,
+        keystrokeSamples: samples,
+        // One pointer segment per typing round, plus whatever was
+        // captured since the last round.
+        mouseSegments: [...segments, mouse.points.current]
+                         .filter(seg => seg.length > 0),
+        mouseClicks: mouse.clicks.current,
+        shapeTraces: traces,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) { setError(data.detail || "Enrollment failed"); return; }
+    setResult(data);
+  };
+
+  if (result) return (
+    <div className="panel">
+      <h2>Enrolled: {result.userId}</h2>
+      <div className="stat"><span>Typing samples</span>
+        <span>{result.keystroke.samples}</span></div>
+      <div className="stat"><span>Timing positions</span>
+        <span>{result.keystroke.positions}</span></div>
+      <div className="stat"><span>Mean dwell</span>
+        <span>{result.keystroke.meanDwellMs} ms</span></div>
+      <div className="stat"><span>Typing speed</span>
+        <span>{result.keystroke.typingSpeedCps} chars/s</span></div>
+      <div className="stat"><span>Mouse template</span>
+        <span style={{ color: result.mouse.status === "ENROLLED"
+                              ? "var(--ok)" : "var(--warn)" }}>
+          {result.mouse.status === "ENROLLED"
+            ? `${result.mouse.samples} samples, ${result.mouse.pointsCaptured} points`
+            : `not enrolled — ${result.mouse.pointsCaptured}/${result.mouse.pointsRequired} points`}
+        </span></div>
+      <div className="stat"><span>Session profile</span>
+        <span>accumulates ({result.session.sessionsRequired} sessions needed)</span></div>
+      <div className="stat"><span>Shape template</span>
+        <span style={{ color: result.shape?.status === "ENROLLED"
+                              ? "var(--ok)" : "var(--warn)" }}>
+          {result.shape?.status === "ENROLLED"
+            ? `${result.shape.samples} traces, ${result.shape.checkpoints} checkpoints`
+            : `not enrolled — ${result.shape?.tracesReceived ?? 0}/${result.shape?.tracesRequired ?? 5} traces`}
+        </span></div>
+      {result.mouse.status !== "ENROLLED" && (
+        <p className="note" style={{ color: "var(--warn)" }}>
+          Mouse dynamics did not enrol. {result.mouse.reason} Re-enrol and
+          move the pointer while typing to include this dimension.
+        </p>
+      )}
+      <p className="note">
+        Session behaviour is not enrolled here. It is longitudinal — how long
+        your sessions run, how you pace actions — and cannot be captured in a
+        single sitting. It builds up over subsequent use.
+      </p>
+      <button className="go" style={{marginTop: 12}}
+        onClick={() => { setResult(null); setSamples([]); setSegments([]);
+                         setTraces([]); setPractice(0); setPhase("practice");
+                         mouse.reset(); setUserId(""); }}>
+        Enroll another
+      </button>
+    </div>
+  );
+
+  return (
+    <div>
+      <div className="panel">
+        <h2>Enrollment</h2>
+        <label>User ID</label>
+        <input value={userId} onChange={e => setUserId(e.target.value)}
+               placeholder="e.g. devdeep" />
+        <p className="note">
+          Three practice rounds first, then {reps} recorded samples. The
+          first {meta.discarded} recorded samples are discarded as well.
+          A first-time user typing an unfamiliar phrase is hesitant, and a
+          template built from that learning phase does not represent how
+          they type once familiar.
+        </p>
+      </div>
+
+      <div className="panel">
+        <div className="phrase">{phrase}</div>
+        <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 8 }}>
+          {phase === "practice"
+            ? `Practice ${practice}/${PRACTICE_ROUNDS} — not recorded`
+            : `Recording ${samples.length}/${reps}`}
+        </div>
+        <div className="dots">
+          {phase === "practice"
+            ? Array.from({ length: PRACTICE_ROUNDS }).map((_, i) =>
+                <div key={i} className={"dot" + (i < practice ? " done" : "")} />)
+            : Array.from({ length: reps }).map((_, i) =>
+                <div key={i} className={"dot" + (i < samples.length ? " done" : "")} />)}
+        </div>
+        <input ref={inputRef} value={typed} autoComplete="off"
+          onChange={e => setTyped(e.target.value)}
+          onKeyDown={kb.onKeyDown} onKeyUp={kb.onKeyUp}
+          onKeyPress={e => { if (e.key === "Enter") submitSample(); }}
+          placeholder="Type the phrase here, then press Enter" />
+        {error && <div className="err">{error}</div>}
+        <div className="arena">
+          <div className="arena-hint">
+            The button moves each round — move the pointer to it
+          </div>
+          <button className="go"
+                  style={{ top: target.top + "px", left: target.left + "%" }}
+                  onClick={phase === "practice" ? submitPractice : submitSample}
+                  disabled={!typed}>
+            {phase === "practice"
+              ? `Practice round ${practice + 1}`
+              : "Submit sample"}
+          </button>
+        </div>
+        {phase === "enroll" && (
+          <button className="go" onClick={finish}
+                  disabled={samples.length < 5 || !userId}>
+            Finish ({samples.length}/{reps})
+          </button>
+        )}
+      </div>
+
+      <div className="panel">
+        <h2>Shape tracing ({traces.length}/{meta.shapeTracesRequired || 5})</h2>
+        {meta.shape && (
+          <TracePad shape={meta.shape} label="Trace the shape"
+                    onComplete={tr => { setTraces(t => [...t, tr]);
+                                        session.mark(); }} />
+        )}
+
+        <div style={{ marginTop: 16, paddingTop: 14,
+                      borderTop: "1px solid var(--line)" }}>
+          <div className="stat">
+            <span>Pointer movement captured</span>
+            <span style={{ color: mouseCount >= meta.mousePointsRequired
+                                  ? "var(--ok)" : "var(--warn)" }}>
+              {mouseCount} / {meta.mousePointsRequired} points
+            </span>
+          </div>
+          {mouseCount < meta.mousePointsRequired && (
+            <p className="note" style={{ color: "var(--warn)" }}>
+              Not enough pointer movement yet. Move the mouse or trackpad
+              while typing, and click the buttons rather than pressing
+              Enter — otherwise mouse dynamics will not enrol.
+            </p>
+          )}
+          <p className="note">
+            Captured passively during the real flow. No drawing task: mouse
+            behaviour is task-dependent, so movement during a tracing
+            exercise says little about movement during form entry.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Verification                                                        */
+/* ------------------------------------------------------------------ */
+
+function Verify({ session }) {
+  const [phrase, setPhrase] = useState("");
+  const [meta, setMeta] = useState({});
+  const [form, setForm] = useState({
+    userId: "", amount: "5000", deviceId: "d_1",
+    ip: "103.21.45.67", beneficiaryId: "b_1", channel: "WEB",
+  });
+  const [typed, setTyped] = useState("");
+  const [trace, setTrace] = useState(null);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const kb = useKeystroke();
+  const mouse = useMouse(true);
+  const [target, setTarget] = useState({ top: 55, left: 35 });
+
+  useEffect(() => {
+    fetch(API + "/enroll/phrase").then(r => r.json()).then(d => {
+      setPhrase(d.phrase); setMeta(d);
+    });
+    // Randomised at verification too. Enrollment and verification must
+    // present the same task, or the pointer features are not comparable.
+    setTarget({ top: 45 + Math.random() * 70, left: 20 + Math.random() * 65 });
+  }, []);
+
+  const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }));
+
+  const submit = async () => {
+    setError(""); setBusy(true); session.mark();
+    const body = {
+      userId: form.userId,
+      amount: parseFloat(form.amount) || 0,
+      deviceId: form.deviceId,
+      ip: form.ip,
+      beneficiaryId: form.beneficiaryId,
+      action: "TRANSFER",
+      channel: form.channel,
+      timestamp: new Date().toISOString(),
+      keystrokeSample: typed === phrase ? kb.get() : null,
+      shapeTrace: trace,
+      mousePoints: mouse.points.current,
+      mouseClicks: mouse.clicks.current,
+      session: session.payload(),
+    };
+    const res = await fetch(API + "/verify", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    setBusy(false);
+    if (!res.ok) { setError(data.detail || "Verification failed"); return; }
+    setResult(data);
+    kb.reset(); mouse.reset(); setTyped(""); setTrace(null);
+    setTarget({ top: 45 + Math.random() * 70, left: 20 + Math.random() * 65 });
+  };
+
+  return (
+    <div>
+      <div className="panel">
+        <h2>Transaction</h2>
+        <div className="row">
+          <div><label>User ID</label>
+            <input value={form.userId} onChange={set("userId")}
+                   placeholder="enrolled user" /></div>
+          <div><label>Amount</label>
+            <input value={form.amount} onChange={set("amount")} /></div>
+        </div>
+        <div className="row">
+          <div><label>Device ID</label>
+            <input value={form.deviceId} onChange={set("deviceId")} /></div>
+          <div><label>Beneficiary ID</label>
+            <input value={form.beneficiaryId} onChange={set("beneficiaryId")} /></div>
+        </div>
+        <div className="row">
+          <div><label>IP address</label>
+            <input value={form.ip} onChange={set("ip")} /></div>
+          <div><label>Channel</label>
+            <select value={form.channel} onChange={set("channel")}>
+              <option>WEB</option><option>MOBILE</option>
+            </select></div>
+        </div>
+        <p className="note">
+          No free-text fields. Beneficiary names and remarks are
+          attacker-controlled, are needed by no feature, and would open an
+          injection path into the decision layer.
+        </p>
+      </div>
+
+      <div className="track">
+        <label>Confirm by typing the phrase</label>
+        <div className="phrase">{phrase}</div>
+        <input value={typed} autoComplete="off"
+          onChange={e => setTyped(e.target.value)}
+          onKeyDown={kb.onKeyDown} onKeyUp={kb.onKeyUp}
+          placeholder="Type to provide keystroke evidence" />
+        <p className="note">
+          Same phrase as enrollment, so timings compare like for like.
+          Free-text comparison means matching different key pairs against
+          each other, which needs far more data to be reliable.
+        </p>
+      </div>
+
+      {meta.shape && (
+        <div className="track">
+          <TracePad shape={meta.shape}
+                    label={trace ? "Shape traced ✓ — trace again to replace"
+                                 : "Trace the shape to provide pointer evidence"}
+                    onComplete={setTrace} />
+        </div>
+      )}
+
+      {error && <div className="err">{error}</div>}
+      <div className="arena">
+        <div className="arena-hint">Move the pointer to the button to submit</div>
+        <button className="go"
+                style={{ top: target.top + "px", left: target.left + "%" }}
+                onClick={submit} disabled={busy || !form.userId}>
+          {busy ? "Verifying…" : "Submit transaction"}
+        </button>
+      </div>
+
+      {result && <Result data={result} />}
+    </div>
+  );
+}
+
+function Result({ data }) {
+  const names = {
+    keystroke: "Keystroke dynamics",
+    shape: "Shape trace",
+    mouse: "Mouse dynamics",
+    session: "Session behaviour",
+    transaction: "Transactional",
+  };
+  return (
+    <div className="panel" style={{ marginTop: 16 }}>
+      <h2>Result</h2>
+      <div className="big">
+        {data.riskScore === null ? "—" : data.riskScore}
+        <span className={"pill " + data.band} style={{ marginLeft: 12,
+              verticalAlign: "middle" }}>{data.band}</span>
+      </div>
+      <div style={{ color: "var(--muted)", marginBottom: 16 }}>
+        Decision: <strong style={{ color: "var(--text)" }}>{data.decision}</strong>
+        {" · "}{data.latencyMs} ms
+        {" · "}{data.dimensionsUsed.length} of 4 dimensions used
+      </div>
+
+      <table>
+        <thead><tr>
+          <th>Dimension</th><th>Status</th><th>Distance</th>
+          <th>P(impostor)</th><th>Confidence</th>
+        </tr></thead>
+        <tbody>
+          {Object.entries(data.dimensions).map(([k, v]) => (
+            <tr key={k}>
+              <td>{names[k] || k}</td>
+              <td><span className={"pill " + v.status}>{v.status}</span></td>
+              <td className="mono">{v.distance ?? "—"}</td>
+              <td className="mono">
+                {v.probability ?? "—"}
+                {v.detail?.rawProbability !== undefined &&
+                 v.detail?.rawProbability !== null &&
+                  <span style={{ color: "var(--muted)" }}>
+                    {" "}(raw {v.detail.rawProbability})
+                  </span>}
+              </td>
+              <td className="mono">
+                {v.detail?.confidence !== undefined
+                  ? v.detail.confidence : "—"}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <p className="note">
+        Each dimension is calibrated independently against its own genuine
+        and impostor distributions, then combined in log-odds space. A
+        keystroke distance of 2.0 and a mouse distance of 2.0 do not mean
+        the same thing, so they are never averaged directly.
+        Dimensions reporting INSUFFICIENT_DATA are skipped, not counted as
+        evidence in either direction. WARMING_UP means the baseline is still
+        thin: the probability is pulled toward 0.5 in proportion to how
+        little history exists, so a weak baseline nudges the result rather
+        than driving it.
+      </p>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* History                                                             */
+/* ------------------------------------------------------------------ */
+
+function History() {
+  const [rows, setRows] = useState([]);
+  const load = () => fetch(API + "/history?limit=25").then(r => r.json())
+                      .then(d => setRows(d.verifications));
+  useEffect(() => { load(); }, []);
+
+  return (
+    <div className="panel">
+      <h2>Verification history</h2>
+      <button className="go" onClick={load} style={{ marginBottom: 14 }}>
+        Refresh
+      </button>
+      {rows.length === 0 && <p className="note">No verifications yet.</p>}
+      {rows.length > 0 && (
+        <table>
+          <thead><tr>
+            <th>User</th><th>Risk</th><th>Band</th><th>Decision</th>
+            <th>Dimensions used</th><th>ms</th>
+          </tr></thead>
+          <tbody>
+            {rows.map(r => (
+              <tr key={r.id}>
+                <td>{r.user_id}</td>
+                <td className="mono">{r.risk_prob ?? "—"}</td>
+                <td><span className={"pill " + r.band}>{r.band}</span></td>
+                <td>{r.decision}</td>
+                <td className="mono">
+                  {/* WARMING_UP dimensions contribute to the decision too,
+                      at reduced weight. Filtering on OK alone hid them and
+                      made the transaction dimension look absent when it
+                      was scoring. */}
+                  {Object.entries(r.dimensions)
+                    .filter(([, v]) => v.status === "OK" || v.status === "WARMING_UP")
+                    .map(([k, v]) => v.status === "WARMING_UP" ? k + "*" : k)
+                    .join(", ") || "none"}
+                </td>
+                <td className="mono">{r.latency_ms}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <p className="note">
+        Every decision is recorded with its inputs and per-dimension
+        outcome. This is both the audit trail and the explainability
+        record — any past decision can be reconstructed. An asterisk marks
+        a dimension still warming up: contributing, but at reduced weight
+        because its baseline is thin.
+      </p>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+
+function App() {
+  const [tab, setTab] = useState("enroll");
+  const session = useSession();
+
+  return (
+    <div className="wrap">
+      <h1>UEBA — Behavioural Authentication</h1>
+      <div className="sub">
+        Keystroke dynamics · Mouse dynamics · Session behaviour · Transactional
+      </div>
+      <nav>
+        {[["enroll", "Enroll"], ["verify", "Transact"], ["history", "History"]]
+          .map(([k, label]) => (
+          <button key={k} className={tab === k ? "on" : ""}
+                  onClick={() => { setTab(k); session.mark(); }}>{label}</button>
+        ))}
+      </nav>
+      {tab === "enroll" && <Enroll session={session} />}
+      {tab === "verify" && <Verify session={session} />}
+      {tab === "history" && <History />}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>

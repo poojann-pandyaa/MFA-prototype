@@ -3,6 +3,7 @@ __pycache__/
 .venv/
 .env
 *.joblib
+*.db
 artifacts/
 data/*.csv
 .pytest_cache/

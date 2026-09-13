@@ -7,19 +7,16 @@ Licenses verified on: ______________     <-- FILL IN when you check them
    https://github.com/prajwalnayaka/UEBA
 
    Derived files:
-     data/synth.py              (adapted from data_synthesis.py)
-     features/engine.py         (structure only; all features rewritten)
-     models/isoforest/MODEL.py  (adapted)
-     models/logreg/MODEL.py     (adapted)
+     data/synth.py                (adapted from data_synthesis.py)
+     features/transactional.py    (structure only; features rewritten)
+     models/isoforest/MODEL.py    (adapted)
 
    Modifications:
      - Domain changed from game administration logs to banking transactions
-     - Feature set replaced with seven per-user behavioural deviations
+     - Feature set replaced with per-user behavioural deviations
      - Isolation Forest contamination corrected from 0.3 to 0.01
-     - Models wrapped in an independent Model interface
-     - Platt calibration, service layer and persistence added
-
-   MIT text is in LICENSE with the original copyright preserved.
+     - Wrapped in an independent Model interface
+     - Calibration, service layer and persistence added
 
 
 2. GACWR/OpenUBA  --  Apache License 2.0
@@ -29,7 +26,7 @@ Licenses verified on: ______________     <-- FILL IN when you check them
      - Model interface separating train/infer from data access
      - Model packaging convention (MODEL.py + model.yaml)
 
-   Only concepts were adopted, so Apache 2.0 imposes no obligations here.
+   Only concepts adopted, so Apache 2.0 imposes no obligations here.
    Credited as an architectural influence.
 
 
@@ -38,10 +35,16 @@ Licenses verified on: ______________     <-- FILL IN when you check them
    Public availability on GitHub grants no right to copy.
 
 
-4. PaySim dataset  --  CC BY-SA 4.0  (external validation, Week 9)
-   Required citation:
-     E. A. Lopez-Rojas, A. Elmir, S. Axelsson. "PaySim: A financial mobile
-     money simulator for fraud detection." EMSS 2016, Larnaca, Cyprus.
+4. Keystroke, mouse and session dimensions -- ORIGINAL WORK
 
-   Share-alike applies to modified versions of the DATASET, not to code
-   that reads it.
+   Collection uses native browser events (keydown/keyup, mousemove,
+   mousedown/mouseup). No third-party behavioural biometrics library is
+   used: dwell time is one subtraction from the browser's own timestamps,
+   and writing it directly avoids any licensing question.
+
+   Method reference (no code taken):
+     Killourhy, K.S. & Maxion, R.A. (2009). "Comparing Anomaly-Detection
+     Algorithms for Keystroke Dynamics." IEEE/IFIP DSN, 125-134.
+
+   That benchmark found scaled Manhattan distance outperformed thirteen
+   more sophisticated alternatives, which is why it is used here.
