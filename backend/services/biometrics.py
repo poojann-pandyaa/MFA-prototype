@@ -81,7 +81,19 @@ def verify_liveness_and_identity(images_b64: list, challenge_type: str, stored_e
     if not pad_onnx.mask_passes(live_mask, config.LIVENESS_MIN_LIVE_FRAME_FRACTION):
         return False
 
-    landmark_sequence = [d.landmarks_px for d in valid_detections]
+    # Gesture evidence comes ONLY from PAD-live frames, in burst order. If
+    # PAD-rejected frames counted, a couple of spliced frames (absorbed by
+    # the live-fraction tolerance) could carry the gesture - e.g. 2 frames
+    # with a shifted nose at one end forge a head turn, 1 closed-eye frame
+    # forges a blink - while the genuine live frames carry the identity.
+    # With the default config there are always >= 5 live frames here
+    # (>= 0.8 * LIVENESS_MIN_VALID_FRAMES); if a looser config leaves fewer
+    # than verify_gesture's minimum, it fails closed (returns False).
+    landmark_sequence = [
+        valid_detections[i].landmarks_px
+        for i in range(len(valid_detections))
+        if live_mask[i]
+    ]
     if not liveness_challenge.verify_gesture(landmark_sequence, challenge_type):
         return False
 

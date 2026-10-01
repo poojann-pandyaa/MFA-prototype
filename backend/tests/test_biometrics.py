@@ -173,3 +173,84 @@ def test_pad_fraction_failure_skips_face_match():
     result, matched = _run_pipeline(sizes, live={0, 1, 2}, matching=set(range(_N_FRAMES)))
     assert result is False
     assert matched == []
+
+
+# --- Gesture evidence must come only from PAD-live frames ------------------
+#
+# Uses the REAL liveness_challenge.verify_gesture on synthetic landmarks
+# (same geometry as tests/test_liveness_challenge.py). Attack: a few
+# spliced frames that PAD rejects (absorbed by the 80% live-fraction
+# tolerance) carry the gesture, while the genuine live frames carry the
+# identity. Those rejected frames must not count as gesture evidence.
+
+from tests.test_liveness_challenge import _base_landmarks, _closed_eyes  # noqa: E402
+
+
+def _nose_shifted(dx):
+    lm = _base_landmarks()
+    lm[1, 0] += dx
+    return lm
+
+
+def _run_real_gesture(landmark_frames, live, challenge):
+    """landmark_frames[i]: frame i's 478x2 landmarks. live: PAD-live indices.
+    Every frame's embedding matches, so the result hinges on PAD+gesture."""
+    frames = _blank_frames_b64(len(landmark_frames))
+    detections = [
+        face_detect.FrameDetection(bbox=(i, 0, 100, 100), landmarks_px=lm, multi_face=False)
+        for i, lm in enumerate(landmark_frames)
+    ]
+
+    def _pad(frame, bbox):
+        return (1, 0.99) if bbox[0] in live else (0, 0.99)
+
+    with mock.patch.object(face_detect, "detect", side_effect=detections), \
+            mock.patch.object(pad_onnx._predictor, "predict_with_bbox", side_effect=_pad), \
+            mock.patch.object(face_match_onnx, "align", return_value=None), \
+            mock.patch.object(face_match_onnx, "embed", return_value=None), \
+            mock.patch.object(face_match_onnx, "verify", return_value=True):
+        return biometrics.verify_liveness_and_identity(frames, challenge, json.dumps([0.0] * 512))
+
+
+def test_non_live_frames_at_start_cannot_forge_a_turn():
+    # 2 non-live frames with the nose shifted, then 11 frontal live frames.
+    for dx in (30, -30):
+        lms = [_nose_shifted(dx), _nose_shifted(dx)] + [_base_landmarks() for _ in range(11)]
+        live = set(range(2, 13))
+        for challenge in ("turn_left", "turn_right"):
+            assert _run_real_gesture(lms, live, challenge) is False, (dx, challenge)
+
+
+def test_non_live_frames_at_end_cannot_forge_a_turn():
+    for dx in (30, -30):
+        lms = [_base_landmarks() for _ in range(11)] + [_nose_shifted(dx), _nose_shifted(dx)]
+        live = set(range(11))
+        for challenge in ("turn_left", "turn_right"):
+            assert _run_real_gesture(lms, live, challenge) is False, (dx, challenge)
+
+
+def test_non_live_closed_eye_frame_cannot_forge_a_blink():
+    lms = [_base_landmarks() for _ in range(12)]
+    lms[6] = _closed_eyes(_base_landmarks())
+    live = set(range(12)) - {6}
+    assert _run_real_gesture(lms, live, "blink") is False
+
+
+def test_genuine_live_turn_still_passes():
+    # Nose moves steadily image-right relative to the eyes across 13 live
+    # frames (subject's own left, unmirrored), plus a frontal non-live
+    # frame in the middle that is simply ignored.
+    lms = [_nose_shifted(i * 5) for i in range(13)]
+    lms[6] = _base_landmarks()
+    live = set(range(13)) - {6}
+    assert _run_real_gesture(lms, live, "turn_left") is True
+    lms_all_live = [_nose_shifted(i * 5) for i in range(13)]
+    assert _run_real_gesture(lms_all_live, set(range(13)), "turn_left") is True
+    assert _run_real_gesture(lms_all_live, set(range(13)), "turn_right") is False
+
+
+def test_genuine_live_blink_still_passes():
+    lms = [_base_landmarks() for _ in range(12)]
+    lms[5] = _closed_eyes(_base_landmarks())
+    lms[6] = _closed_eyes(_base_landmarks())
+    assert _run_real_gesture(lms, set(range(12)), "blink") is True
