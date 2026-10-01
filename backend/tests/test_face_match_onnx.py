@@ -1,4 +1,5 @@
 import json
+import os
 
 import numpy as np
 import cv2
@@ -11,6 +12,9 @@ SAMPLE_PATH = "tests/fixtures/sample_face.jpg"
 
 
 def _load_sample():
+    if not os.path.isfile(face_match_onnx.MODEL_PATH):
+        pytest.skip("Run anti_spoofing/export_arcface_onnx.py to generate models/arcface.onnx")
+
     img = cv2.imread(SAMPLE_PATH)
     if img is None:
         pytest.skip(f"Add {SAMPLE_PATH} first - see tests/fixtures/README.md")

@@ -80,8 +80,23 @@ LANDMARK_INDICES = (
     IMAGE_RIGHT_MOUTH_INDEX,
 )
 
-_session = ort.InferenceSession(MODEL_PATH, providers=["CPUExecutionProvider"])
-_input_name = _session.get_inputs()[0].name
+def _load_session():
+    """Loaded once at process start, reused across all requests (same
+    rationale as services/pad_onnx.py). arcface.onnx is too large to commit,
+    so a checkout that hasn't run the export script yet won't have it -
+    importing this module still has to work in that case, and embed() is
+    where it becomes an error."""
+    if not os.path.isfile(MODEL_PATH):
+        print(
+            f"Warning: ArcFace ONNX model not found at {MODEL_PATH}. "
+            f"Run backend/anti_spoofing/export_arcface_onnx.py to generate it."
+        )
+        return None, None
+    session = ort.InferenceSession(MODEL_PATH, providers=["CPUExecutionProvider"])
+    return session, session.get_inputs()[0].name
+
+
+_session, _input_name = _load_session()
 
 
 def _similarity_transform(src: np.ndarray, dst: np.ndarray) -> np.ndarray:
@@ -129,6 +144,12 @@ def align(frame_bgr: np.ndarray, landmarks_px: np.ndarray) -> np.ndarray:
 def embed(aligned_crop_bgr: np.ndarray) -> np.ndarray:
     """512-d ArcFace embedding of an aligned crop. BGR in [0, 1] - see the
     module docstring for where that comes from."""
+    if _session is None:
+        raise RuntimeError(
+            f"ArcFace ONNX model missing at {MODEL_PATH} - run "
+            f"backend/anti_spoofing/export_arcface_onnx.py to generate it."
+        )
+
     img = aligned_crop_bgr.astype(np.float32) / 255.0
     output = _session.run(None, {_input_name: img[np.newaxis, ...]})[0]
     return output[0]
