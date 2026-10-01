@@ -1,0 +1,7 @@
+# backend/requirements-dev.txt
+# Only needed for running tests and regenerating ONNX artifacts (Tasks 1-6
+# of docs/superpowers/plans/2026-10-01-active-liveness-challenge.md).
+# Never imported at request time - see backend/requirements.txt.
+-r requirements.txt
+pytest
+pytest-mock
