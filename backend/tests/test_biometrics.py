@@ -254,3 +254,42 @@ def test_genuine_live_blink_still_passes():
     lms[5] = _closed_eyes(_base_landmarks())
     lms[6] = _closed_eyes(_base_landmarks())
     assert _run_real_gesture(lms, set(range(12)), "blink") is True
+
+
+# --- Server-side step-2 diagnostics log -----------------------------------
+
+def test_gesture_failure_logs_stage_and_measured_turn_delta(caplog):
+    # Static frontal face asked to turn: gesture fails, and the log says so
+    # with the signed measured delta and the threshold.
+    lms = [_base_landmarks() for _ in range(13)]
+    with caplog.at_level("INFO", logger="mfa.step2"):
+        assert _run_real_gesture(lms, set(range(13)), "turn_right") is False
+    assert "step2 result=gesture_failed challenge=turn_right live_frames=13" in caplog.text
+    assert "turn_delta=+0.000 threshold=0.150" in caplog.text
+
+
+def test_blink_failure_logs_ear_stats(caplog):
+    lms = [_base_landmarks() for _ in range(12)]
+    with caplog.at_level("INFO", logger="mfa.step2"):
+        assert _run_real_gesture(lms, set(range(12)), "blink") is False
+    assert "step2 result=gesture_failed challenge=blink" in caplog.text
+    assert "ear_threshold=0.200 open_closed_open=False" in caplog.text
+
+
+def test_face_mismatch_logs_distance(caplog):
+    lms = [_nose_shifted(i * 5) for i in range(13)]  # genuine turn_left
+    frames = _blank_frames_b64(13)
+    detections = [
+        face_detect.FrameDetection(bbox=(i, 0, 100, 100), landmarks_px=lm, multi_face=False)
+        for i, lm in enumerate(lms)
+    ]
+    # Orthogonal embeddings -> cosine distance exactly 1.0 (real verify()).
+    with mock.patch.object(face_detect, "detect", side_effect=detections), \
+            mock.patch.object(pad_onnx._predictor, "predict_with_bbox", return_value=(1, 0.99)), \
+            mock.patch.object(face_match_onnx, "align", return_value=None), \
+            mock.patch.object(face_match_onnx, "embed", return_value=np.array([1.0, 1.0, 1.0, 1.0])), \
+            caplog.at_level("INFO", logger="mfa.step2"):
+        result = biometrics.verify_liveness_and_identity(frames, "turn_left", json.dumps([1.0, -1.0, 1.0, -1.0]))
+    assert result is False
+    assert "step2 result=face_mismatch challenge=turn_left live_frames=13" in caplog.text
+    assert "frames_checked=1/13 distance=1.0 threshold=0.450" in caplog.text

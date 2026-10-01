@@ -193,3 +193,33 @@ def test_step2_oversized_single_image_rejected_4xx(client, db_session, monkeypat
         "session_id": session_id,
     })
     assert 400 <= response.status_code < 500
+
+
+def test_step2_gesture_failure_logs_server_side_but_body_stays_generic(client, db_session, monkeypatch, caplog):
+    # Real verify_liveness_and_identity with detection/PAD mocked: a static
+    # frontal face fails every challenge type at the gesture stage. The
+    # diagnostic goes to the server log; the HTTP body must not change.
+    import base64
+    import cv2
+    import numpy as np
+    from services import face_detect, pad_onnx
+    from tests.test_liveness_challenge import _base_landmarks
+
+    monkeypatch.setattr(biometrics, "extract_embedding", lambda b64: "[]")
+    _enroll_user(client)
+    session_id, challenge_type = _force_high_risk_session(client, db_session, "alice", "device-diag")
+
+    detection = face_detect.FrameDetection(bbox=(10, 10, 100, 100), landmarks_px=_base_landmarks(), multi_face=False)
+    monkeypatch.setattr(face_detect, "detect", lambda frame: detection)
+    monkeypatch.setattr(pad_onnx._predictor, "predict_with_bbox", lambda frame, bbox: (1, 0.99))
+    ok, buf = cv2.imencode(".jpg", np.zeros((50, 50, 3), dtype=np.uint8))
+    frame_b64 = base64.b64encode(buf).decode("utf-8")
+
+    with caplog.at_level("INFO", logger="mfa.step2"):
+        response = client.post("/login/step2", json={
+            "username": "alice", "images": [frame_b64] * 13,
+            "device_identifier": "device-diag", "session_id": session_id,
+        })
+    assert response.status_code == 401
+    assert response.json() == {"detail": _GENERIC_FAILURE}
+    assert f"step2 result=gesture_failed challenge={challenge_type} live_frames=13" in caplog.text

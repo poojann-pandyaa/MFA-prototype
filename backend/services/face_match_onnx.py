@@ -174,9 +174,11 @@ def verify(embedding: np.ndarray, stored_embedding_str: str) -> bool:
     """
     if not stored_embedding_str:
         return False
+    return bool(cosine_distance(embedding, stored_embedding_str) < config.FACE_MATCH_THRESHOLD)
 
+
+def cosine_distance(embedding: np.ndarray, stored_embedding_str: str) -> float:
     stored = np.array(json.loads(stored_embedding_str))
-    cosine_distance = 1 - np.dot(stored, embedding) / (
+    return float(1 - np.dot(stored, embedding) / (
         np.linalg.norm(stored) * np.linalg.norm(embedding)
-    )
-    return bool(cosine_distance < config.FACE_MATCH_THRESHOLD)
+    ))

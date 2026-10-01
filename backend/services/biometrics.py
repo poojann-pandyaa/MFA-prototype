@@ -1,12 +1,18 @@
 # backend/services/biometrics.py
 import base64
 import json
+import logging
 
 import cv2
 import numpy as np
 
 import config
 from services import face_detect, pad_onnx, liveness_challenge, face_match_onnx
+
+# Server-side diagnostics for step 2 (which stage ended the attempt, and the
+# measured values). Never put any of this in an HTTP response - clients only
+# ever see the generic failure / retake messages. Handler set up in main.py.
+step2_log = logging.getLogger("mfa.step2")
 
 
 class RetakeNeededError(Exception):
@@ -67,10 +73,14 @@ def verify_liveness_and_identity(images_b64: list, challenge_type: str, stored_e
     # generic way PAD/gesture/face-match failures do, not the "please
     # retake" path (see design spec's "Multiple faces in frame").
     if any(d.multi_face for d in detections):
+        step2_log.info("step2 result=multi_face challenge=%s multi_face_frames=%d/%d",
+                       challenge_type, sum(d.multi_face for d in detections), len(detections))
         return False
 
     valid = [(f, d) for f, d in zip(frames, detections) if d.bbox is not None]
     if len(valid) < config.LIVENESS_MIN_VALID_FRAMES:
+        step2_log.info("step2 result=too_few_valid_frames challenge=%s valid=%d/%d min=%d",
+                       challenge_type, len(valid), len(images_b64), config.LIVENESS_MIN_VALID_FRAMES)
         raise RetakeNeededError("Could not clearly see a single face across enough frames. Please retake.")
 
     valid_frames = [f for f, _ in valid]
@@ -79,6 +89,9 @@ def verify_liveness_and_identity(images_b64: list, challenge_type: str, stored_e
 
     live_mask = pad_onnx.live_frame_mask(valid_frames, bboxes, config.LIVENESS_THRESHOLD)
     if not pad_onnx.mask_passes(live_mask, config.LIVENESS_MIN_LIVE_FRAME_FRACTION):
+        step2_log.info("step2 result=pad_failed challenge=%s live=%s/%d min_fraction=%.2f",
+                       challenge_type, "n/a" if live_mask is None else sum(live_mask),
+                       len(valid_frames), config.LIVENESS_MIN_LIVE_FRAME_FRACTION)
         return False
 
     # Gesture evidence comes ONLY from PAD-live frames, in burst order. If
@@ -94,7 +107,10 @@ def verify_liveness_and_identity(images_b64: list, challenge_type: str, stored_e
         for i in range(len(valid_detections))
         if live_mask[i]
     ]
+    gesture_info = (f"challenge={challenge_type} live_frames={len(landmark_sequence)} "
+                    f"{liveness_challenge.describe_gesture(landmark_sequence, challenge_type)}")
     if not liveness_challenge.verify_gesture(landmark_sequence, challenge_type):
+        step2_log.info("step2 result=gesture_failed %s", gesture_info)
         return False
 
     # Identity is checked on EVERY PAD-live frame, and every one must match
@@ -111,9 +127,29 @@ def verify_liveness_and_identity(images_b64: list, challenge_type: str, stored_e
         key=lambda i: valid_detections[i].bbox[2] * valid_detections[i].bbox[3],
         reverse=True,
     )
+    distances = []
     for i in live_indices:
         aligned = face_match_onnx.align(valid_frames[i], valid_detections[i].landmarks_px)
         embedding = face_match_onnx.embed(aligned)
-        if not face_match_onnx.verify(embedding, stored_embedding):
+        matched = face_match_onnx.verify(embedding, stored_embedding)
+        distances.append(_distance_for_log(embedding, stored_embedding))
+        if not matched:
+            step2_log.info("step2 result=face_mismatch %s frames_checked=%d/%d distance=%s "
+                           "threshold=%.3f distances=%s", gesture_info, len(distances),
+                           len(live_indices), distances[-1], config.FACE_MATCH_THRESHOLD, distances)
             return False
+    numeric = [d for d in distances if d != "n/a"]
+    step2_log.info("step2 result=%s %s frames_matched=%d worst_distance=%s threshold=%.3f",
+                   "passed" if live_indices else "no_live_frames", gesture_info, len(distances),
+                   max(numeric) if numeric else "n/a", config.FACE_MATCH_THRESHOLD)
     return bool(live_indices)
+
+
+def _distance_for_log(embedding, stored_embedding):
+    """Cosine distance rounded for the diagnostics log, or "n/a" - logging
+    must never be able to change (or crash) the verification outcome."""
+    try:
+        with np.errstate(divide="ignore", invalid="ignore"):
+            return round(face_match_onnx.cosine_distance(embedding, stored_embedding), 3)
+    except Exception:
+        return "n/a"

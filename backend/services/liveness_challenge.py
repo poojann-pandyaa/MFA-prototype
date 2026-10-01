@@ -56,18 +56,23 @@ def _mean_ear(landmarks: np.ndarray) -> float:
     return (left + right) / 2
 
 
-def _verify_blink(sequence) -> bool:
-    """A blink is open -> closed -> open: some closed frame (EAR below the
-    threshold) must have an open frame (EAR at/above it) somewhere BEFORE it
-    and somewhere AFTER it. Eyes that close and stay closed, or that start
-    closed and open, are not a blink."""
+def _blink_stats(sequence):
+    """(min EAR, max EAR, open->closed->open found). A blink is some closed
+    frame (EAR below the threshold) with an open frame (EAR at/above it)
+    somewhere BEFORE it and somewhere AFTER it. Eyes that close and stay
+    closed, or that start closed and open, are not a blink."""
     threshold = config.BLINK_EAR_THRESHOLD
     ears = [_mean_ear(lm) for lm in sequence]
     is_open = [e >= threshold for e in ears]
-    for i, ear in enumerate(ears):
-        if ear < threshold and any(is_open[:i]) and any(is_open[i + 1:]):
-            return True
-    return False
+    found = any(
+        ear < threshold and any(is_open[:i]) and any(is_open[i + 1:])
+        for i, ear in enumerate(ears)
+    )
+    return min(ears), max(ears), found
+
+
+def _verify_blink(sequence) -> bool:
+    return _blink_stats(sequence)[2]
 
 
 def _face_relative_nose_offset(lm: np.ndarray):
@@ -88,21 +93,50 @@ def _face_relative_nose_offset(lm: np.ndarray):
     return float(np.dot(nose - midpoint, axis) / (inter_eye * inter_eye))
 
 
-def _verify_turn(sequence, direction: str) -> bool:
+def _turn_displacement(sequence):
+    """Median(last window) - median(first window) of the face-relative nose
+    offset; positive = toward image-right (turn_left). None if any frame's
+    eye landmarks are degenerate."""
     offsets = []
     for lm in sequence:
         offset = _face_relative_nose_offset(lm)
         if offset is None:
-            return False
+            return None
         offsets.append(offset)
 
     window = max(1, min(_TURN_WINDOW, len(offsets) // 2))
     start = float(np.median(offsets[:window]))
     end = float(np.median(offsets[-window:]))
-    displacement = end - start
+    return end - start
+
+
+def _verify_turn(sequence, direction: str) -> bool:
+    displacement = _turn_displacement(sequence)
+    if displacement is None:
+        return False
     if direction == "turn_left":
         return bool(displacement > config.HEAD_TURN_DISPLACEMENT_THRESHOLD)
     return bool(displacement < -config.HEAD_TURN_DISPLACEMENT_THRESHOLD)
+
+
+def describe_gesture(landmark_sequence, challenge_type: str) -> str:
+    """Server-side diagnostics only (never sent to clients): the measured
+    values verify_gesture decides on, computed with the same helpers."""
+    n = len(landmark_sequence)
+    if n < _MIN_FRAMES:
+        return f"frames={n} (< min {_MIN_FRAMES})"
+    if challenge_type == "blink":
+        min_ear, max_ear, found = _blink_stats(landmark_sequence)
+        return (f"min_ear={min_ear:.3f} max_ear={max_ear:.3f} "
+                f"ear_threshold={config.BLINK_EAR_THRESHOLD:.3f} open_closed_open={found}")
+    if challenge_type in ("turn_left", "turn_right"):
+        displacement = _turn_displacement(landmark_sequence)
+        threshold = config.HEAD_TURN_DISPLACEMENT_THRESHOLD
+        if displacement is None:
+            return "turn_delta=n/a (degenerate eye landmarks)"
+        return (f"turn_delta={displacement:+.3f} threshold={threshold:.3f} "
+                f"(turn_left needs > +{threshold:.3f}, turn_right needs < -{threshold:.3f})")
+    return "unknown challenge_type"
 
 
 def verify_gesture(landmark_sequence, challenge_type: str) -> bool:

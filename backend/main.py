@@ -15,6 +15,16 @@ Base.metadata.create_all(bind=engine)
 
 logger = logging.getLogger(__name__)
 
+# Step-2 diagnostics (services/biometrics.py's "mfa.step2" logger) at INFO.
+# uvicorn's log config only configures its own loggers and the root logger
+# has no handler, so give this one a stderr handler or INFO lines vanish.
+_step2_log = logging.getLogger("mfa.step2")
+_step2_log.setLevel(logging.INFO)
+if not _step2_log.handlers:
+    _step2_handler = logging.StreamHandler()
+    _step2_handler.setFormatter(logging.Formatter("%(levelname)s:     %(name)s %(message)s"))
+    _step2_log.addHandler(_step2_handler)
+
 _GENERIC_VERIFICATION_FAILURE = "Verification failed. Please try again."
 
 app = FastAPI()
