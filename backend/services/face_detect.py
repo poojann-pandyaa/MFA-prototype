@@ -35,6 +35,11 @@ def _build_landmarker():
     return mp_vision.FaceLandmarker.create_from_options(options)
 
 
+# One landmarker shared by every request. FastAPI runs these sync routes on
+# a threadpool, so detect() can be called from several threads at once; that
+# is safe only because the pinned mediapipe (0.10.35) FaceLandmarker
+# serializes its native calls internally via a SerialDispatcher. Re-check
+# this (or add a lock / per-thread landmarker) if the mediapipe pin moves.
 _landmarker = _build_landmarker()
 
 

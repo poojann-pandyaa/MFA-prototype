@@ -8,10 +8,10 @@ This is a working demo of an Adaptive Multi-Factor Authentication (MFA) web appl
 *   **Frontend**: React (Vite, TailwindCSS)
 *   **Biometrics** (no TensorFlow/DeepFace at request time - everything below runs on MediaPipe and ONNX Runtime):
     *   **Unified face detection**: a single MediaPipe Face Landmarker (`backend/services/face_detect.py`, model file `backend/models/face_landmarker.task`) is the only detector in the app. Its bounding box and 478 landmarks feed PAD cropping, gesture verification, and ArcFace alignment, so no stage runs its own detector. Pinned to `mediapipe==0.10.35` (see the comment in `requirements.txt`).
-    *   **Challenge-response liveness** (`backend/services/liveness_challenge.py`): step 2 asks for a randomly chosen action (`blink`, `turn_left`, or `turn_right`) and the client sends a short burst of frames. The landmark sequence across the burst is checked for the requested gesture (eye-aspect-ratio drop for blink, sustained nose displacement for head turns), so a static photo or a replay that can't anticipate the challenge fails.
+    *   **Challenge-response liveness** (`backend/services/liveness_challenge.py`): step 2 asks for a randomly chosen action (`blink`, `turn_left`, or `turn_right`) and the client sends a short burst of frames. The landmark sequence across the burst is checked for the requested gesture (eyes open -> closed -> open again for blink; for head turns, a sustained change in the nose tip's position *relative to the eyes*, so sliding or leaning toward the camera without turning doesn't count). A static photo fails, and so does a replay that doesn't happen to show the requested action (see the known-limitations note below for how far that goes).
     *   **Liveness / anti-spoofing (PAD)**: a MobileNetV3-Small model served via **ONNX Runtime** (`backend/services/pad_onnx.py`), applied across the burst (a minimum fraction of frames must score live). Ships today with the vendored, pretrained minivision-ai/Silent-Face-Anti-Spoofing (MiniFASNet) weights converted to ONNX (`backend/anti_spoofing/export_onnx.py`); `ml/` contains a from-scratch **trainable** replacement for this model (multi-task: binary live/spoof + attack type + an auxiliary FFT-artifact head) that you can train on free data and drop in to replace it - see `ml/README.md`. `pad_onnx.py` no longer has its own face detector; it crops using the bounding boxes from `face_detect.py`.
     *   **Face matching**: ArcFace (pretrained, not trained in this repo - see `ml/README.md` for why) served via **ONNX Runtime** (`backend/services/face_match_onnx.py`: landmark-based alignment, embedding, cosine-distance compare). The ONNX file is exported once from DeepFace's ArcFace weights (see Setup) and is not committed (~137MB).
-    *   `backend/services/biometrics.py` orchestrates the above for `/enroll` (single photo, embedding only) and `/login/step2` (burst: detect, PAD, gesture, then face-match on the best frame).
+    *   `backend/services/biometrics.py` orchestrates the above for `/enroll` (single photo, embedding only) and `/login/step2` (burst: detect, PAD, gesture, then face-match on every frame PAD scored live - all of them must match).
 
 ## Authentication Flow
 
@@ -23,9 +23,10 @@ This is a working demo of an Adaptive Multi-Factor Authentication (MFA) web appl
     *   **Face detection**: every frame goes through the MediaPipe Face Landmarker. Frames with more than one face fail verification; if fewer than `MFA_LIVENESS_MIN_VALID_FRAMES` (default 6) frames contain exactly one detectable face, the user is asked to retake.
     *   **Liveness Check**: the burst is passed through the anti-spoofing model (ONNX Runtime); at least `MFA_LIVENESS_MIN_LIVE_FRAME_FRACTION` (default 0.8) of frames must score above `MFA_LIVENESS_THRESHOLD` (default 0.5).
     *   **Gesture Check**: the landmark sequence must show the requested blink or head turn (`MFA_BLINK_EAR_THRESHOLD`, `MFA_HEAD_TURN_DISPLACEMENT_THRESHOLD`).
-    *   **Face Matching**: the best frame is aligned and embedded with ArcFace (ONNX Runtime) and compared against the stored enrollment embedding (cosine distance below `MFA_FACE_MATCH_THRESHOLD`, default 0.45). If everything passes, the user is logged in.
-    *   Liveness, gesture, and face-match failures all return the same generic 401 message, so a client can't learn which check failed and tune an attack against it.
-    *   *Frontend status:* the backend contract above (challenge prompt + burst capture) is implemented; the React login page's burst-capture UI is tracked as a separate task in `docs/superpowers/plans/2026-10-01-active-liveness-challenge.md`, so the current frontend may still send a single frame until that lands.
+    *   **Face Matching**: every frame that PAD scored live is aligned and embedded with ArcFace (ONNX Runtime) and compared against the stored enrollment embedding (cosine distance below `MFA_FACE_MATCH_THRESHOLD`, default 0.45); every one of them must match. Frames PAD rejected are never used for matching, so splicing a frame of someone else's photo into an otherwise-live burst can't carry the identity check. If everything passes, the user is logged in.
+    *   Liveness, gesture, and face-match failures - and any unexpected server error during verification, which is logged server-side - all return the same generic 401 message, so a client can't learn which check failed (or how far its burst got) and tune an attack against it. Every step-2 attempt consumes its `session_id`, pass or fail; a retry starts again from step 1 with a fresh challenge.
+    *   **Request size**: each frame is capped at 1,000,000 base64 characters (`backend/schemas.py`, oversized frames get a 422; the frontend's 720x540 JPEGs are well under that). Also cap the overall request body at your reverse proxy (e.g. nginx `client_max_body_size`), since the app itself doesn't limit total body size.
+    *   *Frontend:* `ChallengeCameraCapture.jsx` shows the challenge prompt and captures a 13-frame burst (one every 150ms); `Login.jsx` posts it to `/login/step2` and, on failure, returns to step 1 with the error shown.
 
 ## Security fixes in this pass
 
@@ -36,7 +37,7 @@ The original scaffold had two real vulnerabilities, now fixed:
 
 Both are exercised by an API-level test suite during development (see commit history) covering: no-session-id, forged session-id, wrong-device session-id, session replay, and unauthenticated/invalid-token history access - all correctly rejected with 401.
 
-**Known limitation, by design for a prototype**: the client posts base64 images to the server - there's still no hardware proof they came from a live camera. The randomized blink/head-turn challenge raises the bar considerably over a single static photo (a pre-recorded clip can't know which action will be asked for), but it is not a substitute for hardware attestation (Android Play Integrity), and the gesture/PAD thresholds are starting defaults that should be calibrated on your own captured data.
+**Known limitation, by design for a prototype**: the client posts base64 images to the server - there's still no hardware proof they came from a live camera. The randomized blink/head-turn challenge raises the bar over a single static photo, but its replay resistance is limited: there are only 3 possible challenges, and step 1 can be retried without any rate limit, so an attacker who knows the password and holds a pre-recorded clip of even one action can keep restarting at step 1 until that action comes up (1 in 3 per try). The same burst can also be resubmitted against a new session. Rate limiting / lockout on failed step-2 attempts (and optionally rejecting duplicate bursts) is recommended future work. None of this is a substitute for hardware attestation (Android Play Integrity), and the gesture/PAD thresholds are starting defaults that should be calibrated on your own captured data.
 
 ## Project Structure
 
@@ -70,7 +71,8 @@ adaptive-mfa/
     ├── src/
     │   ├── App.jsx             # React router setup
     │   ├── components/
-    │   │   └── CameraCapture.jsx # Webcam capture component
+    │   │   ├── CameraCapture.jsx # Webcam capture component (enrollment photo)
+    │   │   └── ChallengeCameraCapture.jsx # Step-2 challenge prompt + burst capture
     │   └── pages/
     │       ├── Enroll.jsx      # Enrollment page
     │       ├── Login.jsx       # Adaptive login page (carries session_id to step 2)
@@ -115,6 +117,16 @@ python anti_spoofing/export_arcface_onnx.py
 
 `tf2onnx` is installed separately with `--no-deps` because its package metadata pins `protobuf~=3.20`, which would downgrade protobuf below what TensorFlow and mediapipe need and break both at import time; its code runs fine on the protobuf version already installed. The first run downloads DeepFace's ArcFace weights (~100MB) before converting them; the script self-checks the ONNX output against the Keras model. This is the same one-time-export pattern as the PAD model's `backend/anti_spoofing/export_onnx.py`.
 
+#### Upgrading an existing database
+
+If your `backend/mfa_demo.db` was created before the blink/head-turn challenge was added, its `verification_sessions` table has no `challenge_type` column. The app's startup `create_all` only creates missing *tables*, it never adds columns to existing ones, so every HIGH-risk `/login/step1` would fail with a 500. Add the column once, from the repo root, with the server stopped:
+
+```bash
+sqlite3 backend/mfa_demo.db "ALTER TABLE verification_sessions ADD COLUMN challenge_type VARCHAR;"
+```
+
+This keeps all enrolled users, devices and login history. Deleting `mfa_demo.db` also fixes the error (it's recreated on startup), but you lose every enrollment made so far, including any DeepFace-era embeddings that still verify against the ONNX model, and users have to enroll again. A fresh checkout with no `mfa_demo.db` needs neither step.
+
 #### Running the tests
 
 ```bash
@@ -139,7 +151,7 @@ Thresholds and limits are overridable via environment variables (see `backend/co
 | `MFA_LIVENESS_MIN_VALID_FRAMES` | 6 | Minimum frames with exactly one detected face, else "retake" |
 | `MFA_LIVENESS_MAX_FRAMES` | 30 | Max frames accepted per step-2 request (frontend burst must be <= this) |
 | `MFA_BLINK_EAR_THRESHOLD` | 0.2 | Eye-aspect-ratio threshold for the blink challenge |
-| `MFA_HEAD_TURN_DISPLACEMENT_THRESHOLD` | 0.15 | Nose displacement threshold for head-turn challenges |
+| `MFA_HEAD_TURN_DISPLACEMENT_THRESHOLD` | 0.15 | Head-turn threshold: change in the nose tip's offset from the eye midpoint, in units of inner-eye distance |
 | `MFA_CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Comma-separated allowed origins |
 
 The gesture and burst thresholds are uncalibrated starting defaults; tune them on your own captured data.
