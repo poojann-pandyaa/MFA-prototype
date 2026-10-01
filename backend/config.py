@@ -65,6 +65,13 @@ LIVENESS_THRESHOLD = float(os.environ.get("MFA_LIVENESS_THRESHOLD", "0.5"))
 # verified from the landmark sequence.
 CHALLENGE_TYPES = ["blink", "turn_left", "turn_right"]
 
+# Gesture-verification thresholds (services/liveness_challenge.py). These
+# are starting defaults, not measured values - calibrate against your own
+# captured burst data (see tests/fixtures/README.md) the same way
+# LIVENESS_THRESHOLD above was calibrated against ml/eval.py's output.
+BLINK_EAR_THRESHOLD = float(os.environ.get("MFA_BLINK_EAR_THRESHOLD", "0.2"))
+HEAD_TURN_DISPLACEMENT_THRESHOLD = float(os.environ.get("MFA_HEAD_TURN_DISPLACEMENT_THRESHOLD", "0.15"))
+
 CORS_ALLOW_ORIGINS = [
     o.strip()
     for o in os.environ.get(
