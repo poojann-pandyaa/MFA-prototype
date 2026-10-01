@@ -13,9 +13,11 @@ const CHALLENGE_PROMPTS = {
 
 const BURST_FRAME_COUNT = 13;
 const BURST_INTERVAL_MS = 150;
+const BURST_MAX_TICKS = BURST_FRAME_COUNT * 3;
 
 const ChallengeCameraCapture = ({ challengeType, onCapture, label = 'Verify Identity', error, onErrorClear }) => {
   const webcamRef = useRef(null);
+  const burstIntervalRef = useRef(null);
   const [isFaceDetected, setIsFaceDetected] = useState(false);
   const [capturing, setCapturing] = useState(false);
   const [framesCaptured, setFramesCaptured] = useState(0);
@@ -24,11 +26,13 @@ const ChallengeCameraCapture = ({ challengeType, onCapture, label = 'Verify Iden
   useEffect(() => {
     let detector = null;
     let animationFrameId = null;
+    let cancelled = false;
 
     const loadModelAndDetect = async () => {
       try {
         await tf.ready();
         detector = await blazeface.load();
+        if (cancelled) return;
         detectFace();
       } catch (err) {
         console.error('Failed to load face detection model', err);
@@ -44,34 +48,53 @@ const ChallengeCameraCapture = ({ challengeType, onCapture, label = 'Verify Iden
         !done
       ) {
         const video = webcamRef.current.video;
-        const predictions = await detector.estimateFaces(video, false);
-        setIsFaceDetected(predictions.length > 0);
+        try {
+          const predictions = await detector.estimateFaces(video, false);
+          if (cancelled) return;
+          setIsFaceDetected(predictions.length > 0);
+        } catch (err) {
+          console.error('Face detection error', err);
+        }
       }
-      animationFrameId = requestAnimationFrame(detectFace);
+      if (!cancelled) {
+        animationFrameId = requestAnimationFrame(detectFace);
+      }
     };
 
     loadModelAndDetect();
     return () => {
+      cancelled = true;
       if (animationFrameId) cancelAnimationFrame(animationFrameId);
     };
   }, [capturing, done]);
+
+  useEffect(() => {
+    return () => {
+      if (burstIntervalRef.current) clearInterval(burstIntervalRef.current);
+    };
+  }, []);
 
   const startBurst = useCallback(() => {
     if (onErrorClear) onErrorClear();
     setCapturing(true);
     setFramesCaptured(0);
     const frames = [];
-    const intervalId = setInterval(() => {
+    let ticks = 0;
+    burstIntervalRef.current = setInterval(() => {
+      ticks++;
       const shot = webcamRef.current?.getScreenshot();
       if (shot) {
         frames.push(shot);
         setFramesCaptured(frames.length);
       }
       if (frames.length >= BURST_FRAME_COUNT) {
-        clearInterval(intervalId);
+        clearInterval(burstIntervalRef.current);
         setCapturing(false);
         setDone(true);
         onCapture(frames);
+      } else if (ticks >= BURST_MAX_TICKS) {
+        clearInterval(burstIntervalRef.current);
+        setCapturing(false);
       }
     }, BURST_INTERVAL_MS);
   }, [onCapture, onErrorClear]);
@@ -92,13 +115,15 @@ const ChallengeCameraCapture = ({ challengeType, onCapture, label = 'Verify Iden
         />
         <div className={`absolute inset-0 pointer-events-none flex items-center justify-center border-4 border-dashed rounded-lg m-4 transition-colors duration-200 ${borderColor}`}>
           <span className="bg-black/50 text-white px-3 py-1 rounded text-sm mt-48 text-center">
-            {done
-              ? 'Captured - verifying...'
-              : capturing
-                ? `${CHALLENGE_PROMPTS[challengeType] || 'Hold still'} (${framesCaptured}/${BURST_FRAME_COUNT})`
-                : isFaceDetected
-                  ? `Ready - ${CHALLENGE_PROMPTS[challengeType] || 'press start'}`
-                  : 'Position face here'}
+            {done && error
+              ? 'Verification failed - start again from login'
+              : done
+                ? 'Captured - verifying...'
+                : capturing
+                  ? `${CHALLENGE_PROMPTS[challengeType] || 'Hold still'} (${framesCaptured}/${BURST_FRAME_COUNT})`
+                  : isFaceDetected
+                    ? `Ready - ${CHALLENGE_PROMPTS[challengeType] || 'press start'}`
+                    : 'Position face here'}
           </span>
         </div>
       </div>
