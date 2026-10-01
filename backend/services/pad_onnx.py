@@ -27,6 +27,22 @@ CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 ANTI_SPOOFING_DIR = os.path.join(CURRENT_DIR, "..", "anti_spoofing")
 MODEL_DIR = os.path.join(CURRENT_DIR, "..", "models")
 
+# The ml/ pipeline's trained replacement (see ml/README.md) - a single
+# MobileNetV3-Small model outputting one sigmoid live-probability, not the
+# vendored MiniFASNet ensemble's 3-class softmax. Different enough (input
+# size, preprocessing, output shape) that it can't share _PadModel's
+# filename-encoded-crop-scale parsing, so it gets its own loader below and
+# fully replaces the ensemble when present, rather than joining it.
+CUSTOM_MODEL_FILENAME = "pad_custom.onnx"
+CUSTOM_INPUT_SIZE = 128
+# LCC-FASD's published crops aren't pixel-identical to any specific
+# detector+crop recipe, so this scale (how far the crop expands past the
+# raw face bbox) is a reasonable approximation of typical PAD-dataset face
+# crops, not a measured match - recalibrate MFA_LIVENESS_THRESHOLD (and
+# reconsider this scale) if real-world accuracy diverges from ml/eval.py's
+# numbers.
+CUSTOM_CROP_SCALE = 1.5
+
 if ANTI_SPOOFING_DIR not in sys.path:
     sys.path.append(ANTI_SPOOFING_DIR)
 
@@ -92,19 +108,41 @@ class _PadModel:
         return _softmax(logits)
 
 
+class _CustomPadModel:
+    """Loader for the ml/ pipeline's trained replacement - single sigmoid
+    live-probability output, plain resize-to-128 preprocessing (matching
+    ml/data/manifest.py's PadDataset exactly, since serving must match
+    training preprocessing)."""
+
+    def __init__(self, onnx_path: str):
+        self.session = ort.InferenceSession(onnx_path, providers=["CPUExecutionProvider"])
+        self.input_name = self.session.get_inputs()[0].name
+
+    def predict_probability(self, face_crop_bgr: np.ndarray) -> float:
+        img = cv2.resize(face_crop_bgr, (CUSTOM_INPUT_SIZE, CUSTOM_INPUT_SIZE), interpolation=cv2.INTER_AREA)
+        img = img.astype(np.float32) / 255.0
+        img = np.transpose(img, (2, 0, 1))[np.newaxis, ...]
+        return float(self.session.run(None, {self.input_name: img})[0][0])
+
+
 class AntiSpoofPredictor:
     def __init__(self, model_dir: str = MODEL_DIR):
         self.detector = _FaceDetector()
         self.cropper = CropImage()
         self.models = []
-        if os.path.isdir(model_dir):
+        self.custom_model = None
+
+        custom_path = os.path.join(model_dir, CUSTOM_MODEL_FILENAME)
+        if os.path.isfile(custom_path):
+            self.custom_model = _CustomPadModel(custom_path)
+        elif os.path.isdir(model_dir):
             for f in sorted(os.listdir(model_dir)):
                 if f.endswith(".onnx"):
                     self.models.append(_PadModel(os.path.join(model_dir, f)))
 
     @property
     def ready(self) -> bool:
-        return len(self.models) > 0
+        return self.custom_model is not None or len(self.models) > 0
 
     def predict(self, img_bgr: np.ndarray):
         """Returns (label, confidence, bbox) or (None, None, None) if no face found."""
@@ -114,6 +152,23 @@ class AntiSpoofPredictor:
         bbox = self.detector.get_bbox(img_bgr)
         if bbox is None:
             return None, None, None
+
+        if self.custom_model is not None:
+            crop = self.cropper.crop(
+                org_img=img_bgr, bbox=bbox, scale=CUSTOM_CROP_SCALE,
+                out_w=CUSTOM_INPUT_SIZE, out_h=CUSTOM_INPUT_SIZE, crop=True,
+            )
+            debug_dir = os.environ.get("MFA_DEBUG_PAD_DIR")
+            if debug_dir:
+                os.makedirs(debug_dir, exist_ok=True)
+                ts = str(int(__import__("time").time() * 1000))
+                cv2.imwrite(os.path.join(debug_dir, f"{ts}_full.jpg"), img_bgr)
+                cv2.imwrite(os.path.join(debug_dir, f"{ts}_crop.jpg"), crop)
+                print(f"[pad debug] saved {ts}_full.jpg / {ts}_crop.jpg, bbox={bbox}, "
+                      f"full_img_shape={img_bgr.shape}")
+            prob_live = self.custom_model.predict_probability(crop)
+            label = 1 if prob_live > 0.5 else 0
+            return label, prob_live, bbox
 
         prediction = np.zeros((1, 3), dtype=np.float32)
         for model in self.models:

@@ -51,8 +51,13 @@ VERIFICATION_SESSION_TTL_SECONDS = int(os.environ.get("MFA_VERIFICATION_TTL_SECO
 # enrollment/impostor data is available.
 FACE_MATCH_THRESHOLD = float(os.environ.get("MFA_FACE_MATCH_THRESHOLD", "0.45"))
 
-# Anti-spoofing "real face" confidence threshold (matches prior behavior).
-LIVENESS_THRESHOLD = float(os.environ.get("MFA_LIVENESS_THRESHOLD", "0.8"))
+# Anti-spoofing "real face" confidence threshold. Calibrated against the
+# ml/-trained custom PAD model's score distribution on its LCC-FASD test
+# split (see ml/eval.py output): 0.5 gives APCER=8.7% / BPCER=12.7% there.
+# The prior 0.8 was calibrated for the vendored MiniFASNet ensemble this
+# model replaces and doesn't carry over - re-run ml/eval.py and adjust
+# this if real-world acceptance/rejection rates diverge from those numbers.
+LIVENESS_THRESHOLD = float(os.environ.get("MFA_LIVENESS_THRESHOLD", "0.5"))
 
 CORS_ALLOW_ORIGINS = [
     o.strip()
