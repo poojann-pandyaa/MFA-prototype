@@ -59,6 +59,12 @@ FACE_MATCH_THRESHOLD = float(os.environ.get("MFA_FACE_MATCH_THRESHOLD", "0.45"))
 # this if real-world acceptance/rejection rates diverge from those numbers.
 LIVENESS_THRESHOLD = float(os.environ.get("MFA_LIVENESS_THRESHOLD", "0.5"))
 
+# Step-2 challenge-response actions. Randomized per verification session
+# so a pre-recorded video of the legitimate user can't anticipate which
+# one will be asked for - see liveness_challenge.py for how each is
+# verified from the landmark sequence.
+CHALLENGE_TYPES = ["blink", "turn_left", "turn_right"]
+
 CORS_ALLOW_ORIGINS = [
     o.strip()
     for o in os.environ.get(

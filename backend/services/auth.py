@@ -1,6 +1,7 @@
 import bcrypt
 import jwt
 import datetime
+import random
 import uuid
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -61,13 +62,16 @@ def calculate_risk_score(db: Session, user: User, device_identifier: str) -> str
     return "LOW"
 
 
-def create_verification_session(db: Session, user: User, device_identifier: str) -> str:
+def create_verification_session(db: Session, user: User, device_identifier: str) -> tuple[str, str]:
     """
     Called after a successful step-1 (password) check when step 2 is
-    required. Returns a single-use session_id that step 2 must present -
-    this is what stops /login/step2 from being callable on its own.
+    required. Returns (session_id, challenge_type): a single-use
+    session_id that step 2 must present (stops /login/step2 from being
+    callable on its own), and the randomly-assigned action the user must
+    perform during step 2's capture burst.
     """
     session_id = uuid.uuid4().hex
+    challenge_type = random.choice(config.CHALLENGE_TYPES)
     expires_at = datetime.datetime.utcnow() + datetime.timedelta(
         seconds=config.VERIFICATION_SESSION_TTL_SECONDS
     )
@@ -77,9 +81,10 @@ def create_verification_session(db: Session, user: User, device_identifier: str)
         device_identifier=device_identifier,
         expires_at=expires_at,
         consumed=False,
+        challenge_type=challenge_type,
     ))
     db.commit()
-    return session_id
+    return session_id, challenge_type
 
 
 def consume_verification_session(db: Session, session_id: str, user: User, device_identifier: str) -> VerificationSession:

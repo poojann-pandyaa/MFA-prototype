@@ -36,6 +36,11 @@ class VerificationSession(Base):
     session_id = Column(String, unique=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
     device_identifier = Column(String)
+    # Randomly assigned at creation (see services/auth.py); step 2 must
+    # verify the user actually performed this specific action, which is
+    # what makes a pre-recorded video of the real user fail (see design
+    # spec at docs/superpowers/specs/2026-10-01-active-liveness-challenge-design.md).
+    challenge_type = Column(String)
     expires_at = Column(DateTime)
     consumed = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)

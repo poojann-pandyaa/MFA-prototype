@@ -94,8 +94,13 @@ def login_step1(login_in: schemas.UserLoginStep1, db: Session = Depends(get_db))
             success=False # not yet successful
         ))
         db.commit()
-        session_id = auth.create_verification_session(db, user, login_in.device_identifier)
-        return {"require_step2": True, "risk_score": risk_score, "session_id": session_id}
+        session_id, challenge_type = auth.create_verification_session(db, user, login_in.device_identifier)
+        return {
+            "require_step2": True,
+            "risk_score": risk_score,
+            "session_id": session_id,
+            "challenge_type": challenge_type,
+        }
 
 @app.post("/login/step2")
 def login_step2(login_in: schemas.UserLoginStep2, db: Session = Depends(get_db)):
