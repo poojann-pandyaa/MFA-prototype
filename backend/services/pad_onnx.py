@@ -15,7 +15,6 @@ MiniFASNet checkpoints the project already vendored, exported to ONNX by
 backend/anti_spoofing/export_onnx.py (see that file for how to regenerate
 them, or ml/export.py once a custom-trained model replaces them).
 """
-import math
 import os
 import sys
 
@@ -50,40 +49,6 @@ if ANTI_SPOOFING_DIR not in sys.path:
 # pulling them in doesn't drag PyTorch into the serving process.
 from src.generate_patches import CropImage
 from src.utility import parse_model_name
-
-
-class _FaceDetector:
-    """RetinaFace (Caffe) bounding-box detector - unchanged from upstream."""
-
-    def __init__(self):
-        caffemodel = os.path.join(ANTI_SPOOFING_DIR, "resources", "detection_model", "Widerface-RetinaFace.caffemodel")
-        deploy = os.path.join(ANTI_SPOOFING_DIR, "resources", "detection_model", "deploy.prototxt")
-        self.net = cv2.dnn.readNetFromCaffe(deploy, caffemodel)
-
-    def get_bbox(self, img):
-        height, width = img.shape[0], img.shape[1]
-        aspect_ratio = width / height
-        if width * height >= 192 * 192:
-            img = cv2.resize(
-                img,
-                (int(192 * math.sqrt(aspect_ratio)), int(192 / math.sqrt(aspect_ratio))),
-                interpolation=cv2.INTER_LINEAR,
-            )
-        blob = cv2.dnn.blobFromImage(img, 1, mean=(104, 117, 123))
-        self.net.setInput(blob, "data")
-        out = self.net.forward("detection_out").squeeze()
-        if out.ndim != 2 or out.shape[0] == 0:
-            return None
-        max_conf_index = int(np.argmax(out[:, 2]))
-        if out[max_conf_index, 2] < 0.6:
-            return None
-        left, top, right, bottom = (
-            out[max_conf_index, 3] * width,
-            out[max_conf_index, 4] * height,
-            out[max_conf_index, 5] * width,
-            out[max_conf_index, 6] * height,
-        )
-        return [int(left), int(top), int(right - left + 1), int(bottom - top + 1)]
 
 
 def _softmax(x: np.ndarray) -> np.ndarray:
@@ -127,7 +92,6 @@ class _CustomPadModel:
 
 class AntiSpoofPredictor:
     def __init__(self, model_dir: str = MODEL_DIR):
-        self.detector = _FaceDetector()
         self.cropper = CropImage()
         self.models = []
         self.custom_model = None
@@ -144,31 +108,22 @@ class AntiSpoofPredictor:
     def ready(self) -> bool:
         return self.custom_model is not None or len(self.models) > 0
 
-    def predict(self, img_bgr: np.ndarray):
-        """Returns (label, confidence, bbox) or (None, None, None) if no face found."""
+    def predict_with_bbox(self, img_bgr: np.ndarray, bbox):
+        """bbox is (left, top, width, height) from services.face_detect -
+        detection is no longer done here (see "Unified detection" in the
+        design spec). Returns (label, confidence) or (None, None) if the
+        model isn't ready."""
         if not self.ready:
-            return None, None, None
-
-        bbox = self.detector.get_bbox(img_bgr)
-        if bbox is None:
-            return None, None, None
+            return None, None
 
         if self.custom_model is not None:
             crop = self.cropper.crop(
                 org_img=img_bgr, bbox=bbox, scale=CUSTOM_CROP_SCALE,
                 out_w=CUSTOM_INPUT_SIZE, out_h=CUSTOM_INPUT_SIZE, crop=True,
             )
-            debug_dir = os.environ.get("MFA_DEBUG_PAD_DIR")
-            if debug_dir:
-                os.makedirs(debug_dir, exist_ok=True)
-                ts = str(int(__import__("time").time() * 1000))
-                cv2.imwrite(os.path.join(debug_dir, f"{ts}_full.jpg"), img_bgr)
-                cv2.imwrite(os.path.join(debug_dir, f"{ts}_crop.jpg"), crop)
-                print(f"[pad debug] saved {ts}_full.jpg / {ts}_crop.jpg, bbox={bbox}, "
-                      f"full_img_shape={img_bgr.shape}")
             prob_live = self.custom_model.predict_probability(crop)
             label = 1 if prob_live > 0.5 else 0
-            return label, prob_live, bbox
+            return label, prob_live
 
         prediction = np.zeros((1, 3), dtype=np.float32)
         for model in self.models:
@@ -184,7 +139,7 @@ class AntiSpoofPredictor:
 
         label = int(np.argmax(prediction))
         confidence = float(prediction[0][label] / len(self.models))
-        return label, confidence, bbox
+        return label, confidence
 
 
 # Loaded once at process start, reused across all requests.
@@ -198,15 +153,23 @@ except Exception as e:
     _predictor = None
 
 
-def check_liveness(img_bgr: np.ndarray, threshold: float) -> bool:
-    """1 == real/live face label in the underlying MiniFASNet 3-class scheme."""
+def check_liveness_sequence(frames_bgr, bboxes, threshold: float, min_live_fraction: float) -> bool:
+    """1 == real/live face label in the underlying PAD scheme, aggregated
+    across a burst: requires at least min_live_fraction of frames to be
+    classified live, rather than trusting any single frame (see "PAD
+    check across the whole burst" in the design spec)."""
+    if not frames_bgr:
+        return False
     if _predictor is None or not _predictor.ready:
         print("Anti-spoofing model not initialized properly.")
         return False
 
-    label, confidence, _ = _predictor.predict(img_bgr)
-    if label is None:
-        return False
+    live_count = 0
+    for frame, bbox in zip(frames_bgr, bboxes):
+        label, confidence = _predictor.predict_with_bbox(frame, bbox)
+        if label == 1 and confidence is not None and confidence > threshold:
+            live_count += 1
 
-    print(f"Liveness label: {label}, confidence: {confidence:.3f}")
-    return label == 1 and confidence > threshold
+    live_fraction = live_count / len(frames_bgr)
+    print(f"Liveness: {live_count}/{len(frames_bgr)} frames live ({live_fraction:.2f})")
+    return live_fraction >= min_live_fraction
