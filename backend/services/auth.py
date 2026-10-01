@@ -1,7 +1,7 @@
 import bcrypt
 import jwt
 import datetime
-import random
+import secrets
 import uuid
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -71,7 +71,9 @@ def create_verification_session(db: Session, user: User, device_identifier: str)
     perform during step 2's capture burst.
     """
     session_id = uuid.uuid4().hex
-    challenge_type = random.choice(config.CHALLENGE_TYPES)
+    # secrets, not random: the challenge must not be predictable from
+    # earlier outputs of a seeded/non-cryptographic PRNG.
+    challenge_type = secrets.choice(config.CHALLENGE_TYPES)
     expires_at = datetime.datetime.utcnow() + datetime.timedelta(
         seconds=config.VERIFICATION_SESSION_TTL_SECONDS
     )

@@ -7,13 +7,22 @@ if verify_gesture looks miscalibrated against real captures, re-check
 these against your installed mediapipe version's canonical face model
 before assuming the thresholds are wrong.
 
-Sign convention: turn_left/turn_right compare the FIRST and LAST frame's
-nose position (not min/max), so a brief twitch doesn't count - only a
-sustained displacement across the whole burst does. Whether a rightward
-pixel shift means the subject's "left" or "right" depends on whether the
-frames you're capturing are mirrored before this code sees them; confirm
-the mapping against your own camera in Task 11's manual check and flip
-the sign here if it's backwards for your setup.
+Head turn is measured RELATIVE TO THE FACE, never in absolute image
+coordinates: per frame, the nose tip's offset from the midpoint of the two
+inner eye corners, projected onto the eye axis and divided by the inner-eye
+distance. That quantity is invariant to translation (sliding in frame),
+uniform scale (leaning in/out) and in-plane rotation (head tilt), so only a
+real yaw - the nose moving sideways relative to the eyes - changes it.
+
+turn_left/turn_right compare the median of the FIRST few frames with the
+median of the LAST few (not min/max, not single frames), so neither a brief
+twitch nor one glitched landmark at either end counts - only a sustained
+change across the burst does.
+
+Sign convention: frames arrive unmirrored (react-webcam mirrored=false), so
+a subject turning to their own left moves the nose toward image-right
+(positive offset change) -> turn_left. If you ever mirror frames before
+they reach this code, flip the sign here.
 """
 import numpy as np
 import config
@@ -26,6 +35,9 @@ _NOSE_TIP = 1
 _INTER_EYE = (133, 362)
 
 _MIN_FRAMES = 3
+# How many frames at each end of the burst are median-pooled for the turn
+# comparison (capped at half the sequence so the windows never overlap).
+_TURN_WINDOW = 3
 
 
 def _ear(landmarks: np.ndarray, horizontal, vertical_pairs) -> float:
@@ -45,28 +57,49 @@ def _mean_ear(landmarks: np.ndarray) -> float:
 
 
 def _verify_blink(sequence) -> bool:
+    """A blink is open -> closed -> open: some closed frame (EAR below the
+    threshold) must have an open frame (EAR at/above it) somewhere BEFORE it
+    and somewhere AFTER it. Eyes that close and stay closed, or that start
+    closed and open, are not a blink."""
+    threshold = config.BLINK_EAR_THRESHOLD
     ears = [_mean_ear(lm) for lm in sequence]
-    baseline = max(ears)
-    dip = min(ears)
-    return bool(dip < config.BLINK_EAR_THRESHOLD and baseline >= config.BLINK_EAR_THRESHOLD)
+    is_open = [e >= threshold for e in ears]
+    for i, ear in enumerate(ears):
+        if ear < threshold and any(is_open[:i]) and any(is_open[i + 1:]):
+            return True
+    return False
+
+
+def _face_relative_nose_offset(lm: np.ndarray):
+    """Nose tip's offset from the inner-eye midpoint, measured along the
+    eye axis (image-left eye -> image-right eye), in units of inner-eye
+    distance. None if the eye landmarks are degenerate."""
+    eye_a = lm[_INTER_EYE[0]].astype(np.float64)
+    eye_b = lm[_INTER_EYE[1]].astype(np.float64)
+    axis = eye_b - eye_a
+    inter_eye = float(np.linalg.norm(axis))
+    if not np.isfinite(inter_eye) or inter_eye == 0:
+        return None
+    midpoint = (eye_a + eye_b) / 2
+    nose = lm[_NOSE_TIP].astype(np.float64)
+    # float() keeps this a native Python float, so the threshold comparison
+    # below yields a real bool rather than numpy.bool_ (verify_gesture's
+    # "bool-out" contract, and `is True`/`is False` checks, rely on it).
+    return float(np.dot(nose - midpoint, axis) / (inter_eye * inter_eye))
 
 
 def _verify_turn(sequence, direction: str) -> bool:
-    normalized_x = []
+    offsets = []
     for lm in sequence:
-        inter_eye = np.linalg.norm(lm[_INTER_EYE[0]] - lm[_INTER_EYE[1]])
-        if inter_eye == 0:
+        offset = _face_relative_nose_offset(lm)
+        if offset is None:
             return False
-        # float() here (not just relying on Python's float division) matters:
-        # lm[_NOSE_TIP][0] and inter_eye are numpy scalars, so leaving them
-        # as-is propagates numpy.float32/float64 through displacement below,
-        # which then makes the threshold comparison return numpy.bool_
-        # instead of a native bool - breaking `is True`/`is False` checks
-        # (and anything else that expects this "bool-out" function to
-        # actually return bool).
-        normalized_x.append(float(lm[_NOSE_TIP][0]) / float(inter_eye))
+        offsets.append(offset)
 
-    displacement = normalized_x[-1] - normalized_x[0]
+    window = max(1, min(_TURN_WINDOW, len(offsets) // 2))
+    start = float(np.median(offsets[:window]))
+    end = float(np.median(offsets[-window:]))
+    displacement = end - start
     if direction == "turn_left":
         return bool(displacement > config.HEAD_TURN_DISPLACEMENT_THRESHOLD)
     return bool(displacement < -config.HEAD_TURN_DISPLACEMENT_THRESHOLD)

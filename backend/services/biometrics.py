@@ -54,9 +54,9 @@ def extract_embedding(face_image_b64: str) -> str:
 def verify_liveness_and_identity(images_b64: list, challenge_type: str, stored_embedding: str) -> bool:
     """Runs the full step-2 perception pipeline across a capture burst:
     per-frame detection, sequence-level PAD, gesture verification against
-    challenge_type, and face-match on the best remaining frame. Returns
-    True only if all three pass; raises RetakeNeededError if too few
-    frames had a single detectable face."""
+    challenge_type, and face-match on every PAD-live frame. Returns
+    True only if all three pass (with every live frame matching); raises
+    RetakeNeededError if too few frames had a single detectable face."""
     frames = [b64_to_cv2(b64) for b64 in images_b64]
     frames = [f for f in frames if f is not None]
     detections = [face_detect.detect(f) for f in frames]
@@ -77,22 +77,31 @@ def verify_liveness_and_identity(images_b64: list, challenge_type: str, stored_e
     valid_detections = [d for _, d in valid]
     bboxes = [d.bbox for d in valid_detections]
 
-    if not pad_onnx.check_liveness_sequence(
-        valid_frames, bboxes, config.LIVENESS_THRESHOLD, config.LIVENESS_MIN_LIVE_FRAME_FRACTION
-    ):
+    live_mask = pad_onnx.live_frame_mask(valid_frames, bboxes, config.LIVENESS_THRESHOLD)
+    if not pad_onnx.mask_passes(live_mask, config.LIVENESS_MIN_LIVE_FRAME_FRACTION):
         return False
 
     landmark_sequence = [d.landmarks_px for d in valid_detections]
     if not liveness_challenge.verify_gesture(landmark_sequence, challenge_type):
         return False
 
-    best_idx = max(
-        range(len(valid_detections)),
+    # Identity is checked on EVERY PAD-live frame, and every one must match
+    # the stored embedding. Matching only one frame (e.g. the largest) lets
+    # an attacker perform the gesture live with their own face and splice in
+    # a frame or two of the victim's photo: the PAD live-fraction tolerance
+    # absorbs those frames, and they'd become the face-match frame. Frames
+    # PAD called non-live are never used for matching. Cost is one ArcFace
+    # ONNX call per live frame (~50ms on CPU; bursts are capped at
+    # LIVENESS_MAX_FRAMES). Largest-bbox frame first, so the most reliable
+    # crop is checked first and a mismatch exits early.
+    live_indices = [i for i, is_live in enumerate(live_mask) if is_live]
+    live_indices.sort(
         key=lambda i: valid_detections[i].bbox[2] * valid_detections[i].bbox[3],
+        reverse=True,
     )
-    best_frame = valid_frames[best_idx]
-    best_detection = valid_detections[best_idx]
-
-    aligned = face_match_onnx.align(best_frame, best_detection.landmarks_px)
-    embedding = face_match_onnx.embed(aligned)
-    return face_match_onnx.verify(embedding, stored_embedding)
+    for i in live_indices:
+        aligned = face_match_onnx.align(valid_frames[i], valid_detections[i].landmarks_px)
+        embedding = face_match_onnx.embed(aligned)
+        if not face_match_onnx.verify(embedding, stored_embedding):
+            return False
+    return bool(live_indices)

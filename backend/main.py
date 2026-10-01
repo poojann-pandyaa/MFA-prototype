@@ -1,4 +1,5 @@
 import binascii
+import logging
 
 from fastapi import FastAPI, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -11,6 +12,10 @@ from services import auth
 from services import biometrics
 
 Base.metadata.create_all(bind=engine)
+
+logger = logging.getLogger(__name__)
+
+_GENERIC_VERIFICATION_FAILURE = "Verification failed. Please try again."
 
 app = FastAPI()
 
@@ -133,9 +138,17 @@ def login_step2(login_in: schemas.UserLoginStep2, db: Session = Depends(get_db))
     except binascii.Error:
         # Malformed base64 in one of the frames: a client error, not a 500.
         raise HTTPException(status_code=400, detail="Invalid image data. Please retake.")
+    except Exception:
+        # Anything unexpected (e.g. arcface.onnx missing -> RuntimeError from
+        # embed(), which only runs AFTER PAD and the gesture passed) must be
+        # indistinguishable from an ordinary failed attempt: a 500 here would
+        # tell the client how far its burst got. Log it server-side instead.
+        # The session was already consumed above, so this can't be retried.
+        logger.exception("Unexpected error during step-2 verification")
+        raise HTTPException(status_code=401, detail=_GENERIC_VERIFICATION_FAILURE)
 
     if not verified:
-        raise HTTPException(status_code=401, detail="Verification failed. Please try again.")
+        raise HTTPException(status_code=401, detail=_GENERIC_VERIFICATION_FAILURE)
 
     # If passes:
     # Update login history to success

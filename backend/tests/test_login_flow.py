@@ -1,6 +1,7 @@
 # backend/tests/test_login_flow.py
 import config
 import models
+import schemas
 from services import auth, biometrics
 
 
@@ -126,3 +127,69 @@ def test_step2_malformed_base64_returns_4xx_not_500(client, db_session, monkeypa
     })
     assert response.status_code == 400
     assert "invalid image" in response.json()["detail"].lower()
+
+
+_GENERIC_FAILURE = "Verification failed. Please try again."
+_SESSION_GONE = "Invalid, expired, or already-used verification session"
+
+
+def test_step2_unexpected_exception_is_generic_401_and_consumes_session(client, db_session, monkeypatch, caplog):
+    # e.g. arcface.onnx missing -> RuntimeError from embed() AFTER PAD and
+    # the gesture already passed. A 500 there would tell the client those
+    # checks passed; it must look exactly like any other failed attempt.
+    monkeypatch.setattr(biometrics, "extract_embedding", lambda b64: "[]")
+    _enroll_user(client)
+    session_id, _ = _force_high_risk_session(client, db_session, "alice", "device-boom")
+
+    def _boom(*a, **k):
+        raise RuntimeError("ArcFace ONNX model missing")
+
+    monkeypatch.setattr(biometrics, "verify_liveness_and_identity", _boom)
+    payload = {"username": "alice", "images": ["x"], "device_identifier": "device-boom", "session_id": session_id}
+    response = client.post("/login/step2", json=payload)
+    assert response.status_code == 401
+    assert response.json()["detail"] == _GENERIC_FAILURE
+    # ...but the real cause is logged server-side, with its traceback.
+    assert "Unexpected error during step-2 verification" in caplog.text
+    assert "ArcFace ONNX model missing" in caplog.text
+
+    monkeypatch.setattr(biometrics, "verify_liveness_and_identity", lambda *a, **k: True)
+    replay = client.post("/login/step2", json=payload)
+    assert replay.status_code == 401
+    assert replay.json()["detail"].startswith(_SESSION_GONE)
+
+
+def test_step2_plain_failure_consumes_session(client, db_session, monkeypatch):
+    monkeypatch.setattr(biometrics, "extract_embedding", lambda b64: "[]")
+    _enroll_user(client)
+    session_id, _ = _force_high_risk_session(client, db_session, "alice", "device-fail")
+
+    monkeypatch.setattr(biometrics, "verify_liveness_and_identity", lambda *a, **k: False)
+    payload = {"username": "alice", "images": ["x"], "device_identifier": "device-fail", "session_id": session_id}
+    first = client.post("/login/step2", json=payload)
+    assert first.status_code == 401
+    assert first.json()["detail"] == _GENERIC_FAILURE
+
+    # Even a would-be success on retry can't reuse the burned session.
+    monkeypatch.setattr(biometrics, "verify_liveness_and_identity", lambda *a, **k: True)
+    replay = client.post("/login/step2", json=payload)
+    assert replay.status_code == 401
+    assert replay.json()["detail"].startswith(_SESSION_GONE)
+
+
+def test_step2_oversized_single_image_rejected_4xx(client, db_session, monkeypatch):
+    monkeypatch.setattr(biometrics, "extract_embedding", lambda b64: "[]")
+    _enroll_user(client)
+    session_id, _ = _force_high_risk_session(client, db_session, "alice", "device-hugeimg")
+
+    def _must_not_run(*a, **k):
+        raise AssertionError("verify_liveness_and_identity must not run for an oversized image")
+
+    monkeypatch.setattr(biometrics, "verify_liveness_and_identity", _must_not_run)
+    response = client.post("/login/step2", json={
+        "username": "alice",
+        "images": ["A" * (schemas.MAX_IMAGE_B64_CHARS + 1)],
+        "device_identifier": "device-hugeimg",
+        "session_id": session_id,
+    })
+    assert 400 <= response.status_code < 500

@@ -153,23 +153,41 @@ except Exception as e:
     _predictor = None
 
 
+def live_frame_mask(frames_bgr, bboxes, threshold: float):
+    """Per-frame PAD verdicts for a burst: mask[i] is True iff frame i is
+    classified live (label 1, the real-face label in the underlying PAD
+    scheme) with confidence above threshold. Returns None if the PAD model
+    isn't loaded (callers must fail closed), [] for an empty burst."""
+    if _predictor is None or not _predictor.ready:
+        print("Anti-spoofing model not initialized properly.")
+        return None
+    if len(frames_bgr) != len(bboxes):
+        raise ValueError("frames_bgr and bboxes must be the same length")
+
+    mask = []
+    for frame, bbox in zip(frames_bgr, bboxes):
+        label, confidence = _predictor.predict_with_bbox(frame, bbox)
+        mask.append(bool(label == 1 and confidence is not None and confidence > threshold))
+    return mask
+
+
+def mask_passes(mask, min_live_fraction: float) -> bool:
+    """Sequence-level PAD decision from live_frame_mask's output: at least
+    min_live_fraction of the burst's frames must be live (see "PAD check
+    across the whole burst" in the design spec). None/empty -> False."""
+    if not mask:
+        return False
+    live_fraction = sum(mask) / len(mask)
+    print(f"Liveness: {sum(mask)}/{len(mask)} frames live ({live_fraction:.2f})")
+    return live_fraction >= min_live_fraction
+
+
 def check_liveness_sequence(frames_bgr, bboxes, threshold: float, min_live_fraction: float) -> bool:
     """1 == real/live face label in the underlying PAD scheme, aggregated
     across a burst: requires at least min_live_fraction of frames to be
-    classified live, rather than trusting any single frame (see "PAD
-    check across the whole burst" in the design spec)."""
+    classified live, rather than trusting any single frame. Callers that
+    also need to know WHICH frames were live (e.g. to restrict face-match
+    to them) use live_frame_mask + mask_passes directly."""
     if not frames_bgr:
         return False
-    if _predictor is None or not _predictor.ready:
-        print("Anti-spoofing model not initialized properly.")
-        return False
-
-    live_count = 0
-    for frame, bbox in zip(frames_bgr, bboxes):
-        label, confidence = _predictor.predict_with_bbox(frame, bbox)
-        if label == 1 and confidence is not None and confidence > threshold:
-            live_count += 1
-
-    live_fraction = live_count / len(frames_bgr)
-    print(f"Liveness: {live_count}/{len(frames_bgr)} frames live ({live_fraction:.2f})")
-    return live_fraction >= min_live_fraction
+    return mask_passes(live_frame_mask(frames_bgr, bboxes, threshold), min_live_fraction)
