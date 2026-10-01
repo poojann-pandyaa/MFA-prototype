@@ -65,6 +65,12 @@ LIVENESS_THRESHOLD = float(os.environ.get("MFA_LIVENESS_THRESHOLD", "0.5"))
 # verified from the landmark sequence.
 CHALLENGE_TYPES = ["blink", "turn_left", "turn_right"]
 
+# Testing switch: when on, every login needs the step-2 face check, even from
+# a known device at a normal hour (the risk score is still computed and shown,
+# it just no longer lets LOW skip step 2). Off by default - normal adaptive
+# behavior. Enable with MFA_ALWAYS_REQUIRE_FACE_CHECK=1.
+ALWAYS_REQUIRE_FACE_CHECK = os.environ.get("MFA_ALWAYS_REQUIRE_FACE_CHECK", "0").lower() in ("1", "true", "yes")
+
 # Gesture-verification thresholds (services/liveness_challenge.py). These
 # are starting defaults, not measured values - calibrate against your own
 # captured burst data (see tests/fixtures/README.md) the same way

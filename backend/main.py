@@ -83,7 +83,7 @@ def login_step1(login_in: schemas.UserLoginStep1, db: Session = Depends(get_db))
     # Calculate risk score
     risk_score = auth.calculate_risk_score(db, user, login_in.device_identifier)
     
-    if risk_score == "LOW":
+    if risk_score == "LOW" and not config.ALWAYS_REQUIRE_FACE_CHECK:
         # Record success, register device if not exist
         device = db.query(models.Device).filter(models.Device.user_id == user.id, models.Device.device_identifier == login_in.device_identifier).first()
         if not device:

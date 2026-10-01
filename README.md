@@ -153,6 +153,7 @@ Thresholds and limits are overridable via environment variables (see `backend/co
 | `MFA_BLINK_EAR_THRESHOLD` | 0.2 | Eye-aspect-ratio threshold for the blink challenge |
 | `MFA_HEAD_TURN_DISPLACEMENT_THRESHOLD` | 0.15 | Head-turn threshold: change in the nose tip's offset from the eye midpoint, in units of inner-eye distance |
 | `MFA_CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Comma-separated allowed origins |
+| `MFA_ALWAYS_REQUIRE_FACE_CHECK` | 0 | Testing switch: `1` makes every login require the step-2 face check, even from a known device (risk score is still computed and shown) |
 
 The gesture and burst thresholds are uncalibrated starting defaults; tune them on your own captured data.
 
