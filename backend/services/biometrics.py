@@ -1,15 +1,20 @@
+# backend/services/biometrics.py
 import base64
 import json
-import numpy as np
+
 import cv2
+import numpy as np
 
 import config
-from services import pad_onnx
+from services import face_detect, pad_onnx, liveness_challenge, face_match_onnx
 
-# DeepFace pulls in TensorFlow, which is slow to import and heavy in RAM.
-# It's only needed for enrollment/face-matching, not for the liveness
-# check, so it's imported lazily inside the functions that actually need
-# it rather than at module load time.
+
+class RetakeNeededError(Exception):
+    """Too few frames had a single, clearly-detectable face. Safe to
+    surface to the client as-is - it carries no information about the
+    PAD/gesture/face-match checks, unlike every other failure in
+    verify_liveness_and_identity (see design spec's "Error handling")."""
+
 
 def b64_to_cv2(b64_str: str):
     """Converts a base64 image string (with or without data:image... prefix) to a CV2 BGR image."""
@@ -18,7 +23,7 @@ def b64_to_cv2(b64_str: str):
     img_data = base64.b64decode(b64_str)
     nparr = np.frombuffer(img_data, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-    
+
     if img is not None:
         h, w = img.shape[:2]
         max_dim = max(h, w)
@@ -27,57 +32,67 @@ def b64_to_cv2(b64_str: str):
             new_w = int(w * scale)
             new_h = int(h * scale)
             img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
-            
+
     return img
 
+
 def extract_embedding(face_image_b64: str) -> str:
-    """Extracts DeepFace embedding (ArcFace) from the base64 image."""
-    from deepface import DeepFace
-    img = b64_to_cv2(face_image_b64)
-    try:
-        embedding_objs = DeepFace.represent(img_path=img, model_name="ArcFace", enforce_detection=True)
-        if len(embedding_objs) > 0:
-            embedding = embedding_objs[0]["embedding"]
-            return json.dumps(embedding)
-    except Exception as e:
-        print(f"Face extraction failed: {e}")
-    return ""
-
-def verify_face(face_image_b64: str, stored_embedding_str: str) -> bool:
-    """Verifies a live face image against the stored embedding."""
-    from deepface import DeepFace
-    if not stored_embedding_str:
-        return False
-
-    img = b64_to_cv2(face_image_b64)
-    stored_embedding = json.loads(stored_embedding_str)
-
-    try:
-        new_embedding_objs = DeepFace.represent(img_path=img, model_name="ArcFace", enforce_detection=True)
-        if len(new_embedding_objs) == 0:
-            return False
-
-        new_embedding = new_embedding_objs[0]["embedding"]
-
-        # Calculate cosine distance
-        a = np.array(stored_embedding)
-        b = np.array(new_embedding)
-        cosine_distance = 1 - np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
-
-        # ArcFace's own calibrated cosine threshold is ~0.68; this value is
-        # config-driven (see backend/config.py) rather than hardcoded so it
-        # can be recalibrated against real data via ml/eval.py.
-        if cosine_distance < config.FACE_MATCH_THRESHOLD:
-            return True
-
-    except Exception as e:
-        print(f"Verification failed: {e}")
-
-    return False
-
-def check_liveness(face_image_b64: str) -> bool:
-    """Runs the anti-spoofing model (ONNX Runtime) to determine if the face is live."""
+    """Extracts an ArcFace embedding (ONNX Runtime) from a single base64
+    image - used by /enroll, which only ever gets one photo and has no
+    liveness requirement of its own."""
     img = b64_to_cv2(face_image_b64)
     if img is None:
+        return ""
+    detection = face_detect.detect(img)
+    if detection.bbox is None or detection.multi_face:
+        return ""
+    aligned = face_match_onnx.align(img, detection.landmarks_px)
+    embedding = face_match_onnx.embed(aligned)
+    return json.dumps(embedding.tolist())
+
+
+def verify_liveness_and_identity(images_b64: list, challenge_type: str, stored_embedding: str) -> bool:
+    """Runs the full step-2 perception pipeline across a capture burst:
+    per-frame detection, sequence-level PAD, gesture verification against
+    challenge_type, and face-match on the best remaining frame. Returns
+    True only if all three pass; raises RetakeNeededError if too few
+    frames had a single detectable face."""
+    frames = [b64_to_cv2(b64) for b64 in images_b64]
+    frames = [f for f in frames if f is not None]
+    detections = [face_detect.detect(f) for f in frames]
+
+    # A frame with more than one face is a possible attack signal (someone
+    # else in frame, or a photo held up in front of the attacker's own
+    # face) rather than a benign capture problem - it fails the same
+    # generic way PAD/gesture/face-match failures do, not the "please
+    # retake" path (see design spec's "Multiple faces in frame").
+    if any(d.multi_face for d in detections):
         return False
-    return pad_onnx.check_liveness(img, config.LIVENESS_THRESHOLD)
+
+    valid = [(f, d) for f, d in zip(frames, detections) if d.bbox is not None]
+    if len(valid) < config.LIVENESS_MIN_VALID_FRAMES:
+        raise RetakeNeededError("Could not clearly see a single face across enough frames. Please retake.")
+
+    valid_frames = [f for f, _ in valid]
+    valid_detections = [d for _, d in valid]
+    bboxes = [d.bbox for d in valid_detections]
+
+    if not pad_onnx.check_liveness_sequence(
+        valid_frames, bboxes, config.LIVENESS_THRESHOLD, config.LIVENESS_MIN_LIVE_FRAME_FRACTION
+    ):
+        return False
+
+    landmark_sequence = [d.landmarks_px for d in valid_detections]
+    if not liveness_challenge.verify_gesture(landmark_sequence, challenge_type):
+        return False
+
+    best_idx = max(
+        range(len(valid_detections)),
+        key=lambda i: valid_detections[i].bbox[2] * valid_detections[i].bbox[3],
+    )
+    best_frame = valid_frames[best_idx]
+    best_detection = valid_detections[best_idx]
+
+    aligned = face_match_onnx.align(best_frame, best_detection.landmarks_px)
+    embedding = face_match_onnx.embed(aligned)
+    return face_match_onnx.verify(embedding, stored_embedding)

@@ -72,6 +72,11 @@ CHALLENGE_TYPES = ["blink", "turn_left", "turn_right"]
 BLINK_EAR_THRESHOLD = float(os.environ.get("MFA_BLINK_EAR_THRESHOLD", "0.2"))
 HEAD_TURN_DISPLACEMENT_THRESHOLD = float(os.environ.get("MFA_HEAD_TURN_DISPLACEMENT_THRESHOLD", "0.15"))
 
+# Step-2 capture burst (frontend captures this many frames; see Task 11's
+# ChallengeCameraCapture.jsx). Starting defaults, not measured values.
+LIVENESS_MIN_VALID_FRAMES = int(os.environ.get("MFA_LIVENESS_MIN_VALID_FRAMES", "6"))
+LIVENESS_MIN_LIVE_FRAME_FRACTION = float(os.environ.get("MFA_LIVENESS_MIN_LIVE_FRAME_FRACTION", "0.8"))
+
 CORS_ALLOW_ORIGINS = [
     o.strip()
     for o in os.environ.get(

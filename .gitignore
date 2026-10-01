@@ -14,3 +14,6 @@ ml/checkpoints/
 ml/data/synthetic_images/
 ml/data/manifest_synthetic.csv
 *.pt
+
+# ArcFace ONNX is ~137MB (over GitHub's 100MB limit); regenerate via export script, see README
+backend/models/arcface/
