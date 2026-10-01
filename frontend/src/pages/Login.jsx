@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import CameraCapture from '../components/CameraCapture';
+import ChallengeCameraCapture from '../components/ChallengeCameraCapture';
 
 const API_URL = `http://${window.location.hostname}:8000`;
 
@@ -14,6 +14,7 @@ const Login = () => {
   const [loading, setLoading] = useState(false);
   const [riskInfo, setRiskInfo] = useState(null);
   const [sessionId, setSessionId] = useState(null);
+  const [challengeType, setChallengeType] = useState(null);
 
   // Generate or retrieve device ID
   const getDeviceId = () => {
@@ -36,12 +37,13 @@ const Login = () => {
         device_identifier: getDeviceId()
       });
       
-      const { require_step2, access_token, risk_score, session_id } = response.data;
+      const { require_step2, access_token, risk_score, session_id, challenge_type } = response.data;
       setRiskInfo(risk_score);
 
       if (require_step2) {
         // Proof step 1 (password) succeeded - required by /login/step2.
         setSessionId(session_id);
+        setChallengeType(challenge_type);
         setStep(2);
       } else {
         // Low risk, direct login
@@ -58,13 +60,13 @@ const Login = () => {
     }
   };
 
-  const handleStep2 = async (faceImageB64) => {
+  const handleStep2 = async (imagesB64) => {
     setLoading(true);
     setError('');
     try {
       const response = await axios.post(`${API_URL}/login/step2`, {
         username,
-        face_image_b64: faceImageB64,
+        images: imagesB64,
         device_identifier: getDeviceId(),
         session_id: sessionId
       });
@@ -77,7 +79,12 @@ const Login = () => {
         navigate('/dashboard');
       }
     } catch (err) {
+      // The server consumes the verification session on every step-2 attempt,
+      // so it cannot be retried: send the user back to step 1 for a fresh one.
       setError(err.response?.data?.detail || "Biometric verification failed");
+      setSessionId(null);
+      setChallengeType(null);
+      setStep(1);
     } finally {
       setLoading(false);
     }
@@ -136,9 +143,10 @@ const Login = () => {
             </div>
           </div>
           
-          <CameraCapture 
-            onCapture={handleStep2} 
-            label={loading ? "Verifying..." : "Verify Identity"} 
+          <ChallengeCameraCapture
+            challengeType={challengeType}
+            onCapture={handleStep2}
+            label={loading ? 'Verifying...' : 'Verify Identity'}
             error={error}
             onErrorClear={() => setError('')}
           />
