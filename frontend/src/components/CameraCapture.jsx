@@ -91,6 +91,9 @@ const CameraCapture = ({ onCapture, label = "Capture Face", error, onErrorClear 
                 facingMode: "user"
               }}
               className="absolute inset-0 w-full h-full object-cover"
+              // Mirror the preview only (selfie view). Not react-webcam's
+              // `mirrored` prop, which would also flip the captured photo.
+              style={{ transform: 'scaleX(-1)' }}
             />
             {/* Overlay for face guidance */}
             <div className={`absolute inset-0 pointer-events-none flex items-center justify-center border-4 border-dashed rounded-lg m-4 transition-colors duration-200 ${liveBorderColor}`}>

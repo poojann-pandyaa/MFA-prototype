@@ -11,6 +11,15 @@ const CHALLENGE_PROMPTS = {
   turn_right: 'Turn your head to your right',
 };
 
+// Shown before capture starts. The backend compares the first frames of the
+// burst with the last ones, so the user must START facing the camera and only
+// move once capture begins - turning early means no change is measured.
+const CHALLENGE_INSTRUCTIONS = {
+  blink: 'Look straight at the camera. Press the button, then blink once.',
+  turn_left: 'Look straight at the camera. Press the button, then slowly turn your head to your left and hold it until capture finishes.',
+  turn_right: 'Look straight at the camera. Press the button, then slowly turn your head to your right and hold it until capture finishes.',
+};
+
 const BURST_FRAME_COUNT = 13;
 const BURST_INTERVAL_MS = 150;
 const BURST_MAX_TICKS = BURST_FRAME_COUNT * 3;
@@ -112,6 +121,12 @@ const ChallengeCameraCapture = ({ challengeType, onCapture, label = 'Verify Iden
           screenshotFormat="image/jpeg"
           videoConstraints={{ width: 720, height: 540, facingMode: 'user' }}
           className="absolute inset-0 w-full h-full object-cover"
+          // Mirror the PREVIEW only, so turning to your own left also moves
+          // your face to the left of the screen - otherwise people steer by
+          // the screen and turn the wrong way. Not react-webcam's `mirrored`
+          // prop: that also flips the captured frames, and the backend's
+          // turn sign (services/liveness_challenge.py) assumes unmirrored ones.
+          style={{ transform: 'scaleX(-1)' }}
         />
         <div className={`absolute inset-0 pointer-events-none flex items-center justify-center border-4 border-dashed rounded-lg m-4 transition-colors duration-200 ${borderColor}`}>
           <span className="bg-black/50 text-white px-3 py-1 rounded text-sm mt-48 text-center">
@@ -122,11 +137,17 @@ const ChallengeCameraCapture = ({ challengeType, onCapture, label = 'Verify Iden
                 : capturing
                   ? `${CHALLENGE_PROMPTS[challengeType] || 'Hold still'} (${framesCaptured}/${BURST_FRAME_COUNT})`
                   : isFaceDetected
-                    ? `Ready - ${CHALLENGE_PROMPTS[challengeType] || 'press start'}`
+                    ? 'Ready - look straight at the camera'
                     : 'Position face here'}
           </span>
         </div>
       </div>
+
+      {!capturing && !done && CHALLENGE_INSTRUCTIONS[challengeType] && (
+        <p className="text-sm text-gray-700 text-center max-w-sm">
+          {CHALLENGE_INSTRUCTIONS[challengeType]}
+        </p>
+      )}
 
       {!capturing && !done && (
         <button
