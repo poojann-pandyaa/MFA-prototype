@@ -187,3 +187,41 @@ def test_blink_eyes_open_from_closed_without_prior_open_fails():
     closed_lm = _closed_eyes(open_lm)
     sequence = [closed_lm, closed_lm, open_lm, open_lm, open_lm]
     assert lc.verify_gesture(sequence, "blink") is False
+
+
+# --- A turn must build up over several frames ------------------------------
+#
+# A real head turn passes through the poses in between. The mirror-photo
+# attack (a photo, then the same photo flipped left-right) and the
+# two-photos attack (two real photos of the victim in different poses)
+# jump from one pose to the other in a single frame, with nothing in
+# between - measured on real LFW photos, those got through for ~40-50% of
+# people before this check.
+
+def _pose_jump(dx, n_before=6, n_after=7, in_between=()):
+    """n_before frames at the start pose, then optional in-between nose
+    shifts, then n_after frames at the end pose (nose shifted by dx)."""
+    return ([_yaw(0)(_base_landmarks(), 0) for _ in range(n_before)]
+            + [_yaw(s)(_base_landmarks(), 1) for s in in_between]
+            + [_yaw(dx)(_base_landmarks(), 1) for _ in range(n_after)])
+
+
+def test_instant_pose_jump_fails_both_turn_directions():
+    # Same size of turn as the genuine tests (30px over a 60px inner-eye
+    # spacing), but with no frames in between.
+    for dx in (30, -30, 60, -60):
+        assert _both_directions(_pose_jump(dx)) == (False, False), dx
+
+
+def test_pose_jump_with_only_one_in_between_frame_fails():
+    for dx in (30, -30):
+        assert _both_directions(_pose_jump(dx, in_between=(dx / 2,))) == (False, False), dx
+
+
+def test_fast_but_real_turn_over_four_frames_still_passes():
+    # Whole turn done in 4 frame steps (~0.6s at the frontend's 150ms
+    # interval), then held: 3 frames in between.
+    left = _pose_jump(30, n_before=3, n_after=7, in_between=(7.5, 15, 22.5))
+    right = _pose_jump(-30, n_before=3, n_after=7, in_between=(-7.5, -15, -22.5))
+    assert _both_directions(left) == (True, False)
+    assert _both_directions(right) == (False, True)

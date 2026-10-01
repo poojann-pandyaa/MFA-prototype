@@ -77,6 +77,12 @@ ALWAYS_REQUIRE_FACE_CHECK = os.environ.get("MFA_ALWAYS_REQUIRE_FACE_CHECK", "0")
 # LIVENESS_THRESHOLD above was calibrated against ml/eval.py's output.
 BLINK_EAR_THRESHOLD = float(os.environ.get("MFA_BLINK_EAR_THRESHOLD", "0.2"))
 HEAD_TURN_DISPLACEMENT_THRESHOLD = float(os.environ.get("MFA_HEAD_TURN_DISPLACEMENT_THRESHOLD", "0.15"))
+# A turn must pass through the poses in between: at least this many frames
+# must sit partway (15%-85%) between the start and end pose. Stops a photo
+# followed by its mirror image, or two photos in different poses, which jump
+# from one pose to the other with nothing in between. At the frontend's 150ms
+# interval, 2 means the turn must take at least ~0.45s (3 frame steps).
+HEAD_TURN_MIN_INTERMEDIATE_FRAMES = int(os.environ.get("MFA_HEAD_TURN_MIN_INTERMEDIATE_FRAMES", "2"))
 
 # Step-2 capture burst (frontend captures this many frames; see Task 11's
 # ChallengeCameraCapture.jsx). Starting defaults, not measured values.

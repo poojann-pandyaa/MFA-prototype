@@ -17,7 +17,10 @@ real yaw - the nose moving sideways relative to the eyes - changes it.
 turn_left/turn_right compare the median of the FIRST few frames with the
 median of the LAST few (not min/max, not single frames), so neither a brief
 twitch nor one glitched landmark at either end counts - only a sustained
-change across the burst does.
+change across the burst does. The change must also build up: at least
+HEAD_TURN_MIN_INTERMEDIATE_FRAMES frames must sit partway between the start
+and end pose, so a photo followed by its mirror image (or two photos in
+different poses), which jumps straight from one pose to the other, fails.
 
 Sign convention: frames arrive unmirrored (react-webcam mirrored=false), so
 a subject turning to their own left moves the nose toward image-right
@@ -93,10 +96,17 @@ def _face_relative_nose_offset(lm: np.ndarray):
     return float(np.dot(nose - midpoint, axis) / (inter_eye * inter_eye))
 
 
-def _turn_displacement(sequence):
-    """Median(last window) - median(first window) of the face-relative nose
-    offset; positive = toward image-right (turn_left). None if any frame's
-    eye landmarks are degenerate."""
+def _turn_stats(sequence):
+    """(displacement, in_between_frames), or None if any frame's eye
+    landmarks are degenerate.
+
+    displacement: median(last window) - median(first window) of the
+    face-relative nose offset; positive = toward image-right (turn_left).
+
+    in_between_frames: how many frames sit partway (15%-85%) from the start
+    pose to the end pose. A real turn passes through those poses; a photo
+    followed by its mirror image, or two photos in different poses, jumps
+    straight from one to the other and has none."""
     offsets = []
     for lm in sequence:
         offset = _face_relative_nose_offset(lm)
@@ -107,12 +117,24 @@ def _turn_displacement(sequence):
     window = max(1, min(_TURN_WINDOW, len(offsets) // 2))
     start = float(np.median(offsets[:window]))
     end = float(np.median(offsets[-window:]))
-    return end - start
+    displacement = end - start
+    if displacement == 0:
+        return displacement, 0
+    in_between = sum(1 for o in offsets if 0.15 < (o - start) / displacement < 0.85)
+    return displacement, in_between
+
+
+def _turn_displacement(sequence):
+    stats = _turn_stats(sequence)
+    return None if stats is None else stats[0]
 
 
 def _verify_turn(sequence, direction: str) -> bool:
-    displacement = _turn_displacement(sequence)
-    if displacement is None:
+    stats = _turn_stats(sequence)
+    if stats is None:
+        return False
+    displacement, in_between = stats
+    if in_between < config.HEAD_TURN_MIN_INTERMEDIATE_FRAMES:
         return False
     if direction == "turn_left":
         return bool(displacement > config.HEAD_TURN_DISPLACEMENT_THRESHOLD)
@@ -130,12 +152,14 @@ def describe_gesture(landmark_sequence, challenge_type: str) -> str:
         return (f"min_ear={min_ear:.3f} max_ear={max_ear:.3f} "
                 f"ear_threshold={config.BLINK_EAR_THRESHOLD:.3f} open_closed_open={found}")
     if challenge_type in ("turn_left", "turn_right"):
-        displacement = _turn_displacement(landmark_sequence)
+        stats = _turn_stats(landmark_sequence)
         threshold = config.HEAD_TURN_DISPLACEMENT_THRESHOLD
-        if displacement is None:
+        if stats is None:
             return "turn_delta=n/a (degenerate eye landmarks)"
+        displacement, in_between = stats
         return (f"turn_delta={displacement:+.3f} threshold={threshold:.3f} "
-                f"(turn_left needs > +{threshold:.3f}, turn_right needs < -{threshold:.3f})")
+                f"(turn_left needs > +{threshold:.3f}, turn_right needs < -{threshold:.3f}) "
+                f"in_between_frames={in_between} min={config.HEAD_TURN_MIN_INTERMEDIATE_FRAMES}")
     return "unknown challenge_type"
 
 
