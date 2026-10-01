@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import ChallengeCameraCapture from '../components/ChallengeCameraCapture';
@@ -16,11 +16,18 @@ const Login = () => {
   const [sessionId, setSessionId] = useState(null);
   const [challengeType, setChallengeType] = useState(null);
 
-  // Generate or retrieve device ID
+  // Generate or retrieve device ID. A generated id is NOT saved to
+  // localStorage until login succeeds, but it must stay the same for this
+  // component's lifetime: step 1 and step 2 must send the same id, since the
+  // server binds the step-2 session to user + device_identifier.
+  const pendingDeviceIdRef = useRef(null);
   const getDeviceId = () => {
     let deviceId = localStorage.getItem('device_id');
     if (!deviceId) {
-      deviceId = 'device_' + Math.random().toString(36).substr(2, 9);
+      if (!pendingDeviceIdRef.current) {
+        pendingDeviceIdRef.current = 'device_' + Math.random().toString(36).substr(2, 9);
+      }
+      deviceId = pendingDeviceIdRef.current;
       // We don't save it to localStorage yet, only if login succeeds
     }
     return deviceId;
