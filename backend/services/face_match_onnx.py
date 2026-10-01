@@ -35,7 +35,10 @@ import onnxruntime as ort
 import config
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-MODEL_PATH = os.path.join(CURRENT_DIR, "..", "models", "arcface.onnx")
+# Its own subdirectory, deliberately not models/ alongside the PAD weights:
+# pad_onnx.py's ensemble-fallback branch scans models/ for *every* .onnx file
+# and parses a crop scale out of each filename, which arcface.onnx would break.
+MODEL_PATH = os.path.join(CURRENT_DIR, "..", "models", "arcface", "arcface.onnx")
 ALIGNED_SIZE = 112
 
 # Standard ArcFace alignment reference points (112x112 canonical template,
@@ -62,10 +65,17 @@ REFERENCE_POINTS = np.array([
 # was built from RetinaFace's 5-point output, whose eye points are pupils.
 # Checked against RetinaFace's own landmarks on two real photos - the iris
 # centres sit 0.02-0.13 interocular distances from RetinaFace's eye points
-# while the inner corners (133/362) sit 0.23-0.26 away, which would shrink the
-# measured interocular distance by ~45% and scale every crop in by the same
-# factor. Nose 4 (the tip apex) beat 1, 19, 94 and 2 on template fit residual
-# on both photos; mouth corners 61/291 are the outer commissures.
+# while the inner corners (133/362) sit 0.23-0.26 away.
+#
+# Getting this wrong does not blow the crop up, because the scale of a
+# five-point least-squares fit is anchored by the nose and mouth too: measured,
+# the inner-corner variant still lands the irises within ~6% of the template's
+# eye separation. It just quietly shifts the framing - enough to move the
+# embedding by cosine 0.10, i.e. ~22% of the FACE_MATCH_THRESHOLD budget spent
+# on nothing. That is exactly the kind of error no smoke test would surface.
+#
+# Nose 4 (the tip apex) beat 1, 19, 94 and 2 on template fit residual on both
+# photos; mouth corners 61/291 are the outer commissures.
 IMAGE_LEFT_IRIS_INDEX = 468
 IMAGE_RIGHT_IRIS_INDEX = 473
 NOSE_TIP_INDEX = 4
