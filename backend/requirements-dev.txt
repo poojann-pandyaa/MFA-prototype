@@ -5,3 +5,23 @@
 -r requirements.txt
 pytest
 pytest-mock
+
+# Needed only to regenerate models/arcface.onnx from DeepFace's ArcFace
+# weights (anti_spoofing/export_arcface_onnx.py), and by the parity test
+# that pins the ONNX serving path to DeepFace's output. Listed explicitly
+# because Task 9 drops them from requirements.txt - today they still come
+# in transitively via the -r above.
+tensorflow
+tf-keras
+deepface
+# onnx must be >= 1.18: the 1.17.0 macOS universal2 wheel bundles an
+# abseil/protobuf runtime that clashes with tensorflow 2.20's, and the
+# process aborts (SIGABRT) or deadlocks the moment both are imported
+# together on arm64.
+onnx>=1.18
+# tf2onnx is NOT listed as a requirement on purpose: its metadata still
+# pins protobuf~=3.20, and installing that downgrades protobuf below what
+# tensorflow 2.20 (>=5.28) and mediapipe need, breaking both at import
+# time. Its own code runs fine on protobuf 5.x, so install it separately,
+# without its dependencies, when you need to run the export:
+#     pip install --no-deps tf2onnx
