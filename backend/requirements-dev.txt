@@ -5,12 +5,13 @@
 -r requirements.txt
 pytest
 pytest-mock
+# FastAPI's TestClient requires httpx (otherwise only present transitively).
+httpx
 
-# Needed only to regenerate models/arcface.onnx from DeepFace's ArcFace
-# weights (anti_spoofing/export_arcface_onnx.py), and by the parity test
-# that pins the ONNX serving path to DeepFace's output. Listed explicitly
-# because Task 9 drops them from requirements.txt - today they still come
-# in transitively via the -r above.
+# Needed only to regenerate models/arcface/arcface.onnx from DeepFace's
+# ArcFace weights (anti_spoofing/export_arcface_onnx.py), and by the parity
+# test that pins the ONNX serving path to DeepFace's output. These are no
+# longer in requirements.txt, so they are installed only via this file.
 tensorflow
 tf-keras
 deepface

@@ -6,13 +6,10 @@ pydantic-settings
 bcrypt
 pyjwt
 python-multipart
-deepface
-tf-keras
 numpy<2
 # Pinned: an unpinned install can resolve to opencv-python 5.x here, which
 # ships without cv2.CascadeClassifier / cv2.dnn.readNetFromCaffe in this
-# environment and silently breaks both DeepFace's detector and our own
-# RetinaFace bbox detector.
+# environment and silently breaks OpenCV's cascade/DNN-based detectors.
 opencv-python==4.11.0.86
 onnxruntime
 # Pinned: mediapipe 1.0.x crashes on macOS arm64 ("Check failed: service_

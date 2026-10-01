@@ -17,3 +17,8 @@ ml/data/manifest_synthetic.csv
 
 # ArcFace ONNX is ~137MB (over GitHub's 100MB limit); regenerate via export script, see README
 backend/models/arcface/
+
+# Local face photos for manual checks (see backend/tests/fixtures/README.md)
+backend/tests/fixtures/*.jpg
+backend/tests/fixtures/*.jpeg
+backend/tests/fixtures/*.png
