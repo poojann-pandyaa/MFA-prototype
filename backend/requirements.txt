@@ -15,6 +15,14 @@ numpy<2
 # RetinaFace bbox detector.
 opencv-python==4.11.0.86
 onnxruntime
+# Pinned: mediapipe 1.0.x crashes on macOS arm64 ("Check failed: service_
+# Service is unavailable" in TensorsToDetectionsCalculator/DrishtiMetalHelper)
+# because the Tasks vision graph's detection post-processing step
+# unconditionally reaches for a Metal GPU service that a CPU-only graph
+# never registers - this aborts the process even with delegate=CPU. See
+# https://github.com/google-ai-edge/mediapipe/issues/6356. 0.10.35 is the
+# last release before that regression and runs clean here.
+mediapipe==0.10.35
 # NOTE: torch/torchvision are intentionally NOT a serving dependency.
 # They're only needed once, to convert the vendored anti-spoofing .pth
 # weights to ONNX - see backend/anti_spoofing/export_onnx.py. The server
