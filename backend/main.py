@@ -1,3 +1,5 @@
+import binascii
+
 from fastapi import FastAPI, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from fastapi.middleware.cors import CORSMiddleware
@@ -104,25 +106,36 @@ def login_step1(login_in: schemas.UserLoginStep1, db: Session = Depends(get_db))
 
 @app.post("/login/step2")
 def login_step2(login_in: schemas.UserLoginStep2, db: Session = Depends(get_db)):
+    # Reject oversized bursts before touching the DB or decoding anything.
+    if len(login_in.images) > config.LIVENESS_MAX_FRAMES:
+        raise HTTPException(status_code=400, detail="Too many frames submitted.")
+
     user = db.query(models.User).filter(models.User.username == login_in.username).first()
     if not user:
         raise HTTPException(status_code=400, detail="User not found")
 
-    # 0. Require proof that step 1 (password) was already completed for
-    # this exact user+device. Without this check, step 2 would be a full
-    # MFA bypass: anyone who can pass the face check for a *known username*
+    # Require proof that step 1 (password) was already completed for this
+    # exact user+device. Without this check, step 2 would be a full MFA
+    # bypass: anyone who can pass the face check for a *known username*
     # would get a token with no password at all.
-    auth.consume_verification_session(db, login_in.session_id, user, login_in.device_identifier)
+    vs = auth.consume_verification_session(db, login_in.session_id, user, login_in.device_identifier)
 
-    # 1. Liveness check
-    is_live = biometrics.check_liveness(login_in.face_image_b64)
-    if not is_live:
-        raise HTTPException(status_code=403, detail="Liveness check failed. Spoofing detected.")
+    # PAD, gesture, and face-match all live behind one generic failure
+    # message - a client (or attacker) never learns which one failed, so
+    # a captured burst can't be iteratively tuned against the checks (see
+    # "Error handling & security considerations" in the design spec).
+    try:
+        verified = biometrics.verify_liveness_and_identity(
+            login_in.images, vs.challenge_type, user.face_embedding
+        )
+    except biometrics.RetakeNeededError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except binascii.Error:
+        # Malformed base64 in one of the frames: a client error, not a 500.
+        raise HTTPException(status_code=400, detail="Invalid image data. Please retake.")
 
-    # 2. Face matching
-    is_match = biometrics.verify_face(login_in.face_image_b64, user.face_embedding)
-    if not is_match:
-        raise HTTPException(status_code=401, detail="Face verification failed.")
+    if not verified:
+        raise HTTPException(status_code=401, detail="Verification failed. Please try again.")
 
     # If passes:
     # Update login history to success

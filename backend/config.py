@@ -76,6 +76,10 @@ HEAD_TURN_DISPLACEMENT_THRESHOLD = float(os.environ.get("MFA_HEAD_TURN_DISPLACEM
 # ChallengeCameraCapture.jsx). Starting defaults, not measured values.
 LIVENESS_MIN_VALID_FRAMES = int(os.environ.get("MFA_LIVENESS_MIN_VALID_FRAMES", "6"))
 LIVENESS_MIN_LIVE_FRAME_FRACTION = float(os.environ.get("MFA_LIVENESS_MIN_LIVE_FRAME_FRACTION", "0.8"))
+# Upper bound on frames accepted per step-2 request; /login/step2 rejects
+# larger bursts before decoding anything, so a client can't make the server
+# decode/run ML on an unbounded number of images.
+LIVENESS_MAX_FRAMES = int(os.environ.get("MFA_LIVENESS_MAX_FRAMES", "30"))
 
 CORS_ALLOW_ORIGINS = [
     o.strip()

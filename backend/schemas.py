@@ -14,7 +14,7 @@ class UserLoginStep1(BaseModel):
 
 class UserLoginStep2(BaseModel):
     username: str
-    face_image_b64: str
+    images: List[str]
     device_identifier: str
     session_id: str  # returned by /login/step1; proves step 1 was completed
 
