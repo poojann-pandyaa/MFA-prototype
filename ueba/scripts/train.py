@@ -51,7 +51,7 @@ def calibrate_keystroke(n_users: int, seed: int) -> tuple[DimensionCalibrator, d
     genuine, impostor = [], []
     for i, p in enumerate(profiles):
         tpl = ks.build_template(
-            [ks.extract(typing_sample(p, rng)) for _ in range(8)]
+            [ks.extract(typing_sample(p, rng)) for _ in range(ks.TARGET_SAMPLES)]
         )
         if tpl is None:
             continue
@@ -63,6 +63,8 @@ def calibrate_keystroke(n_users: int, seed: int) -> tuple[DimensionCalibrator, d
         for q in rng.choice(len(others), size=min(6, len(others)), replace=False):
             impostor.append(ks.distance(tpl, ks.extract(typing_sample(others[q], rng))))
 
+    genuine = [d for d in genuine if d is not None]
+    impostor = [d for d in impostor if d is not None]
     cal = DimensionCalibrator.fit(genuine, impostor)
     return cal, {"genuine": genuine, "impostor": impostor}
 
@@ -101,7 +103,7 @@ def calibrate_shape(n_users: int, seed: int) -> tuple[DimensionCalibrator, dict]
     genuine, impostor = [], []
     for i, p in enumerate(profiles):
         tpl = sh.build_template(
-            [sh.extract(shape_sample(p, rng)) for _ in range(8)]
+            [sh.extract(shape_sample(p, rng)) for _ in range(sh.MIN_SAMPLES)]
         )
         if tpl is None:
             continue

@@ -53,6 +53,27 @@ CREATE TABLE IF NOT EXISTS session_record (
 );
 CREATE INDEX IF NOT EXISTS idx_session_user ON session_record(user_id);
 
+CREATE TABLE IF NOT EXISTS challenge (
+    challenge_id TEXT PRIMARY KEY,
+    user_id      TEXT NOT NULL,
+    issued_at    REAL NOT NULL,
+    expires_at   REAL NOT NULL,
+    used_at      REAL
+);
+
+-- Context captured by /risk/preview, held until the orchestrator reports
+-- how the session resolved. Only an APPROVED outcome moves it into the
+-- user's history: a failed, possibly fraudulent attempt must never become
+-- part of anyone's "normal".
+CREATE TABLE IF NOT EXISTS pending_context (
+    transaction_id TEXT PRIMARY KEY,
+    user_id        TEXT NOT NULL,
+    event          TEXT NOT NULL,
+    session        TEXT,
+    created_at     REAL NOT NULL,
+    committed      TEXT
+);
+
 CREATE TABLE IF NOT EXISTS verification (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id       TEXT NOT NULL,
@@ -192,3 +213,66 @@ def get_verifications(user_id=None, limit=50, path=DB_PATH):
         d["dimensions"] = json.loads(d["dimensions"])
         out.append(d)
     return out
+
+
+# ------------------------------------------------------------ challenges
+
+def issue_challenge(challenge_id, user_id, ttl_s, path=DB_PATH):
+    now = time.time()
+    with conn(path) as c:
+        c.execute("INSERT INTO challenge (challenge_id,user_id,issued_at,expires_at) "
+                  "VALUES (?,?,?,?)", (challenge_id, user_id, now, now + ttl_s))
+    return now + ttl_s
+
+
+def consume_challenge(challenge_id, user_id, path=DB_PATH) -> str:
+    """
+    Mark a challenge used. Returns OK, UNKNOWN, WRONG_USER, EXPIRED or USED.
+
+    The update is conditional on used_at being NULL, so two concurrent
+    submissions of the same challenge cannot both succeed.
+    """
+    now = time.time()
+    with conn(path) as c:
+        row = c.execute("SELECT * FROM challenge WHERE challenge_id=?",
+                        (challenge_id,)).fetchone()
+        if row is None:
+            return "UNKNOWN"
+        if row["user_id"] != user_id:
+            return "WRONG_USER"
+        if row["used_at"] is not None:
+            return "USED"
+        if row["expires_at"] < now:
+            return "EXPIRED"
+        cur = c.execute("UPDATE challenge SET used_at=? WHERE challenge_id=? "
+                        "AND used_at IS NULL", (now, challenge_id))
+        return "OK" if cur.rowcount == 1 else "USED"
+
+
+# ------------------------------------------------------- pending context
+
+def put_pending(transaction_id, user_id, event, session=None, path=DB_PATH):
+    with conn(path) as c:
+        c.execute("INSERT OR REPLACE INTO pending_context "
+                  "(transaction_id,user_id,event,session,created_at,committed) "
+                  "VALUES (?,?,?,?,?,NULL)",
+                  (transaction_id, user_id, json.dumps(event),
+                   json.dumps(session) if session else None, time.time()))
+
+
+def get_pending(transaction_id, path=DB_PATH):
+    with conn(path) as c:
+        row = c.execute("SELECT * FROM pending_context WHERE transaction_id=?",
+                        (transaction_id,)).fetchone()
+    if row is None:
+        return None
+    d = dict(row)
+    d["event"] = json.loads(d["event"])
+    d["session"] = json.loads(d["session"]) if d["session"] else None
+    return d
+
+
+def mark_committed(transaction_id, outcome, path=DB_PATH):
+    with conn(path) as c:
+        c.execute("UPDATE pending_context SET committed=? WHERE transaction_id=?",
+                  (outcome, transaction_id))

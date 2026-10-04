@@ -1,16 +1,23 @@
 """
-UEBA service: enrollment and verification.
+UEBA service.
 
-Four behavioural dimensions:
+Two roles, at two moments in a transaction:
 
-  keystroke   fixed-phrase typing, compared to an enrolled template
-  mouse       passive pointer trace during form entry
-  session     accumulated session statistics (no enrollment -- longitudinal)
-  transaction amount, timing, device, location, beneficiary deviation
+  POST /risk/preview    before the decision. Transaction and session
+                        behaviour only -- nothing is asked of the user.
+                        Consumed by the decision engine as input.
 
-Each dimension produces a distance or score on its own scale, is
-calibrated independently to a probability, and the probabilities are
-combined in log-odds space. No weights are chosen by hand.
+  POST /factor/verify   when the engine selects this factor. Keystroke
+                        and shape tracing -- the user is challenged.
+                        Answers in the shared factor contract.
+
+Plus GET /factor/challenge (single-use challenge before verify) and
+POST /profile/commit (the orchestrator reports how the session ended; only
+APPROVED transactions enter the user's history).
+
+The transaction dimension deliberately does not count inside the factor
+score. It already shaped the decision through the preview, so counting it
+again would double-count the same evidence.
 """
 
 from __future__ import annotations
@@ -18,186 +25,50 @@ from __future__ import annotations
 import hashlib
 import os
 import time
+import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from enum import Enum
 from pathlib import Path
 from typing import Any
 
 import numpy as np
-import pandas as pd
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from api import dimensions as dm
+from api.contract import (FACTOR_NAME, MODEL_VERSION, THRESHOLD, ChallengeResponse,
+                          CommitRequest, CommitResponse, FactorStatus,
+                          FactorVerifyRequest, FactorVerifyResponse, FailureReason,
+                          KeyEvent, Outcome, PointerClick, PointerPoint,
+                          PreviewFlags, PreviewRequest, PreviewResponse,
+                          PreviewStatus, SessionPayload)
 from features import keystroke as ks
 from features import mouse as ms
 from features import session as se
 from features import shape as sh
-from features import transactional as tx
-from models.base import ModelContext
 from models.calibrate import Calibrator
 from models.loader import load_model
-from scoring.combine import (CalibrationSet, attenuate, band, combine,
-                             confidence)
+from scoring.combine import CalibrationSet, band, combine
 from store import db
 
 ARTIFACTS = Path(os.getenv("ARTIFACT_DIR", "artifacts"))
 IP_SALT = os.getenv("IP_SALT", "dev-salt-replace-in-production")
 DB_PATH = Path(os.getenv("DB_PATH", "ueba.db"))
 STATIC = Path(__file__).parent.parent / "static"
+CHALLENGE_TTL_S = int(os.getenv("UEBA_CHALLENGE_TTL_S", "300"))
 
-# Observations needed before a dimension is trusted at full strength.
-# The minimum thresholds (tx.MIN_EVENTS, se.MIN_SESSIONS) say when a
-# feature CAN be computed; these say when the baseline behind it is
-# trustworthy. Conflating the two produces a cliff: silence, then a
-# confident wrong answer one event later.
-FULL_CONFIDENCE_EVENTS = 40
-FULL_CONFIDENCE_SESSIONS = 20
-
-# Below this the score is judged too unstable to report at all, and the
-# dimension declares INSUFFICIENT_DATA rather than emitting a number with
-# near-zero confidence. Set just above the mathematical floor: learning
-# still begins at the first event, and every event contributes to the
-# profile whether or not it produced a score.
-MIN_SCOREABLE_EVENTS = 3
-MIN_SCOREABLE_SESSIONS = 3
-
-# Dimensions that contribute to the decision. Every dimension is always
-# computed and reported; this controls only which ones the combination
-# consumes.
-#
-# Mouse is excluded by default. Its calibration was fitted on simulated
-# pointer traces and does not transfer: on simulated data it measured
-# EER 0.098, but in live two-person testing it flagged most genuine
-# attempts as impostor. The simulator produces consistent motor profiles,
-# whereas real pointer movement varies substantially between sittings --
-# posture, trackpad versus mouse, screen size, how rushed the user is.
-#
-# Reporting it while excluding it from the decision keeps the measurement
-# visible without letting an uncalibrated signal drive outcomes.
-# Re-enable once the calibration is refitted on real collected traces:
-#     DECISION_DIMENSIONS=keystroke,mouse,session,transaction
-DECISION_DIMENSIONS = set(
-    os.getenv("DECISION_DIMENSIONS",
-              "keystroke,shape,session,transaction").split(",")
-)
+# Dimensions fused into the factor score. Mouse is computed and reported
+# but excluded: calibrated on simulated traces it measured EER 0.098, and
+# in live testing it flagged most genuine attempts as impostor.
+FACTOR_DIMENSIONS = set(os.getenv("UEBA_FACTOR_DIMENSIONS", "keystroke,shape").split(","))
+PREVIEW_DIMENSIONS = {"transaction", "session"}
 
 _state: dict[str, Any] = {}
 
 
-# --------------------------------------------------------------------- #
-# Schemas
-# --------------------------------------------------------------------- #
-
-
-class KeyEvent(BaseModel):
-    key: str
-    down: float
-    up: float | None = None
-
-
-class MousePoint(BaseModel):
-    x: float
-    y: float
-    t: float
-
-
-class MouseClick(BaseModel):
-    down: float
-    up: float | None = None
-
-
-class EnrollRequest(BaseModel):
-    """
-    Enrollment needs several typing samples, not one.
-
-    A single sample captures one mood. Variance across repetitions is what
-    makes verification possible at all: without it there is no way to tell
-    a tired legitimate user from an impostor.
-    """
-
-    userId: str
-    keystrokeSamples: list[list[KeyEvent]] = Field(..., min_length=1)
-    # One pointer segment per typing round. Separate rounds are separate
-    # interactions with pauses between them, so the variance across them
-    # is real between-session variance. Splitting a single continuous
-    # trace into chunks measures only within-session variance, which is
-    # far tighter and makes ordinary later movement look anomalous.
-    mouseSegments: list[list[MousePoint]] = []
-    mousePoints: list[MousePoint] = []      # fallback, single trace
-    mouseClicks: list[MouseClick] = []
-    # One traced attempt at the fixed shape per enrollment round.
-    shapeTraces: list[list[MousePoint]] = []
-
-
-class Action(str, Enum):
-    LOGIN = "LOGIN"
-    TRANSFER = "TRANSFER"
-    ADD_BENEFICIARY = "ADD_BENEFICIARY"
-    CHANGE_LIMIT = "CHANGE_LIMIT"
-
-
-class Channel(str, Enum):
-    WEB = "WEB"
-    MOBILE = "MOBILE"
-
-
-class SessionPayload(BaseModel):
-    start: float
-    end: float
-    actions: list[float] = []
-
-
-class VerifyRequest(BaseModel):
-    """
-    No free-text fields anywhere. Beneficiary names and remarks are
-    attacker-controlled, are needed by no feature, and would open an
-    injection path into the decision layer.
-    """
-
-    userId: str
-    # transaction context
-    amount: float | None = None
-    deviceId: str
-    ip: str
-    timestamp: datetime | None = None
-    beneficiaryId: str | None = None
-    action: Action = Action.TRANSFER
-    channel: Channel = Channel.WEB
-    # behavioural evidence
-    keystrokeSample: list[KeyEvent] | None = None
-    mousePoints: list[MousePoint] = []
-    mouseClicks: list[MouseClick] = []
-    shapeTrace: list[MousePoint] | None = None
-    session: SessionPayload | None = None
-
-
-class DimensionResult(BaseModel):
-    status: str            # OK | INSUFFICIENT_DATA | NOT_PROVIDED
-    distance: float | None = None
-    probability: float | None = None
-    detail: dict | None = None
-
-
-class VerifyResponse(BaseModel):
-    userId: str
-    riskScore: float | None
-    band: str
-    decision: str
-    dimensions: dict[str, DimensionResult]
-    dimensionsUsed: list[str]
-    modelVersion: str
-    assessedAt: datetime
-    latencyMs: int
-
-
-# --------------------------------------------------------------------- #
-# Helpers
-# --------------------------------------------------------------------- #
-
-
 def hash_ip(ip: str) -> str:
-    """Salted hash: supports "same network as before" without keeping the IP."""
+    """Salted hash: "same network as before" without keeping the address."""
     return hashlib.sha256((IP_SALT + ip).encode()).hexdigest()[:32]
 
 
@@ -211,15 +82,17 @@ def derive_city(ip: str) -> str:
         return "UNKNOWN"
 
 
-def _events_to_dicts(events) -> list[dict]:
-    return [{"key": e.key, "down": e.down, "up": e.up} for e in events]
+def _dump(items) -> list[dict]:
+    return [i.model_dump() for i in items]
 
 
-# --------------------------------------------------------------------- #
-# Lifespan
-# --------------------------------------------------------------------- #
+def _calset() -> CalibrationSet:
+    return _state.get("calset") or CalibrationSet()
 
-from contextlib import asynccontextmanager  # noqa: E402
+
+def _fuse(probs: dict[str, float | None]) -> tuple[float, list[str]]:
+    cs = _calset()
+    return combine(probs, reliability={d: cs.reliability(d) for d in probs})
 
 
 @asynccontextmanager
@@ -227,422 +100,386 @@ async def lifespan(app: FastAPI):
     db.init(DB_PATH)
     try:
         model = load_model("models/isoforest")
-        _state.update(
-            model=model,
-            tx_calibrator=Calibrator.load(ARTIFACTS),
-            calset=CalibrationSet.load(ARTIFACTS),
-            version=f"{model.name}-{model.version}",
-            ready=True,
-        )
+        _state.update(model=model, tx_calibrator=Calibrator.load(ARTIFACTS),
+                      calset=CalibrationSet.load(ARTIFACTS),
+                      version=f"{model.name}-{model.version}", ready=True)
     except Exception as exc:  # noqa: BLE001
         _state.update(ready=False, error=str(exc),
-                      calset=CalibrationSet.load(ARTIFACTS),
-                      version="unloaded")
+                      calset=CalibrationSet.load(ARTIFACTS), version="unloaded")
     yield
 
 
-app = FastAPI(title="UEBA Service", version="2.0.0", lifespan=lifespan)
+app = FastAPI(title="UEBA Service", version="3.0.0", lifespan=lifespan)
 
 
-# --------------------------------------------------------------------- #
+# ===================================================================== #
 # Enrollment
-# --------------------------------------------------------------------- #
+# ===================================================================== #
+
+
+class EnrollRequest(BaseModel):
+    userId: str
+    keystrokeSamples: list[list[KeyEvent]] = Field(..., min_length=1)
+    shapeTraces: list[list[PointerPoint]] = []
+    mouseSegments: list[list[PointerPoint]] = []
+    mouseClicks: list[PointerClick] = []
 
 
 @app.get("/enroll/phrase")
 def enroll_phrase() -> dict:
-    """
-    The fixed phrase, and how many repetitions are needed.
-
-    Fixed text rather than free text: comparing the same phrase at
-    enrollment and verification is a like-for-like comparison. Free text
-    means matching different key pairs against each other, which needs far
-    more data to be reliable.
-    """
+    """What enrollment needs. Fixed text: random text breaks the comparison."""
     return {
         "phrase": ks.ENROLL_PHRASE,
         "repetitions": ks.TARGET_SAMPLES,
-        "minimum": ks.MIN_SAMPLES,
         "discarded": ks.DISCARD_FIRST,
-        "mousePointsRequired": ms.MIN_POINTS * ms.MIN_SAMPLES,
-        "shape": sh.SHAPE,
+        "minimum": ks.MIN_SAMPLES + ks.DISCARD_FIRST,
+        "shape": [list(p) for p in sh.SHAPE],
+        "aspectRatio": sh.ASPECT,
         "shapeTracesRequired": sh.MIN_SAMPLES,
-        "note": (
-            f"The first {ks.DISCARD_FIRST} repetitions are discarded. A "
-            "first-time user typing an unfamiliar phrase is hesitant, and "
-            "a template built from that learning phase does not represent "
-            "how they type once familiar."
-        ),
+        "mousePointsRequired": ms.MIN_POINTS * ms.MIN_SAMPLES,
     }
+
+
+def _mouse_template(segments: list[list[dict]], clicks: list[dict]):
+    """One segment per typing round; clicks matched to their segment by time."""
+    samples = []
+    for pts in segments:
+        if len(pts) < ms.MIN_POINTS:
+            continue
+        lo, hi = pts[0]["t"], pts[-1]["t"]
+        samples.append(ms.extract(pts, [c for c in clicks if lo <= c["down"] <= hi]))
+    return ms.build_template(samples)
 
 
 @app.post("/enroll")
 def enroll(req: EnrollRequest) -> dict:
-    samples = [ks.extract(_events_to_dicts(s)) for s in req.keystrokeSamples]
-    usable = [s for s in samples if s is not None]
-
-    if len(usable) < ks.MIN_SAMPLES:
-        raise HTTPException(
-            400,
-            f"need at least {ks.MIN_SAMPLES} usable typing samples, "
-            f"got {len(usable)} of {len(req.keystrokeSamples)} submitted",
-        )
-
-    keystroke_tpl = ks.build_template(usable)
+    samples = [ks.extract(_dump(s)) for s in req.keystrokeSamples]
+    keystroke_tpl = ks.build_template(samples)
     if keystroke_tpl is None:
-        raise HTTPException(400, "could not build a keystroke template")
+        complete = sum(s["coverage"] >= ks.MIN_ENROLL_COVERAGE for s in samples)
+        raise HTTPException(400, (
+            f"need {ks.MIN_SAMPLES + ks.DISCARD_FIRST} complete typings of the phrase; "
+            f"got {complete} of {len(samples)}"))
 
-    # Mouse enrollment is passive: the trace collected while the user
-    # filled this form. Split into segments so a template with variance can
-    # be built from a single sitting.
-    mouse_tpl = None
-    points_needed = ms.MIN_POINTS * ms.MIN_SAMPLES
-    clicks = [c.model_dump() for c in req.mouseClicks]
+    traces = [sh.extract(_dump(t)) for t in req.shapeTraces]
+    shape_tpl = sh.build_template(traces)
+    if shape_tpl is None:
+        complete = sum(t["coverage"] >= sh.MIN_ENROLL_COVERAGE for t in traces)
+        raise HTTPException(400, (
+            f"need {sh.MIN_SAMPLES} complete shape traces, green dot to red dot; "
+            f"got {complete} of {len(traces)}"))
 
-    if req.mouseSegments:
-        # Preferred path: one segment per typing round.
-        #
-        # Clicks are matched to their segment by timestamp. Passing the
-        # whole click list to every segment would make click_interval span
-        # the gaps between rounds rather than the intervals within one --
-        # a value with no counterpart at verification, where only one
-        # round's clicks exist. Two of the four compared mouse features
-        # are click-based, so this mismatch alone was enough to score a
-        # genuine user at 0.9998.
-        total_points = sum(len(seg) for seg in req.mouseSegments)
-        samples = []
-        for seg in req.mouseSegments:
-            if len(seg) < ms.MIN_POINTS:
-                continue
-            pts = [p.model_dump() for p in seg]
-            lo, hi = pts[0]["t"], pts[-1]["t"]
-            in_seg = [c for c in clicks if lo <= c["down"] <= hi]
-            samples.append(ms.extract(pts, in_seg))
-        mouse_tpl = ms.build_template(samples)
-    else:
-        # Fallback for clients that send one continuous trace. Segmenting
-        # it understates variance -- recorded in the response so the
-        # limitation is visible rather than silent.
-        total_points = len(req.mousePoints)
-        if total_points >= points_needed:
-            pts = [p.model_dump() for p in req.mousePoints]
-            chunk = len(pts) // ms.MIN_SAMPLES
-            samples = []
-            for i in range(ms.MIN_SAMPLES):
-                part = pts[i * chunk:(i + 1) * chunk]
-                if not part:
-                    continue
-                lo, hi = part[0]["t"], part[-1]["t"]
-                samples.append(ms.extract(
-                    part, [c for c in clicks if lo <= c["down"] <= hi]))
-            mouse_tpl = ms.build_template(samples)
+    clicks = _dump(req.mouseClicks)
+    mouse_tpl = _mouse_template([_dump(s) for s in req.mouseSegments], clicks)
+    total_points = sum(len(s) for s in req.mouseSegments)
 
-    shape_tpl = None
-    if req.shapeTraces:
-        shape_samples = [
-            sh.extract([p.model_dump() for p in tr]) for tr in req.shapeTraces
-        ]
-        shape_tpl = sh.build_template(shape_samples)
+    db.save_user(req.userId, keystroke_tpl, mouse_tpl, DB_PATH, shape_tpl=shape_tpl)
 
-    db.save_user(req.userId, keystroke_tpl, mouse_tpl, DB_PATH,
-                 shape_tpl=shape_tpl)
-
+    dwell = [v for v in keystroke_tpl["dwell_mean"] if v is not None]
     return {
         "userId": req.userId,
         "enrolled": True,
-        "keystroke": {
-            "samples": keystroke_tpl["n_samples"],
-            "positions": keystroke_tpl["n_dwell"],
-            "meanDwellMs": round(np.mean(keystroke_tpl["dwell_mean"]), 1),
-            "typingSpeedCps": round(keystroke_tpl["speed_mean"], 2),
-        },
-        "mouse": (
-            {"status": "ENROLLED", "samples": mouse_tpl["n_samples"],
-             "pointsCaptured": total_points,
-             "segmented": bool(req.mouseSegments),
-             "note": None if req.mouseSegments else
-                     "built from a single continuous trace, which "
-                     "understates between-session variance"}
-            if mouse_tpl
-            else {"status": "NOT_ENROLLED",
-                  "pointsCaptured": total_points,
-                  "pointsRequired": points_needed,
-                  "reason": "insufficient pointer movement captured -- "
-                            "move the pointer while typing, and click "
-                            "buttons rather than pressing Enter"}
-        ),
-        "shape": (
-            {"status": "ENROLLED", "samples": shape_tpl["n_samples"],
-             "checkpoints": shape_tpl["n_checkpoints"]}
-            if shape_tpl
-            else {"status": "NOT_ENROLLED",
-                  "tracesReceived": len(req.shapeTraces),
-                  "tracesRequired": sh.MIN_SAMPLES,
-                  "reason": "trace the shape from start to end on each "
-                            "round; incomplete traces are discarded"}
-        ),
-        "session": {
-            "status": "ACCUMULATES",
-            "reason": "session behaviour is longitudinal and cannot be "
-                      "captured in one sitting",
-            "sessionsRequired": se.MIN_SESSIONS,
-        },
+        "keystroke": {"status": "ENROLLED", "samples": keystroke_tpl["n_samples"],
+                      "recorded": len(samples), "discarded": ks.DISCARD_FIRST,
+                      "positions": keystroke_tpl["n_dwell"],
+                      "meanDwellMs": round(float(np.mean(dwell)), 1) if dwell else None,
+                      "typingSpeedCps": round(keystroke_tpl["speed_mean"], 2)},
+        "shape": {"status": "ENROLLED", "samples": shape_tpl["n_samples"],
+                  "checkpoints": shape_tpl["n_checkpoints"]},
+        "mouse": ({"status": "ENROLLED", "samples": mouse_tpl["n_samples"],
+                   "pointsCaptured": total_points, "excludedFromScore": True}
+                  if mouse_tpl else
+                  {"status": "NOT_ENROLLED", "pointsCaptured": total_points,
+                   "pointsRequired": ms.MIN_POINTS * ms.MIN_SAMPLES,
+                   "excludedFromScore": True}),
+        "session": {"status": "ACCUMULATES",
+                    "reason": "longitudinal; cannot be captured in one sitting"},
     }
 
 
-# --------------------------------------------------------------------- #
-# Verification
-# --------------------------------------------------------------------- #
+# ===================================================================== #
+# Contract: challenge, preview, verify, commit
+# ===================================================================== #
 
 
-@app.post("/verify", response_model=VerifyResponse)
-def verify(req: VerifyRequest) -> VerifyResponse:
+@app.get("/factor/challenge", response_model=ChallengeResponse)
+def factor_challenge(userId: str) -> ChallengeResponse:
+    """
+    Issue a single-use challenge.
+
+    The phrase and shape stay fixed -- random text would break the
+    position-by-position comparison. Replay protection comes from the
+    challenge ID instead: a captured submission cannot be sent again.
+    """
+    if db.get_user(userId, DB_PATH) is None:
+        raise HTTPException(404, f"user {userId} is not enrolled")
+    cid = f"ch_{uuid.uuid4().hex[:16]}"
+    expires = db.issue_challenge(cid, userId, CHALLENGE_TTL_S, DB_PATH)
+    return ChallengeResponse(
+        challengeId=cid, factor=FACTOR_NAME, phrase=ks.ENROLL_PHRASE,
+        shape=[list(p) for p in sh.SHAPE], aspectRatio=sh.ASPECT,
+        expiresAt=datetime.fromtimestamp(expires, timezone.utc), shapeRequired=True)
+
+
+@app.post("/risk/preview", response_model=PreviewResponse)
+def risk_preview(req: PreviewRequest) -> PreviewResponse:
+    """
+    Behavioural risk before any challenge. Writes nothing to history: the
+    context is held until /profile/commit reports an approved outcome.
+    """
+    started = time.perf_counter()
+    try:
+        occurred = (req.timestamp or datetime.now(timezone.utc)).timestamp()
+        city = derive_city(req.ip)
+        event = {"user_id": req.userId, "amount": req.amountPaise / 100.0,
+                 "beneficiary_id": req.payeeId or "", "device_id": req.deviceId,
+                 "city": city, "occurred_at": occurred}
+
+        history = db.get_events(req.userId, DB_PATH)
+        flags = dm.preview_flags(event, history)
+
+        tx_dim, p_tx = dm.score_transaction(event, history, _state, ARTIFACTS)
+        session_feats = se.extract(req.session.model_dump()) if req.session else None
+        se_dim, p_se = dm.score_session(session_feats, db.get_sessions(req.userId, DB_PATH), _calset())
+
+        risk, used = _fuse({"transaction": p_tx, "session": p_se})
+        confs = [d.get("confidence", 0.0) for d, p in ((tx_dim, p_tx), (se_dim, p_se)) if p is not None]
+
+        if used:
+            status, risk_band, risk_out = PreviewStatus.OK, band(risk), round(risk, 4)
+        else:
+            # No baseline yet. Absence of evidence is not evidence of safety.
+            status, risk_band, risk_out = PreviewStatus.INSUFFICIENT_DATA, "HIGH", None
+
+        db.put_pending(req.transactionId, req.userId, {
+            "user_id": req.userId, "event_type": req.action,
+            "amount": event["amount"], "beneficiary_id": req.payeeId,
+            "device_id": req.deviceId, "ip_hash": hash_ip(req.ip), "city": city,
+            "channel": req.channel, "occurred_at": occurred,
+        }, session_feats, DB_PATH)
+
+        latency = int((time.perf_counter() - started) * 1000)
+        detail = {"transaction": tx_dim, "session": se_dim, "eventsSeen": len(history)}
+        db.add_verification(req.userId, risk_out, risk_band, "PREVIEW",
+                            {"kind": "preview", "transactionId": req.transactionId,
+                             "flags": flags, **detail},
+                            MODEL_VERSION, latency, DB_PATH)
+        return PreviewResponse(
+            factor=FACTOR_NAME, status=status, band=risk_band, riskScore=risk_out,
+            flags=PreviewFlags(**flags), dimensionsUsed=used,
+            confidence=round(min(confs), 2) if confs else 0.0,
+            modelVersion=MODEL_VERSION, latencyMs=latency, detail=detail)
+    except Exception as exc:  # noqa: BLE001
+        return PreviewResponse(
+            factor=FACTOR_NAME, status=PreviewStatus.UNAVAILABLE, band="HIGH",
+            riskScore=None,
+            flags=PreviewFlags(deviceSeenBefore=False, locationSeenBefore=False,
+                               payeeSeenBefore=False, velocityHigh=False),
+            dimensionsUsed=[], confidence=0.0, modelVersion=MODEL_VERSION,
+            latencyMs=int((time.perf_counter() - started) * 1000),
+            detail={"error": type(exc).__name__})
+
+
+def _factor_verdict(dims: dict[str, dict], score: float | None):
+    """Status and failure reason from the challenge dimensions and the score."""
+    statuses = [d["status"] for name, d in dims.items()
+                if name in FACTOR_DIMENSIONS and d["status"] not in
+                ("NOT_APPLICABLE", "INSUFFICIENT_DATA")]
+    if not statuses or score is None:
+        return FactorStatus.INSUFFICIENT_DATA, FailureReason.NO_TEMPLATE
+    if all(s == "MISSING" for s in statuses):
+        return FactorStatus.FAILED, FailureReason.CHALLENGE_MISSING
+    if "MISSING" in statuses:
+        # Skipping a whole part of the challenge cannot be passed, however
+        # well the other part went. Otherwise that part would be optional
+        # in practice.
+        return FactorStatus.FAILED, FailureReason.CHALLENGE_INCOMPLETE
+    if score >= THRESHOLD:
+        return FactorStatus.PASSED, None
+    if "PARTIAL" in statuses:
+        return FactorStatus.FAILED, FailureReason.CHALLENGE_INCOMPLETE
+    return FactorStatus.FAILED, FailureReason.BEHAVIOUR_MISMATCH
+
+
+@app.post("/factor/verify", response_model=FactorVerifyResponse)
+def factor_verify(req: FactorVerifyRequest) -> FactorVerifyResponse:
     started = time.perf_counter()
 
     user = db.get_user(req.userId, DB_PATH)
     if user is None:
+        return FactorVerifyResponse(
+            factor=FACTOR_NAME, status=FactorStatus.INSUFFICIENT_DATA, score=None,
+            threshold=THRESHOLD, failureReason=FailureReason.NO_TEMPLATE,
+            modelVersion=MODEL_VERSION, latencyMs=0)
+
+    # A protocol violation, not a factor result: answered as an HTTP error.
+    check = db.consume_challenge(req.challengeId, req.userId, DB_PATH)
+    if check != "OK":
+        raise HTTPException(409, f"challenge rejected: {check}")
+
+    try:
+        cs = _calset()
+        p = req.payload
+        can_trace = p.capability.pointer or p.capability.touch
+
+        dims: dict[str, dict] = {}
+        probs: dict[str, float | None] = {}
+        dims["keystroke"], probs["keystroke"] = dm.score_keystroke(
+            user["keystroke_tpl"], _dump(p.keystroke), cs)
+        dims["shape"], probs["shape"] = dm.score_shape(
+            user.get("shape_tpl"), _dump(p.shapeTrace), cs, applicable=can_trace)
+        dims["mouse"], probs["mouse"] = dm.score_mouse(
+            user["mouse_tpl"], _dump(p.pointer.points), _dump(p.pointer.clicks), cs)
+        dims["mouse"]["excludedFromScore"] = "mouse" not in FACTOR_DIMENSIONS
+
+        fused = {d: probs[d] for d in FACTOR_DIMENSIONS if d in probs}
+        p_imp, used = _fuse(fused)
+        score = round(1.0 - p_imp, 4) if used else None
+        status, reason = _factor_verdict(dims, score)
+
+        latency = int((time.perf_counter() - started) * 1000)
+        detail = {**dims, "dimensionsUsed": used,
+                  "impostorProbability": round(p_imp, 4) if used else None}
+        db.add_verification(req.userId, detail["impostorProbability"],
+                            band(p_imp) if used else "HIGH", status.value,
+                            {"kind": "factor", "transactionId": req.transactionId,
+                             "sessionId": req.sessionId, "score": score,
+                             "failureReason": reason.value if reason else None, **detail},
+                            MODEL_VERSION, latency, DB_PATH)
+        return FactorVerifyResponse(
+            factor=FACTOR_NAME, status=status, score=score, threshold=THRESHOLD,
+            failureReason=reason, modelVersion=MODEL_VERSION, latencyMs=latency,
+            detail=detail)
+    except Exception as exc:  # noqa: BLE001
+        return FactorVerifyResponse(
+            factor=FACTOR_NAME, status=FactorStatus.UNAVAILABLE, score=None,
+            threshold=THRESHOLD, failureReason=FailureReason.SERVICE_ERROR,
+            modelVersion=MODEL_VERSION,
+            latencyMs=int((time.perf_counter() - started) * 1000),
+            detail={"error": type(exc).__name__})
+
+
+@app.post("/profile/commit", response_model=CommitResponse)
+def profile_commit(req: CommitRequest) -> CommitResponse:
+    """
+    Called by the orchestrator once the session resolves. Only APPROVED
+    writes the transaction and session into the user's history.
+    """
+    pend = db.get_pending(req.transactionId, DB_PATH)
+    if pend is None:
+        raise HTTPException(404, "no preview recorded for this transaction")
+    uid = pend["user_id"]
+
+    def counts():
+        return len(db.get_events(uid, DB_PATH)), len(db.get_sessions(uid, DB_PATH))
+
+    if pend["committed"]:
+        e, s = counts()
+        return CommitResponse(transactionId=req.transactionId, outcome=req.outcome,
+                              written=False, eventsNow=e, sessionsNow=s,
+                              reason=f"already committed as {pend['committed']}")
+    if req.outcome != Outcome.APPROVED:
+        db.mark_committed(req.transactionId, req.outcome.value, DB_PATH)
+        e, s = counts()
+        return CommitResponse(transactionId=req.transactionId, outcome=req.outcome,
+                              written=False, eventsNow=e, sessionsNow=s,
+                              reason="only approved transactions update the profile")
+
+    ev = pend["event"]
+    db.add_event(ev["user_id"], ev["event_type"], ev["amount"], ev["beneficiary_id"],
+                 ev["device_id"], ev["ip_hash"], ev["city"], ev["channel"],
+                 ev["occurred_at"], DB_PATH)
+    if pend["session"]:
+        db.add_session(uid, pend["session"], DB_PATH)
+    db.mark_committed(req.transactionId, Outcome.APPROVED.value, DB_PATH)
+    e, s = counts()
+    return CommitResponse(transactionId=req.transactionId, outcome=req.outcome,
+                          written=True, eventsNow=e, sessionsNow=s)
+
+
+# ===================================================================== #
+# Legacy combined endpoint (deprecated -- use the contract endpoints)
+# ===================================================================== #
+
+
+class VerifyRequest(BaseModel):
+    userId: str
+    amount: float | None = None
+    deviceId: str
+    ip: str
+    timestamp: datetime | None = None
+    beneficiaryId: str | None = None
+    action: str = "TRANSFER"
+    channel: str = "WEB"
+    keystrokeSample: list[KeyEvent] | None = None
+    shapeTrace: list[PointerPoint] | None = None
+    mousePoints: list[PointerPoint] = []
+    mouseClicks: list[PointerClick] = []
+    session: SessionPayload | None = None
+
+
+@app.post("/verify", deprecated=True)
+def verify_legacy(req: VerifyRequest) -> dict:
+    """
+    All dimensions in one call, as before. Kept for clients not yet moved
+    to the contract. History is written only when the result is ALLOW, so
+    this path no longer feeds failed attempts into the profile either.
+    """
+    started = time.perf_counter()
+    user = db.get_user(req.userId, DB_PATH)
+    if user is None:
         raise HTTPException(404, f"user {req.userId} is not enrolled")
-
-    calset: CalibrationSet = _state.get("calset") or CalibrationSet()
-    dims: dict[str, DimensionResult] = {}
-    probs: dict[str, float | None] = {}
-
-    # ---- keystroke -------------------------------------------------
-    if req.keystrokeSample is None:
-        dims["keystroke"] = DimensionResult(status="NOT_PROVIDED")
-        probs["keystroke"] = None
-    else:
-        sample = ks.extract(_events_to_dicts(req.keystrokeSample))
-        d = ks.distance(user["keystroke_tpl"], sample)
-        p = calset.probability("keystroke", d)
-        dims["keystroke"] = DimensionResult(
-            status="OK" if d is not None else "INSUFFICIENT_DATA",
-            distance=round(d, 4) if d is not None else None,
-            probability=round(p, 4) if p is not None else None,
-            detail=(
-                {k: round(v, 2) for k, v in sample["summary"].items()}
-                if sample else None
-            ),
-        )
-        probs["keystroke"] = p
-
-    # ---- mouse -----------------------------------------------------
-    if len(req.mousePoints) < ms.MIN_POINTS:
-        dims["mouse"] = DimensionResult(
-            status="NOT_PROVIDED",
-            detail={"pointsCaptured": len(req.mousePoints),
-                    "pointsRequired": ms.MIN_POINTS,
-                    "reason": "insufficient pointer movement during this "
-                              "transaction"},
-        )
-        probs["mouse"] = None
-    elif user["mouse_tpl"] is None:
-        dims["mouse"] = DimensionResult(
-            status="INSUFFICIENT_DATA",
-            detail={"reason": "no mouse template enrolled for this user"},
-        )
-        probs["mouse"] = None
-    else:
-        sample = ms.extract([p.model_dump() for p in req.mousePoints],
-                            [c.model_dump() for c in req.mouseClicks])
-        d = ms.distance(user["mouse_tpl"], sample)
-        p = calset.probability("mouse", d)
-        dims["mouse"] = DimensionResult(
-            status="OK" if d is not None else "INSUFFICIENT_DATA",
-            distance=round(d, 4) if d is not None else None,
-            probability=round(p, 4) if p is not None else None,
-            detail=({k: round(v, 3) for k, v in sample.items()} if sample else None),
-        )
-        probs["mouse"] = p
-
-    # ---- shape trace -----------------------------------------------
-    if req.shapeTrace is None:
-        dims["shape"] = DimensionResult(status="NOT_PROVIDED")
-        probs["shape"] = None
-    elif user.get("shape_tpl") is None:
-        dims["shape"] = DimensionResult(
-            status="INSUFFICIENT_DATA",
-            detail={"reason": "no shape template enrolled for this user"})
-        probs["shape"] = None
-    else:
-        sample = sh.extract([p.model_dump() for p in req.shapeTrace])
-        d = sh.distance(user["shape_tpl"], sample)
-        p_ = calset.probability("shape", d)
-        dims["shape"] = DimensionResult(
-            status="OK" if d is not None else "INSUFFICIENT_DATA",
-            distance=round(d, 4) if d is not None else None,
-            probability=round(p_, 4) if p_ is not None else None,
-            detail=({k: round(v, 4) for k, v in sample["summary"].items()}
-                    if sample else
-                    {"reason": "trace incomplete or too short"}),
-        )
-        probs["shape"] = p_
-
-    # ---- session ---------------------------------------------------
-    # Not an enrollment dimension. The profile is built from accumulated
-    # history, so a new user has nothing to compare against.
-    session_feats = se.extract(req.session.model_dump()) if req.session else None
-    history = db.get_sessions(req.userId, DB_PATH)
-    profile = se.build_profile(history)
-
-    if session_feats is None:
-        dims["session"] = DimensionResult(status="NOT_PROVIDED")
-        probs["session"] = None
-    elif profile is None or len(history) < MIN_SCOREABLE_SESSIONS:
-        dims["session"] = DimensionResult(
-            status="INSUFFICIENT_DATA",
-            detail={"sessionsSeen": len(history),
-                    "sessionsRequired": MIN_SCOREABLE_SESSIONS,
-                    "note": "the profile is being built from this session "
-                            "onward"},
-        )
-        probs["session"] = None
-    else:
-        d = se.distance(profile, session_feats)
-        raw = calset.probability("session", d)
-        conf = confidence(len(history), FULL_CONFIDENCE_SESSIONS)
-        p = attenuate(raw, conf) if raw is not None else None
-        dims["session"] = DimensionResult(
-            status="OK" if conf >= 1.0 else "WARMING_UP",
-            distance=round(d, 4) if d is not None else None,
-            probability=round(p, 4) if p is not None else None,
-            detail={
-                "sessionsSeen": len(history),
-                "confidence": round(conf, 2),
-                "rawProbability": round(raw, 4) if raw is not None else None,
-                **{k: round(v, 2) for k, v in session_feats.items()},
-            },
-        )
-        probs["session"] = p
-
-    if session_feats is not None:
-        db.add_session(req.userId, session_feats, DB_PATH)
-
-    # ---- transaction -----------------------------------------------
+    cs = _calset()
     occurred = (req.timestamp or datetime.now(timezone.utc)).timestamp()
-    events = db.get_events(req.userId, DB_PATH)
+    city = derive_city(req.ip)
+    event = {"user_id": req.userId, "amount": req.amount or 0.0,
+             "beneficiary_id": req.beneficiaryId or "", "device_id": req.deviceId,
+             "city": city, "occurred_at": occurred}
 
-    if len(events) < MIN_SCOREABLE_EVENTS:
-        dims["transaction"] = DimensionResult(
-            status="INSUFFICIENT_DATA",
-            detail={
-                "eventsSeen": len(events),
-                "eventsRequired": MIN_SCOREABLE_EVENTS,
-                "note": "the profile is being built from this event onward; "
-                        "a deviation cannot be computed until a standard "
-                        "deviation exists",
-            },
-        )
-        probs["transaction"] = None
-    elif not _state.get("ready"):
-        dims["transaction"] = DimensionResult(
-            status="INSUFFICIENT_DATA",
-            detail={"reason": "transactional model not loaded"},
-        )
-        probs["transaction"] = None
-    else:
-        event = {
-            "user_id": req.userId,
-            "amount": req.amount or 0.0,
-            "beneficiary_id": req.beneficiaryId or "",
-            "device_id": req.deviceId,
-            "city": derive_city(req.ip),
-            "occurred_at": occurred,
-        }
-        hist = [
-            {"user_id": e["user_id"], "amount": e["amount"] or 0.0,
-             "beneficiary_id": e["beneficiary_id"] or "",
-             "device_id": e["device_id"], "city": e["city"],
-             "occurred_at": e["occurred_at"]}
-            for e in events
-        ]
-        fv = tx.compute_one(event, hist)
-        if fv is None:
-            dims["transaction"] = DimensionResult(status="INSUFFICIENT_DATA")
-            probs["transaction"] = None
-        else:
-            frame = pd.DataFrame([fv.as_dict()])
-            model = _state["model"]
-            ctx = ModelContext(data=frame, artifact_dir=ARTIFACTS)
-            model.validate_features(ctx)
-            score = model.infer(ctx)
-            raw = float(_state["tx_calibrator"].transform(score)[0])
-            conf = confidence(len(events), FULL_CONFIDENCE_EVENTS)
-            p = attenuate(raw, conf)
-            dims["transaction"] = DimensionResult(
-                status="OK" if conf >= 1.0 else "WARMING_UP",
-                distance=round(float(score[0]), 4),
-                probability=round(p, 4),
-                detail={
-                    "eventsSeen": len(events),
-                    "confidence": round(conf, 2),
-                    "rawProbability": round(raw, 4),
-                    **{k: round(float(v), 3) for k, v in fv.as_dict().items()},
-                },
-            )
-            probs["transaction"] = p
+    dims, probs = {}, {}
+    dims["keystroke"], probs["keystroke"] = dm.score_keystroke(
+        user["keystroke_tpl"], _dump(req.keystrokeSample or []), cs)
+    dims["shape"], probs["shape"] = dm.score_shape(
+        user.get("shape_tpl"), _dump(req.shapeTrace or []), cs)
+    dims["mouse"], probs["mouse"] = dm.score_mouse(
+        user["mouse_tpl"], _dump(req.mousePoints), _dump(req.mouseClicks), cs)
+    feats = se.extract(req.session.model_dump()) if req.session else None
+    dims["session"], probs["session"] = dm.score_session(
+        feats, db.get_sessions(req.userId, DB_PATH), cs)
+    dims["transaction"], probs["transaction"] = dm.score_transaction(
+        event, db.get_events(req.userId, DB_PATH), _state, ARTIFACTS)
 
-    # Record the event regardless, so history accumulates.
-    db.add_event(req.userId, req.action.value, req.amount, req.beneficiaryId,
-                 req.deviceId, hash_ip(req.ip), derive_city(req.ip),
-                 req.channel.value, occurred, DB_PATH)
-
-    # ---- combine ---------------------------------------------------
-    # Dimensions outside DECISION_DIMENSIONS are still reported above;
-    # they are withheld from the combination only.
-    scoring = {d: p for d, p in probs.items() if d in DECISION_DIMENSIONS}
-    reliability = {d: calset.reliability(d) for d in scoring}
-    risk, used = combine(scoring, reliability=reliability)
-
-    for d, result in dims.items():
-        if d not in DECISION_DIMENSIONS and result.status in ("OK", "WARMING_UP"):
-            result.detail = {**(result.detail or {}),
-                             "excludedFromDecision": True,
-                             "reason": "calibration not yet fitted on real "
-                                       "collected data"}
-
-    if not used:
-        # Nothing could be assessed. Absence of evidence is not evidence of
-        # safety: escalate rather than allowing.
-        decision = "STEP_UP"
-        risk_out = None
-        risk_band = "HIGH"
-    else:
-        risk_band = band(risk)
-        risk_out = round(risk, 4)
-        decision = {"LOW": "ALLOW", "MEDIUM": "STEP_UP", "HIGH": "DENY"}[risk_band]
-
+    risk, used = _fuse({d: p for d, p in probs.items() if d != "mouse"})
+    risk_band = band(risk) if used else "HIGH"
+    decision = {"LOW": "ALLOW", "MEDIUM": "STEP_UP", "HIGH": "DENY"}[risk_band] if used else "STEP_UP"
+    if decision == "ALLOW":
+        db.add_event(req.userId, req.action, req.amount, req.beneficiaryId,
+                     req.deviceId, hash_ip(req.ip), city, req.channel, occurred, DB_PATH)
+        if feats:
+            db.add_session(req.userId, feats, DB_PATH)
     latency = int((time.perf_counter() - started) * 1000)
-    db.add_verification(req.userId, risk_out, risk_band, decision,
-                        {k: v.model_dump() for k, v in dims.items()},
-                        _state.get("version", "unloaded"), latency, DB_PATH)
-
-    return VerifyResponse(
-        userId=req.userId,
-        riskScore=risk_out,
-        band=risk_band,
-        decision=decision,
-        dimensions=dims,
-        dimensionsUsed=used,
-        modelVersion=_state.get("version", "unloaded"),
-        assessedAt=datetime.now(timezone.utc),
-        latencyMs=latency,
-    )
+    db.add_verification(req.userId, round(risk, 4) if used else None, risk_band,
+                        decision, {"kind": "legacy", **dims}, MODEL_VERSION, latency, DB_PATH)
+    return {"userId": req.userId, "riskScore": round(risk, 4) if used else None,
+            "band": risk_band, "decision": decision, "dimensions": dims,
+            "dimensionsUsed": used, "modelVersion": MODEL_VERSION, "latencyMs": latency}
 
 
-# --------------------------------------------------------------------- #
+# ===================================================================== #
 # Inspection
-# --------------------------------------------------------------------- #
+# ===================================================================== #
 
 
 @app.get("/health")
 def health() -> dict:
     return {
         "status": "up" if _state.get("ready") else "degraded",
+        "factor": FACTOR_NAME,
+        "threshold": THRESHOLD,
         "model": _state.get("version", "not loaded"),
-        "calibratedDimensions": sorted(
-            (_state.get("calset") or CalibrationSet()).calibrators.keys()
-        ),
+        "modelVersion": MODEL_VERSION,
+        "calibratedDimensions": sorted(_calset().calibrators.keys()),
+        "factorDimensions": sorted(FACTOR_DIMENSIONS),
     }
 
 
@@ -656,12 +493,12 @@ def user_detail(user_id: str) -> dict:
     u = db.get_user(user_id, DB_PATH)
     if u is None:
         raise HTTPException(404, "not enrolled")
+    shape_tpl = u.get("shape_tpl")
     return {
-        "userId": u["user_id"],
-        "enrolledAt": u["enrolled_at"],
+        "userId": u["user_id"], "enrolledAt": u["enrolled_at"],
         "keystrokeEnrolled": u["keystroke_tpl"] is not None,
+        "shapeEnrolled": bool(shape_tpl) and "split_mean" in shape_tpl,
         "mouseEnrolled": u["mouse_tpl"] is not None,
-        "shapeEnrolled": u.get("shape_tpl") is not None,
         "eventCount": len(db.get_events(user_id, DB_PATH)),
         "sessionCount": len(db.get_sessions(user_id, DB_PATH)),
     }

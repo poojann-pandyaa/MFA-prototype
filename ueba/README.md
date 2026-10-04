@@ -1,31 +1,50 @@
-# UEBA — Behavioural Authentication
+# UEBA — Behavioural Verification
 
-Verifies a user by **how they behave** across four dimensions, from
-enrollment through to transaction verification.
+A factor service for the adaptive MFA system. It answers two questions at two
+moments in a transaction:
 
-| Dimension | What it observes | Enrolled? |
+| When | Endpoint | Uses | Asks the user for |
+|---|---|---|---|
+| Before the decision | `POST /risk/preview` | Transaction and session behaviour | Nothing |
+| When selected as a factor | `POST /factor/verify` | Typing rhythm and shape tracing | A typed phrase and a traced shape |
+
+The full request and response formats are in **[CONTRACT.md](CONTRACT.md)**.
+
+| Dimension | Observes | Enrollment |
 |---|---|---|
-| **Keystroke** | Dwell and flight timing on a fixed phrase | Yes — 8 samples |
-| **Shape trace** | Deviation and timing at 24 checkpoints along a fixed path | Yes — 5+ traces |
-| **Mouse** | Velocity, acceleration, click timing (free movement) | Yes — passively |
-| **Session** | Duration, action pacing, idle ratio, burst activity | No — accumulates |
-| **Transaction** | Amount, timing, device, location, beneficiary deviation | No — accumulates |
+| **Keystroke** | Key hold and gap timing on a fixed phrase | 6 recordings, first discarded, 5 used |
+| **Shape trace** | Deviation and pace at 24 checkpoints along a trapezoid | 4 complete traces |
+| **Mouse** | Free pointer movement | Passive; reported, not scored |
+| **Session** | Session length and pacing | Builds up from approved transactions |
+| **Transaction** | Amount, device, location, payee, hour, velocity | Builds up from approved transactions |
 
 ---
 
 ## Quick start
 
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+uv venv && source .venv/bin/activate        # or: python3 -m venv .venv
+uv pip install -r requirements.txt          # or: pip install -r requirements.txt
 
-python -m scripts.train      # calibrate all four dimensions (~60s)
-python -m pytest tests/ -q   # 32 tests
+python -m scripts.train      # calibrate every dimension (~60s)
+python -m pytest tests/ -q   # 66 tests
 
 uvicorn api.service:app --reload
 ```
 
-Open **http://localhost:8000**, enroll a user, then:
+Open **http://localhost:8000** and hard-refresh (Cmd+Shift+R). Enroll a user,
+then run a transaction through the four steps: risk preview, challenge,
+verify, record outcome.
+
+**Re-enrol everyone after upgrading.** The shape changed from a zigzag to a
+trapezoid, so old shape templates are refused, and old databases lack the
+new tables:
+
+```bash
+rm -f ueba.db
+```
+
+To give a user history so the preview has something to compare against:
 
 ```bash
 python -m scripts.seed <userId>
@@ -115,18 +134,40 @@ allowing — absence of evidence is not evidence of safety.
 
 ---
 
+## What changed in 3.0
+
+- **Contract endpoints.** `/risk/preview`, `/factor/challenge`,
+  `/factor/verify`, `/profile/commit`, answering in the shared factor format.
+- **Missing input is scored, never skipped.** An empty or partial typing or
+  trace is blended toward the calibrated mean impostor distance by how much is
+  missing. Skipping a whole part of the challenge cannot pass.
+- **Backspace replay.** Corrected typos now align correctly. Before, dropping
+  backspace events kept the deleted characters and shifted every later
+  position against the wrong part of the template.
+- **Trapezoid shape** on a pad locked to 2:1, captured with Pointer Events so
+  it works as a finger drag on phones. Compared by per-checkpoint splits
+  rather than cumulative time.
+- **Only approved transactions update the profile**, through
+  `/profile/commit`. The preview writes nothing.
+- **Single-use challenges** for replay protection without changing the
+  phrase.
+- **Enrollment** reduced to 6 typings and 4 traces.
+
 ## Calibration results
 
 On simulated motor profiles, 40 users:
 
-| Dimension | AUC | EER | Change |
+| Dimension | AUC | EER | Notes |
 |---|---|---|---|
-| Keystroke | 0.977 | **0.073** | was 0.104 |
-| Mouse | 0.965 | **0.098** | was 0.148 |
-| Session | 0.831 | **0.237** | was 0.250 |
+| Keystroke | 0.976 | **0.077** | 5 usable samples (was 8): slightly higher error, shorter enrollment |
+| Shape trace | 0.937 | **0.123** | Trapezoid, 4 traces (zigzag was 0.196) |
+| Mouse | 0.965 | 0.098 | Reported only; did not transfer to real users |
+| Session | 0.831 | 0.237 | Preview only |
 
-Improvements came from feature selection validated on held-out seeds, not
-from tuning against the reported numbers.
+All figures are on simulated motor profiles and describe the pipeline, not
+real-world accuracy. The shape gain comes from three changes made together
+(aspect-correct geometry, per-checkpoint splits, the new shape), so it can't
+be attributed to the shape alone.
 
 Transactional (150 users, 90 days, 1.15% fraud): PR-AUC 0.70, ROC-AUC 0.97.
 

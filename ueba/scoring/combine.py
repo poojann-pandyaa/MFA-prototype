@@ -248,3 +248,45 @@ def band(probability: float) -> str:
     if probability < 0.70:
         return "MEDIUM"
     return "HIGH"
+
+
+# --------------------------------------------------------------------- #
+# Partial and missing challenge responses
+# --------------------------------------------------------------------- #
+
+# Coverage at or above this is treated as a complete response.
+COMPLETE_COVERAGE = 0.9
+
+
+def blend(observed: float | None, penalty: float, coverage: float) -> float:
+    """
+    Score a challenge response by how much of it actually arrived.
+
+        d = c * d_observed + (1 - c) * d_penalty
+
+    where c is coverage (0-1) and d_penalty is the calibrator's measured
+    mean impostor distance -- a typical impostor, not an arbitrary constant.
+
+        full, correct response    -> pure observed distance (unchanged)
+        half the phrase / path    -> halfway toward a typical impostor
+        nothing at all            -> scored exactly as a typical impostor
+
+    A requested challenge that goes unanswered is evidence, not silence. It
+    still passes through the same calibration, per-dimension clipping and
+    reliability weighting as every other score, so it counts strongly but
+    cannot on its own override the other dimensions.
+    """
+    c = float(min(max(coverage, 0.0), 1.0))
+    if observed is None:
+        return float(penalty)
+    if c >= COMPLETE_COVERAGE:
+        return float(observed)
+    return c * float(observed) + (1.0 - c) * float(penalty)
+
+
+def coverage_status(coverage: float) -> str:
+    if coverage >= COMPLETE_COVERAGE:
+        return "OK"
+    if coverage > 0.0:
+        return "PARTIAL"
+    return "MISSING"

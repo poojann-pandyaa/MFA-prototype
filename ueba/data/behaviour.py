@@ -55,6 +55,16 @@ def typing_sample(profile: dict, rng: np.random.Generator,
     for i, ch in enumerate(phrase):
         bias = 1.0 + profile["position_bias"][i % len(profile["position_bias"])]
 
+        # A typo as people actually make one: a wrong key, a backspace, then
+        # the intended key. The earlier simulator emitted a backspace after a
+        # correct key, which under backspace replay deletes it.
+        if rng.random() < profile["error_prone"]:
+            wrong = "qwertyuiopasdfghjklzxcvbnm"[int(rng.integers(0, 26))]
+            events.append({"key": wrong, "down": round(t, 2), "up": round(t + 80, 2)})
+            t += 80 + rng.uniform(120, 260)
+            events.append({"key": "Backspace", "down": round(t, 2), "up": round(t + 60, 2)})
+            t += 60 + rng.uniform(80, 200)
+
         dwell = profile["dwell_base"] * bias * tempo
         dwell *= rng.normal(1.0, profile["dwell_jitter"])
         dwell = max(dwell, 15.0)
@@ -70,11 +80,6 @@ def typing_sample(profile: dict, rng: np.random.Generator,
             flight += rng.uniform(120, 400)
 
         t += dwell + max(flight, -dwell * 0.6)
-
-        if rng.random() < profile["error_prone"]:
-            events.append({"key": "Backspace", "down": round(t, 2),
-                           "up": round(t + 60, 2)})
-            t += 60 + rng.uniform(80, 200)
 
     return events
 
@@ -210,9 +215,12 @@ def shape_profile(rng: np.random.Generator) -> dict:
 def shape_sample(profile: dict, rng: np.random.Generator,
                  t0: float = 0.0) -> list[dict]:
     """One traced attempt at the fixed shape, as raw pointer points."""
-    from features.shape import SHAPE
+    from features.shape import ASPECT, SHAPE
 
+    # Generated in aspect-corrected space, so a deviation means the same
+    # distance in either axis, then mapped back to pad coordinates.
     pts = np.array(SHAPE, dtype=float)
+    pts[:, 0] *= ASPECT
     vecs = pts[1:] - pts[:-1]
     lengths = np.hypot(vecs[:, 0], vecs[:, 1])
     total = lengths.sum()
@@ -252,11 +260,11 @@ def shape_sample(profile: dict, rng: np.random.Generator,
             speed = max(speed, 0.03)
 
             t += (step_len / total) / speed * 1000.0
-            out.append({"x": round(float(p[0]), 4),
+            out.append({"x": round(float(p[0]) / ASPECT, 4),
                         "y": round(float(p[1]), 4),
                         "t": round(t, 2)})
 
     # Final point at the end of the path.
-    out.append({"x": float(pts[-1][0]), "y": float(pts[-1][1]),
+    out.append({"x": float(pts[-1][0]) / ASPECT, "y": float(pts[-1][1]),
                 "t": round(t + 20, 2)})
     return out
