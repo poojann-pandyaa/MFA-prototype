@@ -1,769 +1,1215 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>UEBA behavioural verification</title>
-<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-<style>
-  :root {
-    --bg: #10161d; --panel: #18212b; --raised: #1f2a36; --line: #2a3644;
-    --text: #e4ebf2; --muted: #8b99a8; --accent: #5aa7ff;
-    --ok: #3fb950; --warn: #d6a02a; --bad: #f2564d;
-    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text);
-         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
-         font-size: 14px; line-height: 1.5; }
-  .wrap { max-width: 1180px; margin: 0 auto; padding: 20px 20px 64px; }
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>UEBA behavioural verification</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    :root {
+      --bg: #10161d;
+      --panel: #18212b;
+      --raised: #1f2a36;
+      --line: #2a3644;
+      --text: #e4ebf2;
+      --muted: #8b99a8;
+      --accent: #5aa7ff;
+      --ok: #3fb950;
+      --warn: #d6a02a;
+      --bad: #f2564d;
+      --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    }
 
-  header { display: flex; align-items: flex-end; justify-content: space-between;
-           gap: 16px; flex-wrap: wrap; padding-bottom: 14px;
-           border-bottom: 1px solid var(--line); }
-  header h1 { font-size: 19px; margin: 0; font-weight: 600; letter-spacing: -0.01em; }
-  header p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
-  .strip { display: flex; gap: 6px; flex-wrap: wrap; }
-  .chip { font-size: 12px; padding: 3px 9px; border-radius: 4px;
-          background: var(--raised); color: var(--muted); border: 1px solid var(--line); }
-  .chip b { color: var(--text); font-weight: 500; }
-  .chip.live { border-color: rgba(63,185,80,.45); }
-  .chip.down { border-color: rgba(242,86,77,.5); }
+    * {
+      box-sizing: border-box;
+    }
 
-  nav { display: flex; gap: 2px; margin: 14px 0 22px; }
-  nav button { background: none; border: 1px solid transparent; color: var(--muted);
-               padding: 7px 14px; border-radius: 6px; cursor: pointer; font: inherit; }
-  nav button:hover { color: var(--text); }
-  nav button.on { color: var(--text); background: var(--panel); border-color: var(--line); }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+    }
 
-  .grid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 18px;
-          align-items: start; }
-  .grid.even { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-  @media (max-width: 860px) { .grid, .grid.even { grid-template-columns: 1fr; } }
-  .stack { display: grid; gap: 14px; }
-  .sticky { position: sticky; top: 16px; }
+    .wrap {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 20px 20px 64px;
+    }
 
-  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
-           padding: 18px; }
-  .panel.dim { opacity: .5; pointer-events: none; }
-  .step-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
-  .step-num { width: 22px; height: 22px; border-radius: 50%; display: grid;
-              place-items: center; font-size: 12px; background: var(--raised);
-              border: 1px solid var(--line); color: var(--muted); flex: none; }
-  .step-num.done { background: rgba(63,185,80,.15); border-color: rgba(63,185,80,.5);
-                   color: var(--ok); }
-  h2 { font-size: 15px; margin: 0; font-weight: 600; }
-  .hint { color: var(--muted); font-size: 12.5px; margin: 8px 0 0; line-height: 1.55; }
+    header {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--line);
+    }
 
-  label { display: block; font-size: 12px; color: var(--muted); margin: 0 0 5px; }
-  input, select { width: 100%; background: #0c1117; border: 1px solid var(--line);
-                  color: var(--text); padding: 9px 11px; border-radius: 6px; font: inherit; }
-  input:focus, select:focus, button:focus-visible { outline: 2px solid var(--accent);
-                                                    outline-offset: 1px; border-color: transparent; }
-  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
-  @media (max-width: 520px) { .row { grid-template-columns: 1fr; } }
+    header h1 {
+      font-size: 19px;
+      margin: 0;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+    }
 
-  button.go { background: var(--accent); color: #06111d; border: none; padding: 9px 16px;
-              border-radius: 6px; cursor: pointer; font: inherit; font-weight: 600; }
-  button.ghost { background: var(--raised); color: var(--text); border: 1px solid var(--line);
-                 padding: 9px 14px; border-radius: 6px; cursor: pointer; font: inherit; }
-  button:disabled { opacity: .45; cursor: not-allowed; }
-  .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+    header p {
+      margin: 2px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
 
-  .phrase { font-family: var(--mono); font-size: 16px; padding: 12px 14px;
-            background: #0c1117; border: 1px solid var(--line); border-radius: 6px;
-            margin-bottom: 10px; letter-spacing: .02em; }
-  .phrase .ok { color: var(--ok); }
-  .phrase .bad { color: var(--bad); text-decoration: underline; }
-  .phrase .rest { color: var(--muted); }
+    .strip {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
 
-  .dots { display: flex; gap: 5px; margin: 10px 0 0; }
-  .dot { flex: 1; max-width: 34px; height: 5px; border-radius: 3px; background: #2c3846; }
-  .dot.done { background: var(--ok); }
-  .dot.warm { background: #4a5868; }
+    .chip {
+      font-size: 12px;
+      padding: 3px 9px;
+      border-radius: 4px;
+      background: var(--raised);
+      color: var(--muted);
+      border: 1px solid var(--line);
+    }
 
-  .arena { position: relative; height: 112px; margin-top: 12px; border-radius: 6px;
-           border: 1px dashed var(--line); background: #0c1117; }
-  .arena .go { position: absolute; transform: translate(-50%, -50%); }
+    .chip b {
+      color: var(--text);
+      font-weight: 500;
+    }
 
-  .tracepad { position: relative; width: 100%; max-width: 560px; aspect-ratio: 2 / 1;
-              background: #0c1117; border: 1px solid var(--line); border-radius: 8px;
-              touch-action: none; cursor: crosshair; user-select: none; }
-  .tracepad svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+    .chip.live {
+      border-color: rgba(63, 185, 80, .45);
+    }
 
-  .check { display: grid; gap: 9px; margin: 4px 0 12px; }
-  .check div { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; }
-  .check span:first-child { color: var(--muted); }
-  .num { font-variant-numeric: tabular-nums; }
-  .good { color: var(--ok); } .warn { color: var(--warn); } .badc { color: var(--bad); }
+    .chip.down {
+      border-color: rgba(242, 86, 77, .5);
+    }
 
-  .pill { display: inline-block; padding: 2px 9px; border-radius: 20px; font-size: 11.5px;
-          font-weight: 600; background: #253140; color: var(--muted); }
-  .pill.PASSED, .pill.OK, .pill.LOW { background: rgba(63,185,80,.16); color: var(--ok); }
-  .pill.MEDIUM, .pill.PARTIAL, .pill.WARMING_UP { background: rgba(214,160,42,.16); color: var(--warn); }
-  .pill.FAILED, .pill.HIGH, .pill.MISSING, .pill.UNAVAILABLE { background: rgba(242,86,77,.16); color: var(--bad); }
+    nav {
+      display: flex;
+      gap: 2px;
+      margin: 14px 0 22px;
+    }
 
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th { text-align: left; font-weight: 500; color: var(--muted); font-size: 12px;
-       padding: 7px 8px; border-bottom: 1px solid var(--line); }
-  td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
-  .mono { font-family: var(--mono); font-size: 12px; }
+    nav button {
+      background: none;
+      border: 1px solid transparent;
+      color: var(--muted);
+      padding: 7px 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      font: inherit;
+    }
 
-  .scorebar { position: relative; height: 12px; border-radius: 6px; margin: 26px 0 8px;
-              background: linear-gradient(90deg, rgba(242,86,77,.28) 0 70%,
-                                          rgba(214,160,42,.3) 70% 80.5%,
-                                          rgba(63,185,80,.3) 80.5% 100%); }
-  .scorebar .mark { position: absolute; top: -18px; transform: translateX(-50%);
-                    font-size: 11px; color: var(--muted); white-space: nowrap; }
-  .scorebar .tick { position: absolute; top: -3px; bottom: -3px; width: 1px; background: var(--muted); }
-  .scorebar .needle { position: absolute; top: -5px; width: 4px; height: 22px; border-radius: 2px;
-                      background: var(--text); transform: translateX(-50%); }
-  .scale { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); }
+    nav button:hover {
+      color: var(--text);
+    }
 
-  .big { font-size: 28px; font-weight: 600; font-variant-numeric: tabular-nums; }
-  .err { color: var(--bad); font-size: 13px; margin-top: 10px; }
-  .flags { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px; margin-top: 12px; }
-  .flags div { display: flex; justify-content: space-between; font-size: 12.5px; }
-  .flags span:first-child { color: var(--muted); }
-  .filter { display: flex; gap: 6px; margin-bottom: 12px; }
-  @media (prefers-reduced-motion: no-preference) {
-    .needle { transition: left .35s ease-out; }
-  }
-</style>
-</head>
-<body>
-<div id="root"></div>
-<script type="text/babel">
-const { useState, useRef, useEffect, useCallback } = React;
-const API = "";
+    nav button.on {
+      color: var(--text);
+      background: var(--panel);
+      border-color: var(--line);
+    }
 
-const get = (p) => fetch(API + p).then(async r => ({ ok: r.ok, status: r.status, data: await r.json() }));
-const post = (p, body) => fetch(API + p, { method: "POST",
-  headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
-  .then(async r => ({ ok: r.ok, status: r.status, data: await r.json() }));
-const errText = (d) => typeof d?.detail === "string" ? d.detail
-  : Array.isArray(d?.detail) ? d.detail.map(x => x.msg).join("; ") : "Request failed";
+    .grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 320px;
+      gap: 18px;
+      align-items: start;
+    }
 
-/* Capture ------------------------------------------------------------ */
+    .grid.even {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    }
 
-function useKeystroke() {
-  const down = useRef({});
-  const events = useRef([]);
-  const onKeyDown = (e) => {
-    if (e.key === "Enter" || down.current[e.key] !== undefined) return;
-    down.current[e.key] = performance.now();
-  };
-  const onKeyUp = (e) => {
-    const t = down.current[e.key];
-    if (t === undefined) return;
-    events.current.push({ key: e.key, down: t, up: performance.now() });
-    delete down.current[e.key];
-  };
-  const reset = () => { events.current = []; down.current = {}; };
-  return { onKeyDown, onKeyUp, reset, get: () => events.current.slice() };
-}
+    @media (max-width: 860px) {
 
-// Mouse-only pointer capture for free-movement mouse dynamics. Touches are
-// left out deliberately: they are a different motor signal.
-function usePointerCapture() {
-  const points = useRef([]);
-  const clicks = useRef([]);
-  const downAt = useRef(null);
-  useEffect(() => {
-    let last = 0;
-    const move = (e) => {
-      if (e.pointerType !== "mouse") return;
-      const t = performance.now();
-      if (t - last < 16) return;
-      last = t;
-      points.current.push({ x: e.clientX, y: e.clientY, t: Math.round(t * 100) / 100 });
-    };
-    const pd = (e) => { if (e.pointerType === "mouse") downAt.current = performance.now(); };
-    const pu = (e) => {
-      if (e.pointerType !== "mouse" || downAt.current === null) return;
-      clicks.current.push({ down: downAt.current, up: performance.now() });
-      downAt.current = null;
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerdown", pd);
-    window.addEventListener("pointerup", pu);
-    return () => { window.removeEventListener("pointermove", move);
-                   window.removeEventListener("pointerdown", pd);
-                   window.removeEventListener("pointerup", pu); };
-  }, []);
-  const snapshot = () => { const p = points.current.slice(); points.current = []; return p; };
-  const reset = () => { points.current = []; clicks.current = []; };
-  return { points, clicks, snapshot, reset };
-}
-
-function useSession() {
-  const start = useRef(Date.now() / 1000);
-  const actions = useRef([]);
-  const mark = useCallback(() => { actions.current.push(Date.now() / 1000); }, []);
-  const payload = () => ({ start: start.current, end: Date.now() / 1000,
-                           actions: actions.current.slice() });
-  return { mark, payload };
-}
-
-const capability = () => ({
-  pointer: window.matchMedia("(pointer: fine)").matches,
-  touch: (navigator.maxTouchPoints || 0) > 0,
-});
-
-/* Pieces ------------------------------------------------------------- */
-
-function PhraseEcho({ phrase, typed }) {
-  let i = 0;
-  while (i < typed.length && typed[i] === phrase[i]) i++;
-  const wrong = typed.length > i ? phrase.slice(i, Math.min(typed.length, phrase.length)) : "";
-  const rest = phrase.slice(i + wrong.length);
-  return (
-    <div className="phrase" aria-label={"Type: " + phrase}>
-      <span className="ok">{phrase.slice(0, i)}</span>
-      <span className="bad">{wrong}</span>
-      <span className="rest">{rest}</span>
-    </div>
-  );
-}
-
-// Pointer Events cover mouse, pen and touch with one code path, so the trace
-// works as a finger drag on phones. The pad is locked to the shape's aspect
-// ratio: a stretched pad would make enrollment and verification different
-// shapes, and the 60 degree slopes are only 60 degrees at 2:1.
-function TracePad({ shape, aspect, onTrace, requireEnds }) {
-  const ref = useRef(null);
-  const pts = useRef([]);
-  const active = useRef(false);
-  const [drawn, setDrawn] = useState([]);
-  const [msg, setMsg] = useState("");
-
-  const norm = (e) => {
-    const r = ref.current.getBoundingClientRect();
-    return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height,
-             t: Math.round(performance.now() * 100) / 100 };
-  };
-  const near = (p, q) => Math.hypot((p.x - q[0]) * aspect, p.y - q[1]) < 0.16;
-
-  const down = (e) => {
-    e.preventDefault();
-    ref.current.setPointerCapture(e.pointerId);
-    active.current = true;
-    pts.current = [norm(e)];
-    setDrawn(pts.current.slice());
-    setMsg("");
-  };
-  const move = (e) => {
-    if (!active.current) return;
-    pts.current.push(norm(e));
-    if (pts.current.length % 2 === 0) setDrawn(pts.current.slice());
-  };
-  const up = () => {
-    if (!active.current) return;
-    active.current = false;
-    const tr = pts.current.slice();
-    setDrawn([]);
-    if (requireEnds) {
-      if (tr.length < 10) { setMsg("Too short. Trace the whole line."); return; }
-      if (!near(tr[0], shape[0]) || !near(tr[tr.length - 1], shape[shape.length - 1])) {
-        setMsg("Start on the green dot and finish on the red one.");
-        return;
+      .grid,
+      .grid.even {
+        grid-template-columns: 1fr;
       }
     }
-    onTrace(tr);
-  };
 
-  const W = 200, H = 200 / aspect;
-  const line = shape.map(([x, y], i) => `${i ? "L" : "M"}${x * W} ${y * H}`).join(" ");
-  const user = drawn.map((p, i) => `${i ? "L" : "M"}${p.x * W} ${p.y * H}`).join(" ");
-  const [s0, s1] = [shape[0], shape[shape.length - 1]];
+    .stack {
+      display: grid;
+      gap: 14px;
+    }
 
-  return (
-    <div>
-      <div className="tracepad" ref={ref} onPointerDown={down} onPointerMove={move}
-           onPointerUp={up} onPointerCancel={up} role="img"
-           aria-label="Trace pad: drag from the green dot to the red dot along the line">
-        <svg viewBox={`0 0 ${W} ${H}`}>
-          <path d={line} fill="none" stroke="#34465a" strokeWidth="4" strokeLinejoin="round"
-                strokeLinecap="round" />
-          <circle cx={s0[0] * W} cy={s0[1] * H} r="4" fill="#3fb950" />
-          <circle cx={s1[0] * W} cy={s1[1] * H} r="4" fill="#f2564d" />
-          {user && <path d={user} fill="none" stroke="#5aa7ff" strokeWidth="1.6"
-                         strokeLinejoin="round" strokeLinecap="round" />}
-        </svg>
-      </div>
-      {msg && <div className="err">{msg}</div>}
-    </div>
-  );
-}
+    .sticky {
+      position: sticky;
+      top: 16px;
+    }
 
-function Dots({ total, done, warm = 0 }) {
-  return (
-    <div className="dots" aria-label={`${done} of ${total} recorded`}>
-      {Array.from({ length: total }).map((_, i) =>
-        <div key={i} className={"dot" + (i < done ? (i < warm ? " warm" : " done") : "")} />)}
-    </div>
-  );
-}
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 18px;
+    }
 
-function Step({ n, title, done, dim, children }) {
-  return (
-    <section className={"panel" + (dim ? " dim" : "")}>
-      <div className="step-head">
-        <div className={"step-num" + (done ? " done" : "")}>{done ? "✓" : n}</div>
-        <h2>{title}</h2>
-      </div>
-      {children}
-    </section>
-  );
-}
+    .panel.dim {
+      opacity: .5;
+      pointer-events: none;
+    }
 
-function ScoreBar({ score, threshold }) {
-  const pos = (v) => `${Math.max(0, Math.min(1, v)) * 100}%`;
-  const marginal = Math.min(1, threshold * 1.15);
-  return (
-    <div>
-      <div className="scorebar" style={{ background:
-        `linear-gradient(90deg, rgba(242,86,77,.28) 0 ${pos(threshold)},
-          rgba(214,160,42,.3) ${pos(threshold)} ${pos(marginal)},
-          rgba(63,185,80,.3) ${pos(marginal)} 100%)` }}>
-        <span className="mark" style={{ left: pos(threshold) }}>pass at {threshold}</span>
-        <span className="tick" style={{ left: pos(threshold) }} />
-        {score !== null && <span className="needle" style={{ left: pos(score) }} />}
-      </div>
-      <div className="scale"><span>0</span><span>marginal below {marginal.toFixed(3)}</span><span>1</span></div>
-    </div>
-  );
-}
+    .step-head {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
 
-/* Enroll ------------------------------------------------------------- */
+    .step-num {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      font-size: 12px;
+      background: var(--raised);
+      border: 1px solid var(--line);
+      color: var(--muted);
+      flex: none;
+    }
 
-function Enroll({ meta, session, goTransact }) {
-  const [userId, setUserId] = useState("");
-  const [typed, setTyped] = useState("");
-  const [samples, setSamples] = useState([]);
-  const [segments, setSegments] = useState([]);
-  const [traces, setTraces] = useState([]);
-  const [target, setTarget] = useState({ top: 56, left: 50 });
-  const [result, setResult] = useState(null);
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const kb = useKeystroke();
-  const ptr = usePointerCapture();
-  const inputRef = useRef(null);
+    .step-num.done {
+      background: rgba(63, 185, 80, .15);
+      border-color: rgba(63, 185, 80, .5);
+      color: var(--ok);
+    }
 
-  const reps = meta.repetitions, needTraces = meta.shapeTracesRequired;
-  const typingDone = samples.length >= reps, shapeDone = traces.length >= needTraces;
+    h2 {
+      font-size: 15px;
+      margin: 0;
+      font-weight: 600;
+    }
 
-  const submitSample = () => {
-    if (typed !== meta.phrase) { setError("The text doesn't match the phrase yet."); return; }
-    setSamples(s => [...s, kb.get()]);
-    setSegments(g => [...g, ptr.snapshot()]);
-    kb.reset(); setTyped(""); setError(""); session.mark();
-    setTarget({ top: 28 + Math.random() * 56, left: 14 + Math.random() * 72 });
-    inputRef.current?.focus();
-  };
+    .hint {
+      color: var(--muted);
+      font-size: 12.5px;
+      margin: 8px 0 0;
+      line-height: 1.55;
+    }
 
-  const finish = async () => {
-    setBusy(true); setError("");
-    const r = await post("/enroll", { userId: userId.trim(), keystrokeSamples: samples,
-      shapeTraces: traces, mouseSegments: segments.filter(s => s.length),
-      mouseClicks: ptr.clicks.current });
-    setBusy(false);
-    if (!r.ok) { setError(errText(r.data)); return; }
-    setResult(r.data);
-  };
+    label {
+      display: block;
+      font-size: 12px;
+      color: var(--muted);
+      margin: 0 0 5px;
+    }
 
-  const restart = () => { setResult(null); setSamples([]); setSegments([]); setTraces([]);
-                          setTyped(""); setUserId(""); kb.reset(); ptr.reset(); };
+    input,
+    select {
+      width: 100%;
+      background: #0c1117;
+      border: 1px solid var(--line);
+      color: var(--text);
+      padding: 9px 11px;
+      border-radius: 6px;
+      font: inherit;
+    }
 
-  if (result) return (
-    <div className="grid even">
-      <section className="panel">
-        <div className="step-head"><div className="step-num done">✓</div>
-          <h2>{result.userId} is enrolled</h2></div>
-        <div className="check">
-          <div><span>Typing template</span><span className="num">
-            {result.keystroke.samples} of {result.keystroke.recorded} recordings used</span></div>
-          <div><span>Mean key hold</span><span className="num">{result.keystroke.meanDwellMs} ms</span></div>
-          <div><span>Typing speed</span><span className="num">{result.keystroke.typingSpeedCps} chars/s</span></div>
-          <div><span>Shape template</span><span className="num">
-            {result.shape.samples} traces, {result.shape.checkpoints} checkpoints</span></div>
-          <div><span>Mouse template</span><span className={result.mouse.status === "ENROLLED" ? "" : "warn"}>
-            {result.mouse.status === "ENROLLED" ? `${result.mouse.samples} segments, not scored`
-              : "not enough movement, not scored"}</span></div>
-          <div><span>Session profile</span><span>builds up with approved transactions</span></div>
+    input:focus,
+    select:focus,
+    button:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 1px;
+      border-color: transparent;
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    @media (max-width: 520px) {
+      .row {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    button.go {
+      background: var(--accent);
+      color: #06111d;
+      border: none;
+      padding: 9px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font: inherit;
+      font-weight: 600;
+    }
+
+    button.ghost {
+      background: var(--raised);
+      color: var(--text);
+      border: 1px solid var(--line);
+      padding: 9px 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      font: inherit;
+    }
+
+    button:disabled {
+      opacity: .45;
+      cursor: not-allowed;
+    }
+
+    .actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 14px;
+    }
+
+    .phrase {
+      font-family: var(--mono);
+      font-size: 16px;
+      padding: 12px 14px;
+      background: #0c1117;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      margin-bottom: 10px;
+      letter-spacing: .02em;
+    }
+
+    .phrase .ok {
+      color: var(--ok);
+    }
+
+    .phrase .bad {
+      color: var(--bad);
+      text-decoration: underline;
+    }
+
+    .phrase .rest {
+      color: var(--muted);
+    }
+
+    .dots {
+      display: flex;
+      gap: 5px;
+      margin: 10px 0 0;
+    }
+
+    .dot {
+      flex: 1;
+      max-width: 34px;
+      height: 5px;
+      border-radius: 3px;
+      background: #2c3846;
+    }
+
+    .dot.done {
+      background: var(--ok);
+    }
+
+    .dot.warm {
+      background: #4a5868;
+    }
+
+    .arena {
+      position: relative;
+      height: 112px;
+      margin-top: 12px;
+      border-radius: 6px;
+      border: 1px dashed var(--line);
+      background: #0c1117;
+    }
+
+    .arena .go {
+      position: absolute;
+      transform: translate(-50%, -50%);
+    }
+
+    .tracepad {
+      position: relative;
+      width: 100%;
+      max-width: 560px;
+      aspect-ratio: 2 / 1;
+      background: #0c1117;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      touch-action: none;
+      cursor: crosshair;
+      user-select: none;
+    }
+
+    .tracepad svg {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    .check {
+      display: grid;
+      gap: 9px;
+      margin: 4px 0 12px;
+    }
+
+    .check div {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      font-size: 13px;
+    }
+
+    .check span:first-child {
+      color: var(--muted);
+    }
+
+    .num {
+      font-variant-numeric: tabular-nums;
+    }
+
+    .good {
+      color: var(--ok);
+    }
+
+    .warn {
+      color: var(--warn);
+    }
+
+    .badc {
+      color: var(--bad);
+    }
+
+    .pill {
+      display: inline-block;
+      padding: 2px 9px;
+      border-radius: 20px;
+      font-size: 11.5px;
+      font-weight: 600;
+      background: #253140;
+      color: var(--muted);
+    }
+
+    .pill.PASSED,
+    .pill.OK,
+    .pill.LOW {
+      background: rgba(63, 185, 80, .16);
+      color: var(--ok);
+    }
+
+    .pill.MEDIUM,
+    .pill.PARTIAL,
+    .pill.WARMING_UP {
+      background: rgba(214, 160, 42, .16);
+      color: var(--warn);
+    }
+
+    .pill.FAILED,
+    .pill.HIGH,
+    .pill.MISSING,
+    .pill.UNAVAILABLE {
+      background: rgba(242, 86, 77, .16);
+      color: var(--bad);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    th {
+      text-align: left;
+      font-weight: 500;
+      color: var(--muted);
+      font-size: 12px;
+      padding: 7px 8px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    td {
+      padding: 8px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+    }
+
+    .mono {
+      font-family: var(--mono);
+      font-size: 12px;
+    }
+
+    .scorebar {
+      position: relative;
+      height: 12px;
+      border-radius: 6px;
+      margin: 26px 0 8px;
+      background: linear-gradient(90deg, rgba(242, 86, 77, .28) 0 70%,
+          rgba(214, 160, 42, .3) 70% 80.5%,
+          rgba(63, 185, 80, .3) 80.5% 100%);
+    }
+
+    .scorebar .mark {
+      position: absolute;
+      top: -18px;
+      transform: translateX(-50%);
+      font-size: 11px;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .scorebar .tick {
+      position: absolute;
+      top: -3px;
+      bottom: -3px;
+      width: 1px;
+      background: var(--muted);
+    }
+
+    .scorebar .needle {
+      position: absolute;
+      top: -5px;
+      width: 4px;
+      height: 22px;
+      border-radius: 2px;
+      background: var(--text);
+      transform: translateX(-50%);
+    }
+
+    .scale {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .big {
+      font-size: 28px;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .err {
+      color: var(--bad);
+      font-size: 13px;
+      margin-top: 10px;
+    }
+
+    .flags {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px 14px;
+      margin-top: 12px;
+    }
+
+    .flags div {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12.5px;
+    }
+
+    .flags span:first-child {
+      color: var(--muted);
+    }
+
+    .filter {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 12px;
+    }
+
+    @media (prefers-reduced-motion: no-preference) {
+      .needle {
+        transition: left .35s ease-out;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useRef, useEffect, useCallback } = React;
+    const API = "";
+
+    const get = (p) => fetch(API + p).then(async r => ({ ok: r.ok, status: r.status, data: await r.json() }));
+    const post = (p, body) => fetch(API + p, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
+    })
+      .then(async r => ({ ok: r.ok, status: r.status, data: await r.json() }));
+    const errText = (d) => typeof d?.detail === "string" ? d.detail
+      : Array.isArray(d?.detail) ? d.detail.map(x => x.msg).join("; ") : "Request failed";
+
+    /* Capture ------------------------------------------------------------ */
+
+    function useKeystroke() {
+      const down = useRef({});
+      const events = useRef([]);
+      const onKeyDown = (e) => {
+        if (e.key === "Enter" || down.current[e.key] !== undefined) return;
+        down.current[e.key] = performance.now();
+      };
+      const onKeyUp = (e) => {
+        const t = down.current[e.key];
+        if (t === undefined) return;
+        events.current.push({ key: e.key, down: t, up: performance.now() });
+        delete down.current[e.key];
+      };
+      const reset = () => { events.current = []; down.current = {}; };
+      return { onKeyDown, onKeyUp, reset, get: () => events.current.slice() };
+    }
+
+    // Mouse-only pointer capture for free-movement mouse dynamics. Touches are
+    // left out deliberately: they are a different motor signal.
+    function usePointerCapture() {
+      const points = useRef([]);
+      const clicks = useRef([]);
+      const downAt = useRef(null);
+      useEffect(() => {
+        let last = 0;
+        const move = (e) => {
+          if (e.pointerType !== "mouse") return;
+          const t = performance.now();
+          if (t - last < 16) return;
+          last = t;
+          points.current.push({ x: e.clientX, y: e.clientY, t: Math.round(t * 100) / 100 });
+        };
+        const pd = (e) => { if (e.pointerType === "mouse") downAt.current = performance.now(); };
+        const pu = (e) => {
+          if (e.pointerType !== "mouse" || downAt.current === null) return;
+          clicks.current.push({ down: downAt.current, up: performance.now() });
+          downAt.current = null;
+        };
+        window.addEventListener("pointermove", move);
+        window.addEventListener("pointerdown", pd);
+        window.addEventListener("pointerup", pu);
+        return () => {
+          window.removeEventListener("pointermove", move);
+          window.removeEventListener("pointerdown", pd);
+          window.removeEventListener("pointerup", pu);
+        };
+      }, []);
+      const snapshot = () => { const p = points.current.slice(); points.current = []; return p; };
+      const reset = () => { points.current = []; clicks.current = []; };
+      return { points, clicks, snapshot, reset };
+    }
+
+    function useSession() {
+      const start = useRef(Date.now() / 1000);
+      const actions = useRef([]);
+      const mark = useCallback(() => { actions.current.push(Date.now() / 1000); }, []);
+      const payload = () => ({
+        start: start.current, end: Date.now() / 1000,
+        actions: actions.current.slice()
+      });
+      return { mark, payload };
+    }
+
+    const capability = () => ({
+      pointer: window.matchMedia("(pointer: fine)").matches,
+      touch: (navigator.maxTouchPoints || 0) > 0,
+    });
+
+    /* Pieces ------------------------------------------------------------- */
+
+    function PhraseEcho({ phrase, typed }) {
+      let i = 0;
+      while (i < typed.length && typed[i] === phrase[i]) i++;
+      const wrong = typed.length > i ? phrase.slice(i, Math.min(typed.length, phrase.length)) : "";
+      const rest = phrase.slice(i + wrong.length);
+      return (
+        <div className="phrase" aria-label={"Type: " + phrase}>
+          <span className="ok">{phrase.slice(0, i)}</span>
+          <span className="bad">{wrong}</span>
+          <span className="rest">{rest}</span>
         </div>
-        <div className="actions">
-          <button className="go" onClick={goTransact}>Run a transaction</button>
-          <button className="ghost" onClick={restart}>Enrol someone else</button>
-        </div>
-      </section>
-    </div>
-  );
+      );
+    }
 
-  return (
-    <div className="grid">
-      <div className="stack">
-        <Step n={1} title="Who is enrolling" done={!!userId.trim()}>
-          <label htmlFor="uid">User ID</label>
-          <input id="uid" value={userId} onChange={e => setUserId(e.target.value)}
-                 placeholder="e.g. devdeep" autoComplete="off" />
-        </Step>
+    // Pointer Events cover mouse, pen and touch with one code path, so the trace
+    // works as a finger drag on phones. The pad is locked to the shape's aspect
+    // ratio: a stretched pad would make enrollment and verification different
+    // shapes, and the 60 degree slopes are only 60 degrees at 2:1.
+    function TracePad({ shape, aspect, onTrace, requireEnds }) {
+      const ref = useRef(null);
+      const pts = useRef([]);
+      const active = useRef(false);
+      const [drawn, setDrawn] = useState([]);
+      const [msg, setMsg] = useState("");
 
-        <Step n={2} title={`Type the phrase ${reps} times`} done={typingDone}>
-          <PhraseEcho phrase={meta.phrase} typed={typed} />
-          <input ref={inputRef} value={typed} autoComplete="off" spellCheck="false"
-                 disabled={typingDone} aria-label="Type the phrase"
-                 onChange={e => setTyped(e.target.value)}
-                 onKeyDown={e => { kb.onKeyDown(e); if (e.key === "Enter") submitSample(); }}
-                 onKeyUp={kb.onKeyUp}
-                 placeholder={typingDone ? "All recordings captured" : "Type here"} />
-          <Dots total={reps} done={samples.length} warm={Math.min(samples.length, meta.discarded)} />
-          {!typingDone && (
-            <div className="arena">
-              <button className="go" style={{ top: target.top + "%", left: target.left + "%" }}
-                      onClick={submitSample} disabled={!typed}>Save recording</button>
-            </div>
-          )}
-          <p className="hint">
-            The first recording is a warm-up and isn't used: on an unfamiliar phrase people
-            type more slowly at first. Mistakes you correct with backspace are fine. The
-            save button moves each time so your pointer movement varies between recordings.
-          </p>
-        </Step>
+      const norm = (e) => {
+        const r = ref.current.getBoundingClientRect();
+        return {
+          x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height,
+          t: Math.round(performance.now() * 100) / 100
+        };
+      };
+      const near = (p, q) => Math.hypot((p.x - q[0]) * aspect, p.y - q[1]) < 0.16;
 
-        <Step n={3} title={`Trace the shape ${needTraces} times`} done={shapeDone}>
-          {meta.shape && !shapeDone && (
-            <TracePad shape={meta.shape} aspect={meta.aspectRatio} requireEnds
-                      onTrace={tr => { setTraces(t => [...t, tr]); session.mark(); }} />
-          )}
-          <Dots total={needTraces} done={traces.length} />
-          <p className="hint">
-            Hold down and drag from the green dot to the red one, following the line. How
-            closely you track it, your pace, and how you take the two corners is what
-            identifies you. Works with a mouse, trackpad or finger.
-          </p>
-          {traces.length > 0 && !shapeDone &&
-            <div className="actions"><button className="ghost"
-              onClick={() => setTraces(t => t.slice(0, -1))}>Discard last trace</button></div>}
-        </Step>
-      </div>
+      const down = (e) => {
+        e.preventDefault();
+        ref.current.setPointerCapture(e.pointerId);
+        active.current = true;
+        pts.current = [norm(e)];
+        setDrawn(pts.current.slice());
+        setMsg("");
+      };
+      const move = (e) => {
+        if (!active.current) return;
+        pts.current.push(norm(e));
+        if (pts.current.length % 2 === 0) setDrawn(pts.current.slice());
+      };
+      const up = () => {
+        if (!active.current) return;
+        active.current = false;
+        const tr = pts.current.slice();
+        setDrawn([]);
+        if (requireEnds) {
+          if (tr.length < 10) { setMsg("Too short. Trace the whole line."); return; }
+          if (!near(tr[0], shape[0]) || !near(tr[tr.length - 1], shape[shape.length - 1])) {
+            setMsg("Start on the green dot and finish on the red one.");
+            return;
+          }
+        }
+        onTrace(tr);
+      };
 
-      <aside className="panel sticky">
-        <h2 style={{ marginBottom: 12 }}>Enrollment</h2>
-        <div className="check">
-          <div><span>User ID</span><span>{userId.trim() || "not set"}</span></div>
-          <div><span>Typing</span><span className={"num " + (typingDone ? "good" : "")}>
-            {samples.length} / {reps}</span></div>
-          <div><span>Shape traces</span><span className={"num " + (shapeDone ? "good" : "")}>
-            {traces.length} / {needTraces}</span></div>
-        </div>
-        <button className="go" style={{ width: "100%" }} onClick={finish}
-                disabled={busy || !userId.trim() || !typingDone || !shapeDone}>
-          {busy ? "Enrolling" : "Enrol"}
-        </button>
-        {error && <div className="err">{error}</div>}
-        <p className="hint">Templates store timing and tracing statistics only, never a
-          recording of what you typed or drew.</p>
-      </aside>
-    </div>
-  );
-}
+      const W = 200, H = 200 / aspect;
+      const line = shape.map(([x, y], i) => `${i ? "L" : "M"}${x * W} ${y * H}`).join(" ");
+      const user = drawn.map((p, i) => `${i ? "L" : "M"}${p.x * W} ${p.y * H}`).join(" ");
+      const [s0, s1] = [shape[0], shape[shape.length - 1]];
 
-/* Transact ----------------------------------------------------------- */
-
-const newTxn = () => "txn_" + Math.random().toString(36).slice(2, 10);
-
-function Transact({ session }) {
-  const [form, setForm] = useState({ userId: "", amount: "5000", payeeId: "b_1",
-    deviceId: "d_1", ip: "103.21.45.67", channel: "WEB" });
-  const [txn, setTxn] = useState(newTxn());
-  const [preview, setPreview] = useState(null);
-  const [challenge, setChallenge] = useState(null);
-  const [typed, setTyped] = useState("");
-  const [trace, setTrace] = useState(null);
-  const [result, setResult] = useState(null);
-  const [commit, setCommit] = useState(null);
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [target, setTarget] = useState({ top: 52, left: 50 });
-  const kb = useKeystroke();
-  const ptr = usePointerCapture();
-  const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }));
-
-  const assess = async () => {
-    setBusy(true); setError(""); session.mark();
-    const r = await post("/risk/preview", { userId: form.userId.trim(), transactionId: txn,
-      amountPaise: Math.round(parseFloat(form.amount || "0") * 100), payeeId: form.payeeId,
-      deviceId: form.deviceId, ip: form.ip, channel: form.channel,
-      timestamp: new Date().toISOString(), session: session.payload() });
-    if (!r.ok) { setBusy(false); setError(errText(r.data)); return; }
-    const c = await get("/factor/challenge?userId=" + encodeURIComponent(form.userId.trim()));
-    setBusy(false);
-    if (!c.ok) { setError(errText(c.data)); return; }
-    setPreview(r.data); setChallenge(c.data);
-    kb.reset(); ptr.reset();
-    setTarget({ top: 28 + Math.random() * 56, left: 14 + Math.random() * 72 });
-  };
-
-  // Submitting with nothing typed or traced is allowed on purpose: a
-  // skipped challenge is scored as missing, not quietly ignored.
-  const verify = async () => {
-    setBusy(true); setError(""); session.mark();
-    const r = await post("/factor/verify", { sessionId: "demo_" + txn, userId: form.userId.trim(),
-      transactionId: txn, challengeId: challenge.challengeId,
-      payload: { keystroke: kb.get(), shapeTrace: trace || [],
-                 pointer: { points: ptr.points.current, clicks: ptr.clicks.current },
-                 capability: capability() } });
-    setBusy(false);
-    if (!r.ok) { setError(errText(r.data)); return; }
-    setResult(r.data);
-  };
-
-  const record = async (outcome) => {
-    setBusy(true);
-    const r = await post("/profile/commit", { transactionId: txn, outcome });
-    setBusy(false);
-    if (!r.ok) { setError(errText(r.data)); return; }
-    setCommit(r.data);
-  };
-
-  const again = () => { setTxn(newTxn()); setPreview(null); setChallenge(null); setTyped("");
-                        setTrace(null); setResult(null); setCommit(null); setError(""); };
-
-  const yn = (v) => v === null || v === undefined ? "unknown" : v ? "yes" : "no";
-
-  return (
-    <div className="grid even">
-      <div className="stack">
-        <Step n={1} title="Transaction and risk preview" done={!!preview}>
-          <div className="row">
-            <div><label htmlFor="tu">User ID</label>
-              <input id="tu" value={form.userId} onChange={set("userId")} disabled={!!preview}
-                     placeholder="an enrolled user" /></div>
-            <div><label htmlFor="ta">Amount (₹)</label>
-              <input id="ta" value={form.amount} onChange={set("amount")} disabled={!!preview}
-                     inputMode="decimal" /></div>
-          </div>
-          <div className="row">
-            <div><label htmlFor="tp">Payee ID</label>
-              <input id="tp" value={form.payeeId} onChange={set("payeeId")} disabled={!!preview} /></div>
-            <div><label htmlFor="td">Device ID</label>
-              <input id="td" value={form.deviceId} onChange={set("deviceId")} disabled={!!preview} /></div>
-          </div>
-          <div className="row">
-            <div><label htmlFor="ti">IP address</label>
-              <input id="ti" value={form.ip} onChange={set("ip")} disabled={!!preview} /></div>
-            <div><label htmlFor="tc">Channel</label>
-              <select id="tc" value={form.channel} onChange={set("channel")} disabled={!!preview}>
-                <option>WEB</option><option>MOBILE</option></select></div>
-          </div>
-          {!preview && <div className="actions">
-            <button className="go" onClick={assess} disabled={busy || !form.userId.trim()}>
-              {busy ? "Assessing" : "Assess risk"}</button></div>}
-
-          {preview && (
-            <div style={{ marginTop: 6 }}>
-              <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                <span className={"pill " + preview.band}>{preview.band} risk</span>
-                <span className="pill">{preview.status}</span>
-                <span className="hint" style={{ margin: 0 }}>
-                  {preview.dimensionsUsed.length
-                    ? `from ${preview.dimensionsUsed.join(" and ")}, confidence ${preview.confidence}`
-                    : "no approved history yet, so treated as high"}</span>
-              </div>
-              <div className="flags">
-                <div><span>Device seen before</span><span>{yn(preview.flags.deviceSeenBefore)}</span></div>
-                <div><span>Location seen before</span><span>{yn(preview.flags.locationSeenBefore)}</span></div>
-                <div><span>Payee seen before</span><span>{yn(preview.flags.payeeSeenBefore)}</span></div>
-                <div><span>Unusual hour</span><span>{yn(preview.flags.hourUnusual)}</span></div>
-                <div><span>Many in the last hour</span><span>{yn(preview.flags.velocityHigh)}</span></div>
-                <div><span>Dormant account</span><span>{yn(preview.flags.dormant)}</span></div>
-              </div>
-              <p className="hint">This is what the decision engine receives. The IP address and
-                device ID stop here; the engine only ever sees these flags and the band.</p>
-            </div>
-          )}
-        </Step>
-
-        <Step n={2} title="Behavioural challenge" done={!!result} dim={!challenge}>
-          {challenge && (<>
-            <PhraseEcho phrase={challenge.phrase} typed={typed} />
-            <input value={typed} autoComplete="off" spellCheck="false" disabled={!!result}
-                   aria-label="Type the phrase" onChange={e => setTyped(e.target.value)}
-                   onKeyDown={kb.onKeyDown} onKeyUp={kb.onKeyUp} placeholder="Type the phrase" />
-            <div style={{ marginTop: 14 }}>
-              {!result && <TracePad shape={challenge.shape} aspect={challenge.aspectRatio}
-                                     onTrace={tr => setTrace(tr)} />}
-              <p className="hint">{trace ? "Trace captured. Draw again to replace it."
-                : "Trace the shape from the green dot to the red one."}</p>
-            </div>
-            {!result && <div className="arena">
-              <button className="go" style={{ top: target.top + "%", left: target.left + "%" }}
-                      onClick={verify} disabled={busy}>{busy ? "Verifying" : "Verify"}</button>
-            </div>}
-            <p className="hint">Anything left out still counts. A skipped or half-finished
-              challenge is scored toward an impostor, not ignored.</p>
-          </>)}
-          {!challenge && <p className="hint">Unlocks after the risk preview.</p>}
-        </Step>
-        {error && <div className="err">{error}</div>}
-      </div>
-
-      <div className="stack">
-        <Step n={3} title="Factor result" done={!!result} dim={!result}>
-          {!result && <p className="hint">The response in the shared factor contract appears here.</p>}
-          {result && (<>
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <span className="big">{result.score === null ? "none" : result.score.toFixed(3)}</span>
-              <span className={"pill " + result.status}>{result.status}</span>
-            </div>
-            {result.failureReason && <p className="hint">Reason: {result.failureReason}</p>}
-            <ScoreBar score={result.score} threshold={result.threshold} />
-            <table style={{ marginTop: 14 }}>
-              <thead><tr><th>Part</th><th>Status</th><th>Coverage</th><th>P(impostor)</th></tr></thead>
-              <tbody>
-                {["keystroke", "shape", "mouse"].map(k => {
-                  const d = result.detail[k] || {};
-                  return (
-                    <tr key={k}>
-                      <td>{k === "keystroke" ? "Typing" : k === "shape" ? "Shape trace" : "Mouse"}
-                        {d.excludedFromScore && <div className="hint" style={{ margin: 0 }}>reported, not scored</div>}</td>
-                      <td><span className={"pill " + d.status}>{d.status}</span></td>
-                      <td className="mono">{d.coverage ?? "n/a"}</td>
-                      <td className="mono">{d.probability ?? "n/a"}</td>
-                    </tr>);
-                })}
-              </tbody>
-            </table>
-            <p className="hint">Score is 1 − P(impostor) from typing and shape combined.
-              Transaction risk is not counted here; it already shaped the decision in step 1.</p>
-          </>)}
-        </Step>
-
-        <Step n={4} title="Record the outcome" done={!!commit} dim={!result}>
-          {!commit && (<>
-            <p className="hint" style={{ marginTop: 0 }}>In production the orchestrator reports
-              how the session ended. Here you play that role. Only an approved transaction
-              becomes part of this user's normal behaviour.</p>
-            <div className="actions">
-              <button className="go" onClick={() => record("APPROVED")} disabled={!result || busy}>
-                Approve and record</button>
-              <button className="ghost" onClick={() => record("BLOCKED")} disabled={!result || busy}>
-                Block</button>
-            </div>
-          </>)}
-          {commit && (<>
-            <div className="check">
-              <div><span>Outcome</span><span>{commit.outcome}</span></div>
-              <div><span>Added to history</span><span className={commit.written ? "good" : ""}>
-                {commit.written ? "yes" : "no"}</span></div>
-              <div><span>Approved transactions</span><span className="num">{commit.eventsNow}</span></div>
-              <div><span>Sessions</span><span className="num">{commit.sessionsNow}</span></div>
-            </div>
-            {commit.reason && <p className="hint">{commit.reason}</p>}
-            <div className="actions"><button className="go" onClick={again}>New transaction</button></div>
-          </>)}
-        </Step>
-      </div>
-    </div>
-  );
-}
-
-/* History ------------------------------------------------------------ */
-
-function History() {
-  const [rows, setRows] = useState([]);
-  const [kind, setKind] = useState("all");
-  const load = () => get("/history?limit=50").then(r => r.ok && setRows(r.data.verifications));
-  useEffect(() => { load(); }, []);
-  const kindOf = (r) => r.dimensions?.kind || "legacy";
-  const shown = rows.filter(r => kind === "all" || kindOf(r) === kind);
-
-  return (
-    <section className="panel">
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-        <div className="filter">
-          {[["all", "All"], ["preview", "Risk previews"], ["factor", "Factor checks"]].map(([k, l]) =>
-            <button key={k} className={kind === k ? "go" : "ghost"} onClick={() => setKind(k)}>{l}</button>)}
-        </div>
-        <button className="ghost" onClick={load}>Refresh</button>
-      </div>
-      {shown.length === 0 ? <p className="hint">Nothing recorded yet. Enrol a user and run a transaction.</p> : (
-        <table>
-          <thead><tr><th>When</th><th>User</th><th>Check</th><th>Result</th>
-            <th>Score</th><th>Detail</th><th>ms</th></tr></thead>
-          <tbody>{shown.map(r => {
-            const d = r.dimensions || {}, k = kindOf(r);
-            return (
-              <tr key={r.id}>
-                <td className="mono">{new Date(r.decided_at * 1000).toLocaleTimeString()}</td>
-                <td>{r.user_id}</td>
-                <td>{k === "preview" ? "Risk preview" : k === "factor" ? "Factor check" : "Legacy"}</td>
-                <td><span className={"pill " + (k === "preview" ? r.band : r.decision)}>
-                  {k === "preview" ? r.band : r.decision}</span></td>
-                <td className="mono">{k === "factor" ? (d.score ?? "none")
-                  : r.risk_prob === null ? "none" : `risk ${r.risk_prob}`}</td>
-                <td className="hint" style={{ margin: 0 }}>{k === "factor"
-                  ? (d.failureReason || ["keystroke", "shape"].map(x => `${x} ${d[x]?.status ?? ""}`).join(", "))
-                  : k === "preview" ? `${d.eventsSeen ?? 0} approved before` : ""}</td>
-                <td className="mono">{r.latency_ms}</td>
-              </tr>);
-          })}</tbody>
-        </table>
-      )}
-    </section>
-  );
-}
-
-/* App ---------------------------------------------------------------- */
-
-function App() {
-  const [tab, setTab] = useState("enroll");
-  const [meta, setMeta] = useState(null);
-  const [health, setHealth] = useState(null);
-  const session = useSession();
-
-  useEffect(() => {
-    get("/enroll/phrase").then(r => r.ok && setMeta(r.data));
-    get("/health").then(r => setHealth(r.ok ? r.data : { status: "down" }))
-      .catch(() => setHealth({ status: "down" }));
-  }, []);
-
-  return (
-    <div className="wrap">
-      <header>
+      return (
         <div>
-          <h1>Behavioural verification</h1>
-          <p>Typing rhythm and shape tracing, scored against each person's own enrollment.</p>
-        </div>
-        {health && (
-          <div className="strip" aria-label="Service status">
-            <span className={"chip " + (health.status === "up" ? "live" : "down")}>
-              service <b>{health.status === "up" ? "live" : health.status}</b></span>
-            {health.factor && <span className="chip">factor <b>{health.factor}</b></span>}
-            {health.threshold && <span className="chip">pass at <b>{health.threshold}</b></span>}
-            {health.modelVersion && <span className="chip"><b>{health.modelVersion}</b></span>}
+          <div className="tracepad" ref={ref} onPointerDown={down} onPointerMove={move}
+            onPointerUp={up} onPointerCancel={up} role="img"
+            aria-label="Trace pad: drag from the green dot to the red dot along the line">
+            <svg viewBox={`0 0 ${W} ${H}`}>
+              <path d={line} fill="none" stroke="#34465a" strokeWidth="4" strokeLinejoin="round"
+                strokeLinecap="round" />
+              <circle cx={s0[0] * W} cy={s0[1] * H} r="4" fill="#3fb950" />
+              <circle cx={s1[0] * W} cy={s1[1] * H} r="4" fill="#f2564d" />
+              {user && <path d={user} fill="none" stroke="#5aa7ff" strokeWidth="1.6"
+                strokeLinejoin="round" strokeLinecap="round" />}
+            </svg>
           </div>
-        )}
-      </header>
-      <nav>
-        {[["enroll", "Enroll"], ["transact", "Transact"], ["history", "History"]].map(([k, l]) =>
-          <button key={k} className={tab === k ? "on" : ""}
-                  onClick={() => { setTab(k); session.mark(); }}>{l}</button>)}
-      </nav>
-      {!meta ? <p className="hint">Connecting to the service.</p> : <>
-        {tab === "enroll" && <Enroll meta={meta} session={session} goTransact={() => setTab("transact")} />}
-        {tab === "transact" && <Transact session={session} />}
-        {tab === "history" && <History />}
-      </>}
-    </div>
-  );
-}
+          {msg && <div className="err">{msg}</div>}
+        </div>
+      );
+    }
 
-ReactDOM.createRoot(document.getElementById("root")).render(<App />);
-</script>
+    function Dots({ total, done, warm = 0 }) {
+      return (
+        <div className="dots" aria-label={`${done} of ${total} recorded`}>
+          {Array.from({ length: total }).map((_, i) =>
+            <div key={i} className={"dot" + (i < done ? (i < warm ? " warm" : " done") : "")} />)}
+        </div>
+      );
+    }
+
+    function Step({ n, title, done, dim, children }) {
+      return (
+        <section className={"panel" + (dim ? " dim" : "")}>
+          <div className="step-head">
+            <div className={"step-num" + (done ? " done" : "")}>{done ? "✓" : n}</div>
+            <h2>{title}</h2>
+          </div>
+          {children}
+        </section>
+      );
+    }
+
+    function ScoreBar({ score, threshold }) {
+      const pos = (v) => `${Math.max(0, Math.min(1, v)) * 100}%`;
+      const marginal = Math.min(1, threshold * 1.15);
+      return (
+        <div>
+          <div className="scorebar" style={{
+            background:
+              `linear-gradient(90deg, rgba(242,86,77,.28) 0 ${pos(threshold)},
+          rgba(214,160,42,.3) ${pos(threshold)} ${pos(marginal)},
+          rgba(63,185,80,.3) ${pos(marginal)} 100%)`
+          }}>
+            <span className="mark" style={{ left: pos(threshold) }}>pass at {threshold}</span>
+            <span className="tick" style={{ left: pos(threshold) }} />
+            {score !== null && <span className="needle" style={{ left: pos(score) }} />}
+          </div>
+          <div className="scale"><span>0</span><span>marginal below {marginal.toFixed(3)}</span><span>1</span></div>
+        </div>
+      );
+    }
+
+    /* Enroll ------------------------------------------------------------- */
+
+    function Enroll({ meta, session, goTransact }) {
+      const [userId, setUserId] = useState("");
+      const [typed, setTyped] = useState("");
+      const [samples, setSamples] = useState([]);
+      const [segments, setSegments] = useState([]);
+      const [traces, setTraces] = useState([]);
+      const [target, setTarget] = useState({ top: 56, left: 50 });
+      const [result, setResult] = useState(null);
+      const [error, setError] = useState("");
+      const [busy, setBusy] = useState(false);
+      const kb = useKeystroke();
+      const ptr = usePointerCapture();
+      const inputRef = useRef(null);
+
+      // Practice rounds are not recorded. A cold template captures someone still
+      // learning an unfamiliar phrase and shape; in testing, cold enrollments
+      // failed their owner and a warmed-up one passed four times out of four.
+      const PT = 3, PS = 2;            // practice typings, practice traces
+      const [pt, setPt] = useState(0);
+      const [ps, setPs] = useState(0);
+      const practising = pt < PT;
+
+      const reps = meta.repetitions, needTraces = meta.shapeTracesRequired;
+      const typingDone = samples.length >= reps, shapeDone = traces.length >= needTraces;
+
+      const submitSample = () => {
+        if (typed !== meta.phrase) { setError("The text doesn't match the phrase yet."); return; }
+        // Read the captures before queuing the updates. React runs updater
+        // functions later, by which time kb.reset() below has emptied them.
+        const ev = kb.get(), seg = ptr.snapshot();
+        if (practising) setPt(n => n + 1);
+        else { setSamples(s => [...s, ev]); setSegments(g => [...g, seg]); }
+        kb.reset(); setTyped(""); setError(""); session.mark();
+        setTarget({ top: 28 + Math.random() * 56, left: 14 + Math.random() * 72 });
+        inputRef.current?.focus();
+      };
+
+      const finish = async () => {
+        setBusy(true); setError("");
+        const r = await post("/enroll", {
+          userId: userId.trim(), keystrokeSamples: samples,
+          shapeTraces: traces, mouseSegments: segments.filter(s => s.length),
+          mouseClicks: ptr.clicks.current
+        });
+        setBusy(false);
+        if (!r.ok) { setError(errText(r.data)); return; }
+        setResult(r.data);
+      };
+
+      const restart = () => {
+        setResult(null); setSamples([]); setSegments([]); setTraces([]);
+        setTyped(""); setUserId(""); setPt(0); setPs(0);
+        kb.reset(); ptr.reset();
+      };
+
+      if (result) return (
+        <div className="grid even">
+          <section className="panel">
+            <div className="step-head"><div className="step-num done">✓</div>
+              <h2>{result.userId} is enrolled</h2></div>
+            <div className="check">
+              <div><span>Typing template</span><span className="num">
+                {result.keystroke.samples} of {result.keystroke.recorded} recordings used</span></div>
+              <div><span>Mean key hold</span><span className="num">{result.keystroke.meanDwellMs} ms</span></div>
+              <div><span>Typing speed</span><span className="num">{result.keystroke.typingSpeedCps} chars/s</span></div>
+              <div><span>Shape template</span><span className="num">
+                {result.shape.samples} traces, {result.shape.checkpoints} checkpoints</span></div>
+              <div><span>Mouse template</span><span className={result.mouse.status === "ENROLLED" ? "" : "warn"}>
+                {result.mouse.status === "ENROLLED" ? `${result.mouse.samples} segments, not scored`
+                  : "not enough movement, not scored"}</span></div>
+              <div><span>Session profile</span><span>builds up with approved transactions</span></div>
+            </div>
+            <div className="actions">
+              <button className="go" onClick={goTransact}>Run a transaction</button>
+              <button className="ghost" onClick={restart}>Enrol someone else</button>
+            </div>
+          </section>
+        </div>
+      );
+
+      return (
+        <div className="grid">
+          <div className="stack">
+            <Step n={1} title="Who is enrolling" done={!!userId.trim()}>
+              <label htmlFor="uid">User ID</label>
+              <input id="uid" value={userId} onChange={e => setUserId(e.target.value)}
+                placeholder="e.g. devdeep" autoComplete="off" />
+            </Step>
+
+            <Step n={2} title={`Type the phrase ${reps} times`} done={typingDone}>
+              <PhraseEcho phrase={meta.phrase} typed={typed} />
+              {!typingDone && <p className="hint" style={{ margin: "0 0 8px" }}>
+                {practising ? `Practice ${pt + 1} of ${PT}, not saved`
+                  : `Recording ${samples.length + 1} of ${reps}`}</p>}
+              <input ref={inputRef} value={typed} autoComplete="off" spellCheck="false"
+                disabled={typingDone} aria-label="Type the phrase"
+                onChange={e => setTyped(e.target.value)}
+                onKeyDown={e => { kb.onKeyDown(e); if (e.key === "Enter") submitSample(); }}
+                onKeyUp={kb.onKeyUp}
+                placeholder={typingDone ? "All recordings captured" : "Type here"} />
+              <Dots total={reps} done={samples.length} warm={Math.min(samples.length, meta.discarded)} />
+              {!typingDone && (
+                <div className="arena">
+                  <button className="go" style={{ top: target.top + "%", left: target.left + "%" }}
+                    onClick={submitSample} disabled={!typed}>
+                    {practising ? "Next practice" : "Save recording"}</button>
+                </div>
+              )}
+              <p className="hint">
+                The first {PT} typings are practice and aren't saved, and the first saved
+                recording is discarded too: on an unfamiliar phrase people type more slowly at
+                first. Mistakes you correct with backspace are fine. The button moves each time
+                so your pointer movement varies between recordings.
+              </p>
+            </Step>
+
+            <Step n={3} title={`Trace the shape ${needTraces} times`} done={shapeDone}>
+              {meta.shape && !shapeDone && (
+                <TracePad shape={meta.shape} aspect={meta.aspectRatio} requireEnds
+                  onTrace={tr => {
+                    if (ps < PS) setPs(n => n + 1);
+                    else setTraces(t => [...t, tr]);
+                    session.mark();
+                  }} />
+              )}
+              {!shapeDone && <p className="hint" style={{ margin: "8px 0 0" }}>
+                {ps < PS ? `Practice ${ps + 1} of ${PS}, not saved`
+                  : `Trace ${traces.length + 1} of ${needTraces}`}</p>}
+              <Dots total={needTraces} done={traces.length} />
+              <p className="hint">
+                The first {PS} traces are practice. Hold down and drag from the green dot to
+                the red one, following the line. How
+                closely you track it, your pace, and how you take the two corners is what
+                identifies you. Works with a mouse, trackpad or finger.
+              </p>
+              {traces.length > 0 && !shapeDone &&
+                <div className="actions"><button className="ghost"
+                  onClick={() => setTraces(t => t.slice(0, -1))}>Discard last trace</button></div>}
+            </Step>
+          </div>
+
+          <aside className="panel sticky">
+            <h2 style={{ marginBottom: 12 }}>Enrollment</h2>
+            <div className="check">
+              <div><span>User ID</span><span>{userId.trim() || "not set"}</span></div>
+              <div><span>Typing</span><span className={"num " + (typingDone ? "good" : "")}>
+                {samples.length} / {reps}</span></div>
+              <div><span>Shape traces</span><span className={"num " + (shapeDone ? "good" : "")}>
+                {traces.length} / {needTraces}</span></div>
+            </div>
+            <button className="go" style={{ width: "100%" }} onClick={finish}
+              disabled={busy || !userId.trim() || !typingDone || !shapeDone}>
+              {busy ? "Enrolling" : "Enrol"}
+            </button>
+            {error && <div className="err">{error}</div>}
+            <p className="hint">Templates store timing and tracing statistics only, never a
+              recording of what you typed or drew.</p>
+          </aside>
+        </div>
+      );
+    }
+
+    /* Transact ----------------------------------------------------------- */
+
+    const newTxn = () => "txn_" + Math.random().toString(36).slice(2, 10);
+
+    function Transact({ session }) {
+      const [form, setForm] = useState({
+        userId: "", amount: "5000", payeeId: "b_1",
+        deviceId: "d_1", ip: "103.21.45.67", channel: "WEB"
+      });
+      const [txn, setTxn] = useState(newTxn());
+      const [preview, setPreview] = useState(null);
+      const [challenge, setChallenge] = useState(null);
+      const [typed, setTyped] = useState("");
+      const [trace, setTrace] = useState(null);
+      const [result, setResult] = useState(null);
+      const [commit, setCommit] = useState(null);
+      const [error, setError] = useState("");
+      const [busy, setBusy] = useState(false);
+      const [target, setTarget] = useState({ top: 52, left: 50 });
+      const kb = useKeystroke();
+      const ptr = usePointerCapture();
+      const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }));
+
+      const assess = async () => {
+        setBusy(true); setError(""); session.mark();
+        const r = await post("/risk/preview", {
+          userId: form.userId.trim(), transactionId: txn,
+          amountPaise: Math.round(parseFloat(form.amount || "0") * 100), payeeId: form.payeeId,
+          deviceId: form.deviceId, ip: form.ip, channel: form.channel,
+          timestamp: new Date().toISOString(), session: session.payload()
+        });
+        if (!r.ok) { setBusy(false); setError(errText(r.data)); return; }
+        const c = await get("/factor/challenge?userId=" + encodeURIComponent(form.userId.trim()));
+        setBusy(false);
+        if (!c.ok) { setError(errText(c.data)); return; }
+        setPreview(r.data); setChallenge(c.data);
+        kb.reset(); ptr.reset();
+        setTarget({ top: 28 + Math.random() * 56, left: 14 + Math.random() * 72 });
+      };
+
+      // Submitting with nothing typed or traced is allowed on purpose: a
+      // skipped challenge is scored as missing, not quietly ignored.
+      const verify = async () => {
+        setBusy(true); setError(""); session.mark();
+        const r = await post("/factor/verify", {
+          sessionId: "demo_" + txn, userId: form.userId.trim(),
+          transactionId: txn, challengeId: challenge.challengeId,
+          payload: {
+            keystroke: kb.get(), shapeTrace: trace || [],
+            pointer: { points: ptr.points.current, clicks: ptr.clicks.current },
+            capability: capability()
+          }
+        });
+        setBusy(false);
+        if (!r.ok) { setError(errText(r.data)); return; }
+        setResult(r.data);
+      };
+
+      const record = async (outcome) => {
+        setBusy(true);
+        const r = await post("/profile/commit", { transactionId: txn, outcome });
+        setBusy(false);
+        if (!r.ok) { setError(errText(r.data)); return; }
+        setCommit(r.data);
+      };
+
+      const again = () => {
+        setTxn(newTxn()); setPreview(null); setChallenge(null); setTyped("");
+        setTrace(null); setResult(null); setCommit(null); setError("");
+      };
+
+      const yn = (v) => v === null || v === undefined ? "unknown" : v ? "yes" : "no";
+
+      return (
+        <div className="grid even">
+          <div className="stack">
+            <Step n={1} title="Transaction and risk preview" done={!!preview}>
+              <div className="row">
+                <div><label htmlFor="tu">User ID</label>
+                  <input id="tu" value={form.userId} onChange={set("userId")} disabled={!!preview}
+                    placeholder="an enrolled user" /></div>
+                <div><label htmlFor="ta">Amount (₹)</label>
+                  <input id="ta" value={form.amount} onChange={set("amount")} disabled={!!preview}
+                    inputMode="decimal" /></div>
+              </div>
+              <div className="row">
+                <div><label htmlFor="tp">Payee ID</label>
+                  <input id="tp" value={form.payeeId} onChange={set("payeeId")} disabled={!!preview} /></div>
+                <div><label htmlFor="td">Device ID</label>
+                  <input id="td" value={form.deviceId} onChange={set("deviceId")} disabled={!!preview} /></div>
+              </div>
+              <div className="row">
+                <div><label htmlFor="ti">IP address</label>
+                  <input id="ti" value={form.ip} onChange={set("ip")} disabled={!!preview} /></div>
+                <div><label htmlFor="tc">Channel</label>
+                  <select id="tc" value={form.channel} onChange={set("channel")} disabled={!!preview}>
+                    <option>WEB</option><option>MOBILE</option></select></div>
+              </div>
+              {!preview && <div className="actions">
+                <button className="go" onClick={assess} disabled={busy || !form.userId.trim()}>
+                  {busy ? "Assessing" : "Assess risk"}</button></div>}
+
+              {preview && (
+                <div style={{ marginTop: 6 }}>
+                  <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                    <span className={"pill " + preview.band}>{preview.band} risk</span>
+                    <span className="pill">{preview.status}</span>
+                    <span className="hint" style={{ margin: 0 }}>
+                      {preview.dimensionsUsed.length
+                        ? `from ${preview.dimensionsUsed.join(" and ")}, confidence ${preview.confidence}`
+                        : "no approved history yet, so treated as high"}</span>
+                  </div>
+                  <div className="flags">
+                    <div><span>Device seen before</span><span>{yn(preview.flags.deviceSeenBefore)}</span></div>
+                    <div><span>Location seen before</span><span>{yn(preview.flags.locationSeenBefore)}</span></div>
+                    <div><span>Payee seen before</span><span>{yn(preview.flags.payeeSeenBefore)}</span></div>
+                    <div><span>Unusual hour</span><span>{yn(preview.flags.hourUnusual)}</span></div>
+                    <div><span>Many in the last hour</span><span>{yn(preview.flags.velocityHigh)}</span></div>
+                    <div><span>Dormant account</span><span>{yn(preview.flags.dormant)}</span></div>
+                  </div>
+                  <p className="hint">This is what the decision engine receives. The IP address and
+                    device ID stop here; the engine only ever sees these flags and the band.</p>
+                </div>
+              )}
+            </Step>
+
+            <Step n={2} title="Behavioural challenge" done={!!result} dim={!challenge}>
+              {challenge && (<>
+                <PhraseEcho phrase={challenge.phrase} typed={typed} />
+                <input value={typed} autoComplete="off" spellCheck="false" disabled={!!result}
+                  aria-label="Type the phrase" onChange={e => setTyped(e.target.value)}
+                  onKeyDown={kb.onKeyDown} onKeyUp={kb.onKeyUp} placeholder="Type the phrase" />
+                <div style={{ marginTop: 14 }}>
+                  {!result && <TracePad shape={challenge.shape} aspect={challenge.aspectRatio}
+                    onTrace={tr => setTrace(tr)} />}
+                  <p className="hint">{trace ? "Trace captured. Draw again to replace it."
+                    : "Trace the shape from the green dot to the red one."}</p>
+                </div>
+                {!result && <div className="arena">
+                  <button className="go" style={{ top: target.top + "%", left: target.left + "%" }}
+                    onClick={verify} disabled={busy}>{busy ? "Verifying" : "Verify"}</button>
+                </div>}
+                <p className="hint">Anything left out still counts. A skipped or half-finished
+                  challenge is scored toward an impostor, not ignored.</p>
+              </>)}
+              {!challenge && <p className="hint">Unlocks after the risk preview.</p>}
+            </Step>
+            {error && <div className="err">{error}</div>}
+          </div>
+
+          <div className="stack">
+            <Step n={3} title="Factor result" done={!!result} dim={!result}>
+              {!result && <p className="hint">The response in the shared factor contract appears here.</p>}
+              {result && (<>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <span className="big">{result.score === null ? "none" : result.score.toFixed(3)}</span>
+                  <span className={"pill " + result.status}>{result.status}</span>
+                </div>
+                {result.failureReason && <p className="hint">Reason: {result.failureReason}</p>}
+                <ScoreBar score={result.score} threshold={result.threshold} />
+                <table style={{ marginTop: 14 }}>
+                  <thead><tr><th>Part</th><th>Status</th><th>Coverage</th><th>P(impostor)</th></tr></thead>
+                  <tbody>
+                    {["keystroke", "shape", "mouse"].map(k => {
+                      const d = result.detail[k] || {};
+                      return (
+                        <tr key={k}>
+                          <td>{k === "keystroke" ? "Typing" : k === "shape" ? "Shape trace" : "Mouse"}
+                            {d.excludedFromScore && <div className="hint" style={{ margin: 0 }}>reported, not scored</div>}</td>
+                          <td><span className={"pill " + d.status}>{d.status}</span></td>
+                          <td className="mono">{d.coverage ?? "n/a"}</td>
+                          <td className="mono">{d.probability ?? "n/a"}</td>
+                        </tr>);
+                    })}
+                  </tbody>
+                </table>
+                <p className="hint">Score is 1 − P(impostor) from typing and shape combined.
+                  Transaction risk is not counted here; it already shaped the decision in step 1.</p>
+              </>)}
+            </Step>
+
+            <Step n={4} title="Record the outcome" done={!!commit} dim={!result}>
+              {!commit && (<>
+                <p className="hint" style={{ marginTop: 0 }}>In production the orchestrator reports
+                  how the session ended. Here you play that role. Only an approved transaction
+                  becomes part of this user's normal behaviour.</p>
+                <div className="actions">
+                  <button className="go" onClick={() => record("APPROVED")} disabled={!result || busy}>
+                    Approve and record</button>
+                  <button className="ghost" onClick={() => record("BLOCKED")} disabled={!result || busy}>
+                    Block</button>
+                </div>
+              </>)}
+              {commit && (<>
+                <div className="check">
+                  <div><span>Outcome</span><span>{commit.outcome}</span></div>
+                  <div><span>Added to history</span><span className={commit.written ? "good" : ""}>
+                    {commit.written ? "yes" : "no"}</span></div>
+                  <div><span>Approved transactions</span><span className="num">{commit.eventsNow}</span></div>
+                  <div><span>Sessions</span><span className="num">{commit.sessionsNow}</span></div>
+                </div>
+                {commit.reason && <p className="hint">{commit.reason}</p>}
+                <div className="actions"><button className="go" onClick={again}>New transaction</button></div>
+              </>)}
+            </Step>
+          </div>
+        </div>
+      );
+    }
+
+    /* History ------------------------------------------------------------ */
+
+    function History() {
+      const [rows, setRows] = useState([]);
+      const [kind, setKind] = useState("all");
+      const load = () => get("/history?limit=50").then(r => r.ok && setRows(r.data.verifications));
+      useEffect(() => { load(); }, []);
+      const kindOf = (r) => r.dimensions?.kind || "legacy";
+      const shown = rows.filter(r => kind === "all" || kindOf(r) === kind);
+
+      return (
+        <section className="panel">
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+            <div className="filter">
+              {[["all", "All"], ["preview", "Risk previews"], ["factor", "Factor checks"]].map(([k, l]) =>
+                <button key={k} className={kind === k ? "go" : "ghost"} onClick={() => setKind(k)}>{l}</button>)}
+            </div>
+            <button className="ghost" onClick={load}>Refresh</button>
+          </div>
+          {shown.length === 0 ? <p className="hint">Nothing recorded yet. Enrol a user and run a transaction.</p> : (
+            <table>
+              <thead><tr><th>When</th><th>User</th><th>Check</th><th>Result</th>
+                <th>Score</th><th>Detail</th><th>ms</th></tr></thead>
+              <tbody>{shown.map(r => {
+                const d = r.dimensions || {}, k = kindOf(r);
+                return (
+                  <tr key={r.id}>
+                    <td className="mono">{new Date(r.decided_at * 1000).toLocaleTimeString()}</td>
+                    <td>{r.user_id}</td>
+                    <td>{k === "preview" ? "Risk preview" : k === "factor" ? "Factor check" : "Legacy"}</td>
+                    <td><span className={"pill " + (k === "preview" ? r.band : r.decision)}>
+                      {k === "preview" ? r.band : r.decision}</span></td>
+                    <td className="mono">{k === "factor" ? (d.score ?? "none")
+                      : r.risk_prob === null ? "none" : `risk ${r.risk_prob}`}</td>
+                    <td className="hint" style={{ margin: 0 }}>{k === "factor"
+                      ? (d.failureReason || ["keystroke", "shape"].map(x => `${x} ${d[x]?.status ?? ""}`).join(", "))
+                      : k === "preview" ? `${d.eventsSeen ?? 0} approved before` : ""}</td>
+                    <td className="mono">{r.latency_ms}</td>
+                  </tr>);
+              })}</tbody>
+            </table>
+          )}
+        </section>
+      );
+    }
+
+    /* App ---------------------------------------------------------------- */
+
+    function App() {
+      const [tab, setTab] = useState("enroll");
+      const [meta, setMeta] = useState(null);
+      const [health, setHealth] = useState(null);
+      const session = useSession();
+
+      useEffect(() => {
+        get("/enroll/phrase").then(r => r.ok && setMeta(r.data));
+        get("/health").then(r => setHealth(r.ok ? r.data : { status: "down" }))
+          .catch(() => setHealth({ status: "down" }));
+      }, []);
+
+      return (
+        <div className="wrap">
+          <header>
+            <div>
+              <h1>Behavioural verification</h1>
+              <p>Typing rhythm and shape tracing, scored against each person's own enrollment.</p>
+            </div>
+            {health && (
+              <div className="strip" aria-label="Service status">
+                <span className={"chip " + (health.status === "up" ? "live" : "down")}>
+                  service <b>{health.status === "up" ? "live" : health.status}</b></span>
+                {health.factor && <span className="chip">factor <b>{health.factor}</b></span>}
+                {health.threshold && <span className="chip">pass at <b>{health.threshold}</b></span>}
+                {health.modelVersion && <span className="chip"><b>{health.modelVersion}</b></span>}
+              </div>
+            )}
+          </header>
+          <nav>
+            {[["enroll", "Enroll"], ["transact", "Transact"], ["history", "History"]].map(([k, l]) =>
+              <button key={k} className={tab === k ? "on" : ""}
+                onClick={() => { setTab(k); session.mark(); }}>{l}</button>)}
+          </nav>
+          {!meta ? <p className="hint">Connecting to the service.</p> : <>
+            {tab === "enroll" && <Enroll meta={meta} session={session} goTransact={() => setTab("transact")} />}
+            {tab === "transact" && <Transact session={session} />}
+            {tab === "history" && <History />}
+          </>}
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
 </body>
+
 </html>
