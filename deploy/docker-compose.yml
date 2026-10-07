@@ -1,0 +1,196 @@
+name: amfa
+
+x-hardening: &hardening
+  read_only: true
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: ["ALL"]
+  tmpfs: ["/tmp:size=256m,mode=1777"]
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: { max-size: "20m", max-file: "5" }
+
+x-core-env: &core-env
+  AMFA_ENV: production
+  AMFA_ROLE: core
+  AMFA_PUBLIC_URL: ${AMFA_PUBLIC_URL:?set in .env}
+  AMFA_MASTER_KEYS: ${AMFA_MASTER_KEYS:?set in .env}
+  AMFA_INTERNAL_TOKEN: ${AMFA_INTERNAL_TOKEN:?set in .env}
+  AMFA_IP_SALT: ${AMFA_IP_SALT:?set in .env}
+  AMFA_REDIS_URL: redis://:${REDIS_PASSWORD:?set in .env}@redis:6379/0
+  AMFA_OTP_PROVIDER: ${AMFA_OTP_PROVIDER:-webhook}
+  AMFA_OTP_WEBHOOK_URL: ${AMFA_OTP_WEBHOOK_URL:-}
+  AMFA_OTP_WEBHOOK_SECRET: ${AMFA_OTP_WEBHOOK_SECRET:-}
+  AMFA_AGENT_BACKEND: ${AMFA_AGENT_BACKEND:-local}
+  AMFA_ADMIN_TOTP: ${AMFA_ADMIN_TOTP:-required}
+  AMFA_TRUSTED_PROXIES: 172.30.0.2/32
+  AMFA_FACE_URL: http://face:8101
+  AMFA_VOICE_URL: http://voice:8102
+  AMFA_UEBA_URL: http://ueba:8103
+  AMFA_DATABASE_URL: postgresql+psycopg://amfa_app:${DB_APP_PASSWORD:?set in .env}@postgres-core:5432/amfa_core
+  AMFA_GEOIP_DB: ${AMFA_GEOIP_DB:-}
+  AMFA_KEY_PROVIDER: ${AMFA_KEY_PROVIDER:-env}
+  AMFA_VAULT_ADDR: ${AMFA_VAULT_ADDR:-}
+  AMFA_VAULT_TOKEN: ${AMFA_VAULT_TOKEN:-}
+  AMFA_VAULT_KEY: ${AMFA_VAULT_KEY:-}
+  AMFA_WRAPPED_MASTER_KEYS: ${AMFA_WRAPPED_MASTER_KEYS:-}
+
+x-factor-env: &factor-env
+  AMFA_ENV: production
+  AMFA_ROLE: factor
+  AMFA_MASTER_KEYS: ${AMFA_FACTOR_MASTER_KEYS:?set in .env}
+  AMFA_INTERNAL_TOKEN: ${AMFA_INTERNAL_TOKEN}
+  AMFA_REDIS_URL: redis://:${REDIS_PASSWORD}@redis-factors:6379/0
+
+services:
+  postgres-core:
+    image: postgres:17-alpine
+    <<: *hardening
+    read_only: false
+    cap_drop: []
+    environment:
+      POSTGRES_USER: amfa_owner
+      POSTGRES_PASSWORD: ${DB_OWNER_PASSWORD:?set in .env}
+      POSTGRES_DB: amfa_core
+      DB_APP_PASSWORD: ${DB_APP_PASSWORD}
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    volumes:
+      - pgcore:/var/lib/postgresql/data
+      - ./postgres/init-core.sh:/docker-entrypoint-initdb.d/10-init.sh:ro
+    networks: [coredata]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U amfa_owner -d amfa_core"]
+      interval: 10s
+      retries: 10
+
+  postgres-factors:
+    image: postgres:17-alpine
+    <<: *hardening
+    read_only: false
+    cap_drop: []
+    environment:
+      POSTGRES_USER: amfa_factors
+      POSTGRES_PASSWORD: ${DB_FACTOR_PASSWORD:?set in .env}
+      POSTGRES_DB: amfa_factors
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    volumes: ["pgfactors:/var/lib/postgresql/data"]
+    networks: [factordata]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U amfa_factors -d amfa_factors"]
+      interval: 10s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    <<: *hardening
+    user: "999:1000"
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}", "--save", "", "--appendonly", "no",
+              "--maxmemory", "256mb", "--maxmemory-policy", "volatile-ttl"]
+    networks: [coredata]
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+
+  redis-factors:
+    image: redis:7-alpine
+    <<: *hardening
+    user: "999:1000"
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}", "--save", "", "--appendonly", "no",
+              "--maxmemory", "64mb", "--maxmemory-policy", "volatile-ttl"]
+    networks: [factordata]
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+
+  migrate:
+    build: { context: .., dockerfile: deploy/Dockerfile, target: core }
+    <<: *hardening
+    restart: "no"
+    environment:
+      <<: *core-env
+      AMFA_DATABASE_URL: postgresql+psycopg://amfa_owner:${DB_OWNER_PASSWORD}@postgres-core:5432/amfa_core
+    command: ["migrate", "--grant-app-role", "amfa_app"]
+    depends_on: { postgres-core: { condition: service_healthy } }
+    networks: [coredata]
+
+  core:
+    build: { context: .., dockerfile: deploy/Dockerfile, target: core }
+    <<: *hardening
+    environment: *core-env
+    volumes: ["coredata:/var/lib/amfa"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+      face: { condition: service_healthy }
+      voice: { condition: service_healthy }
+      ueba: { condition: service_healthy }
+    networks:
+      edge: { ipv4_address: 172.30.0.10 }
+      internal: {}
+      coredata: {}
+    deploy: { resources: { limits: { memory: 4g } } }
+
+  face:
+    build: { context: .., dockerfile: deploy/Dockerfile, target: face }
+    <<: *hardening
+    environment:
+      <<: *factor-env
+      AMFA_FACE_DB_URL: postgresql+psycopg://amfa_factors:${DB_FACTOR_PASSWORD}@postgres-factors:5432/amfa_factors
+    depends_on: { postgres-factors: { condition: service_healthy } }
+    networks: [internal, factordata]
+    deploy: { resources: { limits: { memory: 1g } } }
+
+  voice:
+    build: { context: .., dockerfile: deploy/Dockerfile, target: voice }
+    <<: *hardening
+    environment:
+      <<: *factor-env
+      AMFA_VOICE_DB_URL: postgresql+psycopg://amfa_factors:${DB_FACTOR_PASSWORD}@postgres-factors:5432/amfa_factors
+      AMFA_VOICE_PAD_THRESHOLD: ${AMFA_VOICE_PAD_THRESHOLD:--0.6931471805599453}
+      AMFA_VOICE_PROMPT_CHECK: ${AMFA_VOICE_PROMPT_CHECK:-advisory}
+    depends_on: { postgres-factors: { condition: service_healthy } }
+    networks: [internal, factordata]
+    deploy: { resources: { limits: { memory: 2g } } }
+
+  ueba:
+    build: { context: .., dockerfile: deploy/Dockerfile, target: ueba }
+    <<: *hardening
+    environment:
+      <<: *factor-env
+      AMFA_UEBA_DB_URL: postgresql+psycopg://amfa_factors:${DB_FACTOR_PASSWORD}@postgres-factors:5432/amfa_factors
+    depends_on: { postgres-factors: { condition: service_healthy } }
+    networks: [internal, factordata]
+    deploy: { resources: { limits: { memory: 1g } } }
+
+  caddy:
+    image: caddy:2-alpine
+    <<: *hardening
+    cap_add: ["NET_BIND_SERVICE"]
+    ports: ["80:80", "443:443"]
+    environment:
+      AMFA_DOMAIN: ${AMFA_DOMAIN:?set in .env}
+      ACME_EMAIL: ${ACME_EMAIL:?set in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
+    depends_on: [core]
+    networks:
+      edge: { ipv4_address: 172.30.0.2 }
+
+networks:
+  edge:
+    ipam: { config: [{ subnet: 172.30.0.0/24 }] }
+  internal:
+    internal: true
+  coredata:
+    internal: true
+  factordata:
+    internal: true
+
+volumes:
+  pgcore: {}
+  pgfactors: {}
+  coredata: {}
+  caddydata: {}
+  caddyconfig: {}

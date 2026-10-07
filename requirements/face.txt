@@ -1,0 +1,4 @@
+-r base.txt
+opencv-python-headless==4.11.0.86
+onnxruntime==1.30.0
+pillow==12.3.0

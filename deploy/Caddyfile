@@ -1,0 +1,26 @@
+{
+	email {$ACME_EMAIL}
+	servers {
+		protocols h1 h2
+	}
+}
+
+{$AMFA_DOMAIN} {
+	tls {
+		protocols tls1.2 tls1.3
+	}
+	encode zstd gzip
+	request_body {
+		max_size 32MB
+	}
+	header {
+		-Server
+		Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+	}
+	reverse_proxy core:8000 {
+		header_up X-Forwarded-For {remote_host}
+		transport http {
+			read_timeout 60s
+		}
+	}
+}

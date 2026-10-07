@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Demo Bank</title>
+  <link rel="stylesheet" href="/static/bank.css">
+</head>
+<body>
+  <header><strong>Demo Bank</strong><span class="who"><span id="who"></span><button id="logout" class="link hidden" type="button">Sign out</button></span></header>
+  <main>
+    <section class="card" id="signin">
+      <h1 id="auth-title">Sign in to internet banking</h1>
+      <form id="auth-form" novalidate>
+        <label for="username">Username</label>
+        <input id="username" name="username" autocomplete="username" required minlength="3" maxlength="24"
+               pattern="[a-z0-9][a-z0-9_\-]{2,23}" autocapitalize="none" spellcheck="false">
+        <div id="name-row" class="hidden">
+          <label for="fullname">Full name</label>
+          <input id="fullname" name="fullname" autocomplete="name" maxlength="60">
+        </div>
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required minlength="8" maxlength="128">
+        <p id="auth-hint" class="muted hidden">3–24 characters: lowercase letters, digits, - or _. Password at least 8 characters.</p>
+        <button type="submit" id="auth-submit">Sign in</button>
+        <p id="auth-error" class="error" role="alert"></p>
+      </form>
+      <p class="muted"><span id="switch-text">New to Demo Bank?</span>
+        <button id="switch" class="link" type="button">Open an account</button></p>
+    </section>
+
+    <section class="card hidden" id="account">
+      <h2>Current account</h2>
+      <p class="balance" id="balance"></p>
+      <p id="enrolment"></p>
+      <button id="enrol" class="secondary">Set up secure approvals</button>
+    </section>
+
+    <section class="card hidden" id="transfer">
+      <h2>Send money (IMPS)</h2>
+      <form id="form">
+        <label for="payee">To</label>
+        <select id="payee"></select>
+        <label for="amount">Amount (₹)</label>
+        <input id="amount" type="number" min="1" step="0.01" value="4500">
+        <label for="remarks">Remarks (never reaches the decision engine)</label>
+        <input id="remarks" type="text" maxlength="140" value="Rent for September">
+        <button type="submit" id="send">Continue</button>
+      </form>
+      <p id="plan" class="muted"></p>
+      <div id="frame" class="frame hidden"></div>
+      <p id="outcome"></p>
+    </section>
+  </main>
+  <script src="/static/bank.js"></script>
+</body>
+</html>

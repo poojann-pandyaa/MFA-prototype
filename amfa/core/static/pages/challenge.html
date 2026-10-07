@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>Approve transaction</title>
+  <link rel="stylesheet" href="/static/css/hosted.css">
+</head>
+<body>
+  <main class="shell" aria-live="polite">
+    <div class="brand"><span class="lock" aria-hidden="true"></span><span id="bank">Secure approval</span></div>
+
+    <section class="card approving hidden" id="approving" aria-labelledby="approving-title">
+      <div class="kind" id="kind"></div>
+      <h1 id="approving-title" class="amount"></h1>
+      <div class="payee">to <strong id="payee"></strong></div>
+      <p class="muted">Only continue if you started this transaction yourself.</p>
+      <ul class="steps" id="steps" aria-label="Verification steps"></ul>
+    </section>
+
+    <section class="card" id="panel">
+      <p class="muted" id="loading">Loading…</p>
+    </section>
+
+    <footer>Your camera and microphone are used only for this check. Nothing is recorded or kept.</footer>
+  </main>
+  <script src="/sdk/amfa.js"></script>
+  <script src="/static/js/ui.js"></script>
+  <script src="/static/js/challenge.js"></script>
+</body>
+</html>

@@ -1,0 +1,26 @@
+services:
+  demo-bank:
+    build: { context: .., dockerfile: deploy/Dockerfile, target: demo-bank }
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    tmpfs: ["/tmp:size=16m,mode=1777"]
+    restart: unless-stopped
+    env_file: [demo-bank.env]
+    environment:
+      BANK_STATE_FILE: /var/lib/bank/bank.json
+      BANK_SECURE_COOKIES: "1"
+    volumes: ["bankdata:/var/lib/bank"]
+    extra_hosts: ["${AMFA_DOMAIN}:172.30.0.2"]
+    depends_on: [core]
+    networks:
+      edge: { ipv4_address: 172.30.0.20 }
+
+  caddy:
+    environment:
+      BANK_DOMAIN: ${BANK_DOMAIN:?set in .env}
+    volumes:
+      - ./Caddyfile.demo:/etc/caddy/Caddyfile:ro
+
+volumes:
+  bankdata: {}

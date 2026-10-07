@@ -1,0 +1,7 @@
+services:
+  core:
+    command: ["serve", "core", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+  face:
+    command: ["serve", "face", "--host", "0.0.0.0", "--port", "8101", "--workers", "1"]
+  ueba:
+    command: ["serve", "ueba", "--host", "0.0.0.0", "--port", "8103", "--workers", "1"]

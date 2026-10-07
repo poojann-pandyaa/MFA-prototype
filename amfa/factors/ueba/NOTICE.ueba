@@ -1,0 +1,50 @@
+NOTICE
+
+Licenses verified on: ______________     <-- FILL IN when you check them
+
+
+1. prajwalnayaka/UEBA  --  MIT License
+   https://github.com/prajwalnayaka/UEBA
+
+   Derived files:
+     data/synth.py                (adapted from data_synthesis.py)
+     features/transactional.py    (structure only; features rewritten)
+     models/isoforest/MODEL.py    (adapted)
+
+   Modifications:
+     - Domain changed from game administration logs to banking transactions
+     - Feature set replaced with per-user behavioural deviations
+     - Isolation Forest contamination corrected from 0.3 to 0.01
+     - Wrapped in an independent Model interface
+     - Calibration, service layer and persistence added
+
+
+2. GACWR/OpenUBA  --  Apache License 2.0
+   https://github.com/GACWR/OpenUBA
+
+   NO CODE COPIED. Patterns studied and independently reimplemented:
+     - Model interface separating train/infer from data access
+     - Model packaging convention (MODEL.py + model.yaml)
+
+   Only concepts adopted, so Apache 2.0 imposes no obligations here.
+   Credited as an architectural influence.
+
+
+3. nikhilm2003/UEBA-AI-SmartGuard  --  NOT USED
+   No LICENSE file. Under default copyright all rights are reserved.
+   Public availability on GitHub grants no right to copy.
+
+
+4. Keystroke, mouse and session dimensions -- ORIGINAL WORK
+
+   Collection uses native browser events (keydown/keyup, mousemove,
+   mousedown/mouseup). No third-party behavioural biometrics library is
+   used: dwell time is one subtraction from the browser's own timestamps,
+   and writing it directly avoids any licensing question.
+
+   Method reference (no code taken):
+     Killourhy, K.S. & Maxion, R.A. (2009). "Comparing Anomaly-Detection
+     Algorithms for Keystroke Dynamics." IEEE/IFIP DSN, 125-134.
+
+   That benchmark found scaled Manhattan distance outperformed thirteen
+   more sophisticated alternatives, which is why it is used here.

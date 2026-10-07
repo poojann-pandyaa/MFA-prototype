@@ -1,0 +1,8 @@
+-r base.txt
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.14.0+cpu
+torchaudio==2.11.0+cpu
+speechbrain==1.1.1
+soundfile==0.14.0
+scipy==1.18.1
+vosk==0.3.45

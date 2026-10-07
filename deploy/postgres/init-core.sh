@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<SQL
+CREATE ROLE amfa_app LOGIN PASSWORD '${DB_APP_PASSWORD}';
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+GRANT CONNECT ON DATABASE amfa_core TO amfa_app;
+SQL

@@ -1,0 +1,5 @@
+-r core.txt
+-r face.txt
+-r voice.txt
+-r ueba.txt
+pytest==9.1.1

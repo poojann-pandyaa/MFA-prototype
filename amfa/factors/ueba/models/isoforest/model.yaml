@@ -1,0 +1,25 @@
+name: isoforest
+version: "1.0.0"
+framework: scikit-learn
+description: >
+  Isolation Forest over transactional behavioural deviation features.
+  Trained unsupervised on non-fraud events. Emits a continuous anomaly
+  score; calibration is a separate step.
+expected_features:
+  - amount_zscore
+  - txn_velocity_1h
+  - is_new_device
+  - is_new_location
+  - hour_unusual
+  - is_new_beneficiary
+  - days_since_last_txn
+hyperparameters:
+  n_estimators: 200
+  max_samples: 256
+  contamination: 0.01
+  random_state: 42
+notes: |
+  The source repository uses contamination 0.3, assuming 30% of events are
+  anomalous. In scikit-learn this sets the predict() threshold, not tree
+  construction, so it depressed precision while leaving score_samples()
+  ranking untouched. This service consumes the ranking.
