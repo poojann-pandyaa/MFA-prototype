@@ -1,0 +1,19 @@
+name: ci
+on:
+  push:
+    branches: [integration, main]
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      # Factor requirements are added here as each branch's tests are ported
+      # (UEBA: requirements/ueba.txt, voice: requirements/voice.txt).
+      - run: pip install -r requirements/base.txt -r requirements/face.txt pytest
+      - run: python -m pytest

@@ -194,15 +194,13 @@
     panel.appendChild(btn);
     btn.addEventListener("click", function() {
       UI.busy(btn, true, "Hold still…");
-      var frames = [];
+      var frames = [], interval = ch.params.intervalMs || 150;
       AMFA.sleep(600).then(function() {
-        return camera.burst(2, 250);
+        return camera.burst(3, interval);
       }).then(function(f) {
         frames = frames.concat(f);
-        prompt.textContent = "Now turn your head to your " + dir.toLowerCase() + " and hold it";
-        return AMFA.sleep(400);
-      }).then(function() {
-        return camera.burst(Math.max(1, (ch.params.frames || 8) - 2), 400);
+        prompt.textContent = "Now slowly turn your head to your " + dir.toLowerCase() + " and hold it";
+        return camera.burst(Math.max(3, (ch.params.frames || 12) - 3), interval);
       }).then(function(f) {
         prompt.textContent = "Done — checking";
         submit(ch, {

@@ -128,8 +128,8 @@ def issue_challenge(s, sess: db.AuthSession, customer: db.Customer, txn: db.Tran
             params = {"mode": "delivered", "sentTo": otp.mask_contact(contact.get("to", "")),
                       "digits": otp.DIGITS}
     elif factor == "FACE":
-        params = {"action": secrets.choice(["TURN_LEFT", "TURN_RIGHT"]), "frames": 8,
-                  "intervalMs": 350}
+        params = {"action": secrets.choice(["TURN_LEFT", "TURN_RIGHT"]), "frames": 12,
+                  "intervalMs": 150}
     elif factor == "VOICE":
         words = [secrets.choice(VOICE_WORDS) for _ in range(3)]
         digits = " ".join(str(secrets.randbelow(10)) for _ in range(4))
@@ -151,8 +151,9 @@ def _public_challenge(ch: db.Challenge) -> dict:
             "expiresAt": int(ch.expires_at)}
 
 
-_DIAG_KEYS = {"FACE": {"action", "yaws", "frontalFrames", "turnedFrames", "turnedFrame",
-                       "turnedIdentity", "needFrontalMax", "needTurnDelta", "frameLiveness"}}
+_DIAG_KEYS = {"FACE": {"action", "yaws", "liveFrames", "frontalFrames", "turnDelta", "inBetweenFrames",
+                       "turnedFrame", "turnedIdentity", "burstIdentity", "needFrontalMax",
+                       "needTurnDelta", "frameLiveness"}}
 
 
 def attempt_diagnostics(factor: str, res: dict) -> Optional[dict]:
@@ -318,14 +319,23 @@ def _append(checklist: list[dict], appended: list[Factor], why: str, by: str) ->
     return {"appended": new, "reason": why} if new else None
 
 
+# Once a single face is in view, every face failure (turn, liveness, identity) gets the same
+# words, so a failed attempt never tells the client which check its frames got past.
+FACE_UNVERIFIED = ("We couldn't verify you. Look straight at the camera, then when prompted turn "
+                   "your head slowly about a quarter turn in the direction shown and hold it.")
+FACE_UNIFORM_REASONS = {"HEAD_TURN_NOT_OBSERVED", "HEAD_TURN_NOT_CONTINUOUS", "NO_FRONTAL_FRAME",
+                        "NOT_ENOUGH_LIVE_FRAMES", "IDENTITY_CHANGED_DURING_TURN", "FACE_MISMATCH"}
+
+
 def _client_result(res: dict, item: dict) -> dict:
     reason = res.get("failureReason")
+    if item["factor"] == "FACE" and reason in FACE_UNIFORM_REASONS:
+        reason = "FACE_UNVERIFIED"
     guidance = {
         "NO_FACE_DETECTED": "We could not see your face. Face the camera in good light.",
         "MULTIPLE_FACES": "Only you should be in view.",
         "FACE_TOO_SMALL": "Move closer to the camera.",
-        "HEAD_TURN_NOT_OBSERVED": "We didn't see the head turn. When prompted, turn your head about a quarter turn in the direction shown and hold it.",
-        "NO_FRONTAL_FRAME": "Start by looking straight at the camera.",
+        "FACE_UNVERIFIED": FACE_UNVERIFIED,
         "NOT_ENOUGH_SPEECH": "Please read the whole phrase clearly.",
         "TOO_NOISY": "Find a quieter place and try again.",
         "AUDIO_CLIPPED": "Hold the phone a little further away.",

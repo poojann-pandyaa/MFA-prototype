@@ -48,6 +48,7 @@ include = ["amfa*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 addopts = "-q"
 markers = [
   "models: needs the real model weights under models/ (skipped when absent)",

@@ -12,6 +12,7 @@ from amfa.common.contract import (FAILED, INSUFFICIENT_DATA, PASSED, SPOOF_DETEC
                                   VerifyRequest)
 from amfa.common.media import MediaError, decode_image
 from amfa.factors.base import ReplayGuard, internal_auth, normalise, store_for
+from amfa.factors.face import gesture
 from amfa.factors.face import matcher as fm
 from amfa.factors.face import pad as fpad
 
@@ -20,9 +21,13 @@ LIVENESS_THRESHOLD = 0.80
 LIVENESS_FRAME_FLOOR = 0.50
 FRONTAL_MAX_YAW = 0.12
 TURN_MIN_DELTA = 0.18
+TURN_MIN_IN_BETWEEN = 2
 TURNED_IDENTITY_MIN = fm.MATCH_THRESHOLD
+BURST_IDENTITY_MIN = fm.MATCH_THRESHOLD
 ENROLL_CONSISTENCY_MIN = 0.50
-MIN_FRAMES, MAX_FRAMES = 3, 8
+ENROLL_FRAMES = (3, 8)
+VERIFY_FRAMES = (6, 16)
+MIN_LIVE_FRAMES = 6
 
 store = store_for("face")
 guard = ReplayGuard(store, identical_cos=0.9995)
@@ -41,9 +46,9 @@ app = FastAPI(title="AMFA face factor", version="1.0.0", lifespan=lifespan,
 web.install(app, body_limits=[("/factor/", 20 * 1024 * 1024)])
 
 
-def _frames(payload: dict) -> list[tuple[np.ndarray, str]]:
+def _frames(payload: dict, bounds: tuple[int, int]) -> list[tuple[np.ndarray, str]]:
     frames = payload.get("frames")
-    if not isinstance(frames, list) or not (MIN_FRAMES <= len(frames) <= MAX_FRAMES):
+    if not isinstance(frames, list) or not (bounds[0] <= len(frames) <= bounds[1]):
         raise MediaError("FRAME_COUNT_INVALID")
     return [decode_image(f) for f in frames]
 
@@ -65,7 +70,7 @@ def enroll(req: EnrollRequest) -> EnrollResult:
     t0 = time.perf_counter()
     ms = lambda: int((time.perf_counter() - t0) * 1000)
     try:
-        frames = _frames(req.payload)
+        frames = _frames(req.payload, ENROLL_FRAMES)
     except MediaError as e:
         return EnrollResult(factor=FACTOR, enrolled=False, reason=e.code, latencyMs=ms())
 
@@ -124,7 +129,7 @@ def verify(req: VerifyRequest) -> FactorResult:
         return result(FAILED, "CHALLENGE_MISSING")
 
     try:
-        frames = _frames(req.payload)
+        frames = _frames(req.payload, VERIFY_FRAMES)
     except MediaError as e:
         return result(FAILED, e.code)
 
@@ -153,44 +158,55 @@ def verify(req: VerifyRequest) -> FactorResult:
     if not bonafide and req.padMode is PadMode.TERMINAL:
         return result(SPOOF_DETECTED, "PRESENTATION_ATTACK_DETECTED", **common)
 
-    yaws = [f.yaw for f in faces]
-    frontal_idx = [i for i, y in enumerate(yaws) if abs(y) <= FRONTAL_MAX_YAW]
-    sign = 1.0 if action == "TURN_LEFT" else -1.0
-    baseline = yaws[frontal_idx[0]] if frontal_idx else None
-    turned_idx = [i for i, y in enumerate(yaws)
-                  if baseline is not None and i > frontal_idx[0]
-                  and sign * (y - baseline) >= TURN_MIN_DELTA]
-    active = {"action": action, "yaws": [round(y, 3) for y in yaws],
-              "frontalFrames": len(frontal_idx), "turnedFrames": len(turned_idx),
-              "needFrontalMax": FRONTAL_MAX_YAW, "needTurnDelta": TURN_MIN_DELTA,
-              "frameLiveness": [round(float(v), 3) for v in lives]}
+    live_idx = [i for i, p in enumerate(lives) if p >= LIVENESS_FRAME_FLOOR]
+    active = {"action": action, "yaws": [round(f.yaw, 3) for f in faces],
+              "liveFrames": len(live_idx), "needFrontalMax": FRONTAL_MAX_YAW,
+              "needTurnDelta": TURN_MIN_DELTA, "frameLiveness": [round(float(v), 3) for v in lives]}
+    if len(live_idx) < MIN_LIVE_FRAMES:
+        return result(FAILED, "NOT_ENOUGH_LIVE_FRAMES", detail={"active": active}, **common)
+
+    # Gesture and identity evidence come only from frames PAD judged live, so photo frames
+    # spliced into a live burst can neither fake the turn nor stand in for the face match.
+    reason, turn = gesture.check_turn([faces[i].yaw for i in live_idx], action,
+                                      frontal_max=FRONTAL_MAX_YAW, min_delta=TURN_MIN_DELTA,
+                                      min_in_between=TURN_MIN_IN_BETWEEN)
+    if turn is not None:
+        active.update(turnDelta=round(turn.displacement, 3), inBetweenFrames=turn.in_between)
+    if reason:
+        return result(FAILED, reason, detail={"active": active}, **common)
+
+    frontal_idx = [i for i in live_idx if abs(faces[i].yaw) <= FRONTAL_MAX_YAW]
+    active["frontalFrames"] = len(frontal_idx)
     if not frontal_idx:
         return result(FAILED, "NO_FRONTAL_FRAME", detail={"active": active}, **common)
-    if not turned_idx:
-        return result(FAILED, "HEAD_TURN_NOT_OBSERVED", detail={"active": active}, **common)
 
     mean_tpl = np.asarray(template["mean"], dtype=np.float32)
-    frontal_embs = [fm.get().embed(frames[i][0], faces[i]) for i in frontal_idx]
-    scores = [fm.cosine(mean_tpl, e) for e in frontal_embs]
+    embs = {i: fm.get().embed(frames[i][0], faces[i]) for i in live_idx}
+    scores = [fm.cosine(mean_tpl, embs[i]) for i in frontal_idx]
     best = int(np.argmax(scores))
     score = float(scores[best])
-    probe = frontal_embs[best]
+    probe = embs[frontal_idx[best]]
 
     hit = guard.check(req.tenantId, req.userId, "-", probe)
     if hit:
         return result(SPOOF_DETECTED, hit, score=round(score, 4), **common)
 
-    t_i = min(turned_idx, key=lambda i: sign * (yaws[i] - baseline))
+    sign = 1.0 if action == "TURN_LEFT" else -1.0
+    turned_idx = [i for i in live_idx if sign * (faces[i].yaw - turn.start) >= TURN_MIN_DELTA]
+    if not turned_idx:
+        return result(FAILED, "HEAD_TURN_NOT_OBSERVED", detail={"active": active}, **common)
+    t_i = min(turned_idx, key=lambda i: sign * (faces[i].yaw - turn.start))
     active["turnedFrame"] = t_i
-    turned_emb = fm.get().embed(frames[t_i][0], faces[t_i])
-    turned_sim = min(fm.cosine(probe, turned_emb), fm.cosine(mean_tpl, turned_emb))
+    turned_sim = min(fm.cosine(probe, embs[t_i]), fm.cosine(mean_tpl, embs[t_i]))
     active["turnedIdentity"] = round(turned_sim, 3)
+    continuity = min(fm.cosine(probe, e) for e in embs.values())
+    active["burstIdentity"] = round(continuity, 3)
 
     for d, e in zip(digests, [probe] + [None] * (len(digests) - 1)):
         guard.remember(req.tenantId, req.userId, d, e)
 
     detail = {"active": active, "frontalScores": [round(s, 4) for s in scores]}
-    if turned_sim < TURNED_IDENTITY_MIN:
+    if turned_sim < TURNED_IDENTITY_MIN or continuity < BURST_IDENTITY_MIN:
         return result(FAILED, "IDENTITY_CHANGED_DURING_TURN", score=round(score, 4),
                       detail=detail, **common)
     if score < fm.MATCH_THRESHOLD:

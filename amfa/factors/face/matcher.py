@@ -10,6 +10,7 @@ import cv2
 import numpy as np
 
 from amfa.common import artifacts
+from amfa.factors.face.gesture import nose_offset
 
 DET_SCORE = 0.80
 MIN_FACE_PX = 80
@@ -43,10 +44,9 @@ class FaceMatcher:
         out = []
         for f in (faces if faces is not None else []):
             lm = f[4:14].reshape(5, 2)
-            iod = float(np.linalg.norm(lm[0] - lm[1]))
-            if iod <= 1e-3:
+            yaw = nose_offset(lm)
+            if yaw is None:
                 continue
-            yaw = float((lm[2][0] - (lm[0][0] + lm[1][0]) / 2) / iod)
             out.append(DetectedFace(box=f, score=float(f[14]), width=int(f[2]), yaw=yaw))
         return out
 
