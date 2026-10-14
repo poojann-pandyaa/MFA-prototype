@@ -61,7 +61,9 @@ class EcapaSpeaker:
         from speechbrain.inference.speaker import EncoderClassifier
 
         local = artifacts.verify_directory(artifacts.ECAPA_DIR, artifacts.ECAPA_PINS)
+        # hyperparams.yaml names the hub repo as pretrained_path; point it at the verified local copy
         self.clf = EncoderClassifier.from_hparams(source=str(local), savedir=str(local),
+                                                  overrides={"pretrained_path": str(local)},
                                                   run_opts={"device": "cpu"})
         self.clf.eval()
         self._torch = torch

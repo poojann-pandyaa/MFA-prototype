@@ -12,14 +12,19 @@ TENANT, USER = "tn_test", "cu_test"
 
 
 @pytest.fixture(scope="module")
-def client():
+def client(tmp_path_factory):
     from amfa.factors.ueba import service
     from amfa.factors.ueba.training import train
-    train.run(n_users=40, n_days=60, n_behaviour_users=20, seed=42)
-    service.app.dependency_overrides[internal_auth] = lambda: None
-    with TestClient(service.app) as c:
-        yield c
-    service.app.dependency_overrides.clear()
+    # pin into a temp file so the test model never overwrites the real ARTIFACTS.sha256
+    pins = tmp_path_factory.mktemp("ueba") / "ARTIFACTS.sha256"
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(train, "PIN_FILE", pins)
+        mp.setattr(service, "PIN_FILE", pins)
+        train.run(n_users=40, n_days=60, n_behaviour_users=20, seed=42)
+        service.app.dependency_overrides[internal_auth] = lambda: None
+        with TestClient(service.app) as c:
+            yield c
+        service.app.dependency_overrides.clear()
 
 
 @pytest.fixture(scope="module")
