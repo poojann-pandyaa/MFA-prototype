@@ -13,6 +13,6 @@ jobs:
         with:
           python-version: "3.13"
           cache: pip
-      # Voice requirements (requirements/voice.txt) are added when its tests are ported.
+      # No voice requirements: its tests use scripted models, so torch is not installed.
       - run: pip install -r requirements/base.txt -r requirements/face.txt -r requirements/ueba.txt pytest
       - run: python -m pytest

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import time
 from functools import lru_cache
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Iterator, Optional
 
 import numpy as np
 from fastapi import Request
@@ -78,6 +78,15 @@ class TemplateStore:
             return None
         return json.loads(crypto.open_(row.sealed, self._aad(tenant, user),
                                        purpose=f"template:{self.factor}"))
+
+    def all(self, tenant: str) -> Iterator[tuple[str, dict]]:
+        """Every template of a tenant, decrypted one at a time (for 1:N search)."""
+        with self.engine.connect() as c:
+            rows = c.execute(select(self.templates.c.user_id, self.templates.c.sealed).where(
+                self.templates.c.tenant_id == tenant)).all()
+        for r in rows:
+            yield r.user_id, json.loads(crypto.open_(r.sealed, self._aad(tenant, r.user_id),
+                                                     purpose=f"template:{self.factor}"))
 
     def delete(self, tenant: str, user: str) -> bool:
         with self.engine.begin() as c:

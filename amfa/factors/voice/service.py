@@ -2,17 +2,20 @@ from __future__ import annotations
 
 import time
 from contextlib import asynccontextmanager
+from typing import Any, Optional
 
 import numpy as np
 from fastapi import Depends, FastAPI
+from pydantic import BaseModel, ConfigDict, Field
 
 from amfa.common import artifacts, logs, web
-from amfa.common.contract import (FAILED, INSUFFICIENT_DATA, PASSED, SPOOF_DETECTED,
+from amfa.common.contract import (FAILED, ID_PATTERN, INSUFFICIENT_DATA, PASSED, SPOOF_DETECTED,
                                   EnrollRequest, EnrollResult, FactorResult, PadMode, PadResult,
                                   VerifyRequest)
 from amfa.common.media import MediaError, decode_audio
 from amfa.factors.base import ReplayGuard, internal_auth, normalise, store_for
 from amfa.factors.voice import models as vm
+from amfa.factors.voice.gallery import SpeakerGallery, identify
 
 FACTOR = "VOICE"
 MIN_VOICED_S = 1.0
@@ -153,6 +156,57 @@ def verify(req: VerifyRequest) -> FactorResult:
     return result(PASSED, reason, score=round(score, 4), detail=detail, **common)
 
 
+class IdentifyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    tenantId: str = Field(pattern=ID_PATTERN)
+    payload: dict[str, Any]
+    padMode: PadMode = PadMode.TERMINAL
+    excludeUserId: Optional[str] = Field(default=None, pattern=ID_PATTERN)
+    topK: int = Field(default=5, ge=1, le=20)
+
+
+@app.post("/factor/identify", dependencies=[Depends(internal_auth)])
+def identify_voice(req: IdentifyRequest) -> dict:
+    """1:N open-set identification: which of this tenant's enrolled users, if any, is speaking.
+    For the platform only (duplicate-voice and mule-ring checks); never exposed to a customer,
+    since the answer names another customer."""
+    t0 = time.perf_counter()
+
+    def out(decision: str, reason: str | None = None, **kw) -> dict:
+        return {"decision": decision, "identified": decision == "IDENTIFIED", "reason": reason,
+                "modelVersion": vm.speaker().version,
+                "latencyMs": int((time.perf_counter() - t0) * 1000), **kw}
+
+    try:
+        wav, _, q = decode_audio(req.payload.get("audio", ""))
+    except MediaError as e:
+        return out("REJECTED_INPUT", e.code)
+    problem = _quality_problem(q)
+    if problem:
+        return out("REJECTED_INPUT", problem, quality=q)
+
+    pad_score = vm.pad().score(wav)
+    bonafide = pad_score > vm.PAD_THRESHOLD
+    pad = {"verdict": "BONAFIDE" if bonafide else "SPOOF", "score": round(pad_score, 4),
+           "threshold": round(vm.PAD_THRESHOLD, 4), "mode": req.padMode.value}
+    if not bonafide and req.padMode is PadMode.TERMINAL:
+        return out("REJECTED_SPOOF", "PRESENTATION_ATTACK_DETECTED", pad=pad)
+
+    emb = vm.speaker().embed(wav)
+    gallery = SpeakerGallery(embedding_dim=len(emb))
+    for user, tpl in store.all(req.tenantId):
+        vec = np.asarray(tpl.get("voiceprint", []), dtype=np.float32)
+        if user != req.excludeUserId and tpl.get("model") == vm.speaker().version and len(vec) == len(emb):
+            gallery.enroll_speaker(user, vec)
+
+    res = identify(gallery, emb, threshold=vm.IDENT_THRESHOLD, margin=vm.IDENT_MARGIN, top_k=req.topK)
+    return out(res["decision"], res["rejection_reason"], pad=pad, identifiedUserId=res["identified_speaker_id"],
+               top1Score=res["top1_score"], top2Score=res["top2_score"], scoreMargin=res["score_margin"],
+               gallerySize=res["gallery_size"], threshold=res["threshold"], margin=res["margin"],
+               candidates=[{"userId": c["speaker_id"], "score": round(c["cosine_similarity"], 4),
+                            "rank": c["rank"]} for c in res["candidates"]])
+
+
 @app.delete("/factor/templates/{tenant_id}/{user_id}", dependencies=[Depends(internal_auth)])
 def erase(tenant_id: str, user_id: str) -> dict:
     return {"factor": FACTOR, "deleted": store.delete(tenant_id, user_id)}
@@ -163,4 +217,5 @@ def health() -> dict:
     pins = [a for a in artifacts.status() if a["path"].startswith("voice/")]
     return {"service": "voice", "status": "up" if all(a["verified"] for a in pins) else "degraded",
             "models": pins, "matchThreshold": vm.MATCH_THRESHOLD, "padThreshold": vm.PAD_THRESHOLD,
+            "identThreshold": vm.IDENT_THRESHOLD, "identMargin": vm.IDENT_MARGIN,
             "padDefaultMode": "advisory", "promptCheck": vm.PROMPT_CHECK, "store": store.ping()}

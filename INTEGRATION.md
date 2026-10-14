@@ -10,7 +10,43 @@ Re-check with `git log integration..origin/<branch>` after every port.
 |---|---|---|
 | `Research/face-auth` | `46244ad` | done, see below |
 | `ueba-service` | `23910e1` | done, see below |
-| `voice-auth` | `3b9ea79` (from the squash) | pending: `14273a7`, `c706875` |
+| `voice-auth` | `c706875` | done, see below |
+
+## voice-auth @ c706875
+
+The 1:1 path (ECAPA-TDNN match at 0.25, RawNet2 PAD at log 0.5, same RawNet2 model file) was already
+in the squash and is unchanged. Ported (`amfa/factors/voice/{gallery,metrics}.py`, `service.py`,
+`models.py`, `amfa/factors/base.py`):
+
+| Branch change | In integration |
+|---|---|
+| `14273a7` 1:N open-set identification (`SpeakerGallery`, `identify`) | `gallery.py`. The accept/reject decision is a pure function, `identify(gallery, probe, threshold, margin, top_k)`: top-1 >= 0.30 and top-1 minus top-2 >= 0.05 |
+| `c706875` `top_k` must not weaken the decision | the top-2 score is always retrieved (`max(top_k, 2)`); two regression tests fail if that line is changed |
+| `metrics.py` (cosine, CMC, rank-N, open-set DIR/FPIR/FNIR, effective false-match rate) | `metrics.py`, taken as-is |
+| `pipeline.identify_factor` (PAD, then gallery) | `POST /factor/identify` on the voice service: PAD first (terminal by default, so a spoofed probe never searches), then a search over the tenant's enrolled voiceprints. `TemplateStore.all()` lists a tenant's sealed templates; templates made by a different embedding model are skipped |
+
+New settings: `AMFA_VOICE_IDENT_THRESHOLD` (default 0.30, never below the 1:1 threshold) and
+`AMFA_VOICE_IDENT_MARGIN` (default 0.05).
+
+The endpoint is internal (signed by the core) and names other customers, so it must never be
+exposed to a customer. **Nothing calls it yet.** The intended use is a duplicate-voice / mule-ring
+check at enrolment. Whether a match should block, flag for review, or only be logged is a product
+decision, so no enrolment behaviour changed. The search decrypts every template of the tenant per call;
+cache the stacked matrix before using it on a large tenant.
+
+Left out on purpose:
+
+| Branch item | Why |
+|---|---|
+| RawNet2 as a hard gate in the 1:1 flow | integration made PAD `advisory` by default (a spoof verdict flags but does not reject; two flags block). This is a policy choice, so the default was not changed; set the tenant's `padModes.VOICE` to `terminal` to get the branch's behaviour |
+| `VoiceBiometricPipeline` / `SpeakerVerifier` classes, demos, `docs/`, `results/` | integration's service replaces the pipeline; the branch's evaluation results are reference material |
+| Branch tests for the pipeline, ECAPA and RawNet2 wrappers (`test_pipeline`, `test_ecapa`, `test_rawnet2`, `test_workspace_integrity`) | they test the branch's classes; they need the model weights, which the build sandbox cannot download |
+
+Tests: `test_gallery.py` and `test_metrics.py` ported unchanged apart from imports;
+`test_identification.py` re-expresses the branch's identification tests against `identify`;
+`test_service.py` exercises `/factor/identify` with a scripted speaker model and PAD.
+Not verified: a run against the real ECAPA and RawNet2 weights, and identification accuracy on real
+voices (the thresholds 0.30 / 0.05 are the branch's, measured on its own data).
 
 ## ueba-service @ 23910e1
 
