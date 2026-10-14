@@ -21,3 +21,9 @@ def test_framing_problems_still_get_specific_help():
 
 def test_the_uniform_message_is_face_only():
     assert guidance("FACE_MISMATCH", factor="VOICE") is None
+
+
+def test_behaviour_challenge_failures_tell_the_user_what_to_finish():
+    for reason in ("CHALLENGE_INCOMPLETE", "CHALLENGE_MISSING"):
+        text = guidance(reason, factor="UEBA")
+        assert text and "line" in text and "phrase" in text

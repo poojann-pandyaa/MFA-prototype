@@ -288,7 +288,7 @@
   function typingStep() {
     var info = state.behaviour, target = info.repetitions || 10, samples = [], traces = [];
     var wantShape = false;
-    heading("Typing rhythm", "Type the phrase below " + target + " times, pressing Enter after each. " + "The first couple are practice — just type naturally.");
+    heading("Typing rhythm", "Type the phrase below " + target + " times, pressing Enter after each. " + "The first one is practice — just type naturally.");
     var bar = el("span"), count = el("p", {
       class: "muted"
     });
@@ -338,21 +338,22 @@
       send();
     });
     function shapeStage() {
-      heading("Trace the line", "Drag from the green dot to the red dot, following the line. 5 times.");
+      var need = info.shapeTracesRequired || 4;
+      heading("Trace the line", "Drag from the green dot to the red dot, following the line. " + need + " times.");
       var canvas = el("canvas", {
         "aria-label": "Tracing area"
       }), c2 = el("p", {
         class: "muted",
-        text: "0 of 5"
+        text: "0 of " + need
       });
       panel.appendChild(canvas);
       panel.appendChild(c2);
       requestAnimationFrame(function() {
         var tr = new AMFA.ShapeTracer(canvas, info.shape, function(pts) {
-          if (pts.length < 40) return;
+          if (pts.length < 10) return;
           traces.push(pts);
-          c2.textContent = traces.length + " of 5";
-          if (traces.length >= (info.shapeTracesRequired || 5)) {
+          c2.textContent = traces.length + " of " + need;
+          if (traces.length >= need) {
             tr.detach();
             send();
           }

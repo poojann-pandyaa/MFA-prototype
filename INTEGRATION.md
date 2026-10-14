@@ -9,8 +9,41 @@ Re-check with `git log integration..origin/<branch>` after every port.
 | Branch | Integrated up to | Status |
 |---|---|---|
 | `Research/face-auth` | `46244ad` | done, see below |
-| `ueba-service` | `493ef30` (from the squash) | pending: `6e2a180`, `23910e1` |
+| `ueba-service` | `23910e1` | done, see below |
 | `voice-auth` | `3b9ea79` (from the squash) | pending: `14273a7`, `c706875` |
+
+## ueba-service @ 23910e1
+
+Ported (`amfa/factors/ueba/{features,scoring,data,training}`, new `dimensions.py`, `service.py`,
+`amfa/core/static/js/enroll.js`, `amfa/core/static/css/hosted.css`):
+
+| Branch change (`6e2a180`) | In integration |
+|---|---|
+| Every challenge answer is scored; partial or empty answers are blended toward a typical impostor by how much is missing | `keystroke.py`, `shape.py` and `combine.blend` taken from the branch; `dimensions.py` holds the challenge scoring |
+| Typing is aligned by replaying backspaces, so one corrected typo no longer shifts every later key | `keystroke.align`. A wrong or short phrase is no longer rejected as `PHRASE_MISMATCH`; it is scored by coverage |
+| Skipping part of the challenge cannot be passed on the other part | `service._verdict`: `CHALLENGE_MISSING` / `CHALLENGE_INCOMPLETE`. Shape is scored whenever the challenge asked for it (`req.challenge["shape"]`), so leaving the trace out now fails; before, it was skipped silently |
+| Enrolment: 6 typings, the first discarded, 5 used; 4 shape traces; incomplete ones excluded | `build_template`; enrolment reports `PHRASE_INCOMPLETE` per rejected typing |
+| New shape: 4-point trapezoid on a 2:1 pad | `sh.SHAPE` / `sh.ASPECT`; the page's trace canvas is now 2:1 and `/enroll/phrase` returns `aspectRatio` |
+| Typo simulator and `train.py` fixes | `data/behaviour.py`, `training/train.py` |
+
+Integration's own choices kept (decided with the team): factor name `UEBA`, threshold `0.5`,
+reason code `BEHAVIOURAL_MISMATCH`, the `/factor/enroll` + `/factor/verify` + `/risk/preview` shape.
+The replay guard now only applies to complete answers, so repeating an empty answer is not
+reported as a replay.
+
+Left out on purpose:
+
+| Branch item | Why |
+|---|---|
+| `api/contract.py` typed models, `/factor/challenge`, `/profile/commit`, `CONTRACT.md` threshold 0.70 | integration has its own contract (`amfa/common/contract.py`) and issues challenges from the core |
+| `store/db.py` verification table, `seed.py`, `static/index.html` demo | integration stores sealed templates and events through `store_for`; the core keeps the audit trail |
+| `preview_flags` (device/location/payee seen before, hour, dormancy, `velocityHigh`) | `core/context_builder.py` computes these itself from the tenant's own history. `velocityHigh` is not used by the rules yet; candidate input for the decision model |
+| Passive `score_session` / `score_transaction` in `dimensions.py` | unchanged by `6e2a180`; integration keeps its inline version because its artifacts are laid out differently |
+| `test_contract.py` (30 tests of the branch's contract) | tests the branch's API; the equivalent behaviour is covered by `tests/factors/ueba/test_service.py` |
+
+Tests: `test_features.py` ported unchanged apart from imports; `test_service.py` runs the real
+service against a small model trained once per session (about 10 s).
+Thresholds not re-measured on real users: all behaviour results use simulated typists and tracers.
 
 ## Research/face-auth @ 46244ad
 

@@ -339,7 +339,8 @@ def _client_result(res: dict, item: dict) -> dict:
         "NOT_ENOUGH_SPEECH": "Please read the whole phrase clearly.",
         "TOO_NOISY": "Find a quieter place and try again.",
         "AUDIO_CLIPPED": "Hold the phone a little further away.",
-        "PHRASE_MISMATCH": "Type the phrase exactly as shown.",
+        "CHALLENGE_INCOMPLETE": "Please type the whole phrase and trace the whole line, from the green dot to the red dot.",
+        "CHALLENGE_MISSING": "Please type the phrase and trace the line as shown.",
         "OTP_INVALID": "That code is not valid. Check it and try again.",
         "OTP_EXPIRED": "That code has expired. Request a new one.",
     }.get(reason or "")

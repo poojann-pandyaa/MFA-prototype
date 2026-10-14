@@ -5,3 +5,4 @@ import tempfile
 # directory before any test imports amfa.
 os.environ.setdefault("AMFA_DATA_DIR", tempfile.mkdtemp(prefix="amfa-tests-"))
 os.environ.setdefault("AMFA_ENV", "development")
+os.environ.setdefault("AMFA_MODELS_DIR", tempfile.mkdtemp(prefix="amfa-models-"))

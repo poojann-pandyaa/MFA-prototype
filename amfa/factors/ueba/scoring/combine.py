@@ -1,3 +1,21 @@
+"""
+Calibration and combination.
+
+Each behavioural dimension produces a distance on its own arbitrary scale.
+A keystroke distance of 2.0 and a mouse distance of 2.0 do not mean the
+same thing, so they cannot be averaged or weighted directly. That is the
+same mistake as the 60/40 rule-versus-ML blend the transactional work
+started with.
+
+Instead each dimension is calibrated independently against its own
+genuine and impostor distributions, producing a probability. Probabilities
+are then combined in log-odds space.
+
+  Platt, J. (1999). "Probabilistic Outputs for Support Vector Machines."
+  Niculescu-Mizil, A. & Caruana, R. (2005). "Predicting Good Probabilities
+  With Supervised Learning." Proc. 22nd ICML.
+"""
+
 from __future__ import annotations
 
 import json
@@ -12,6 +30,11 @@ EPS = 1e-6
 
 @dataclass
 class DimensionCalibrator:
+    """
+    Maps a distance to P(impostor) via a fitted sigmoid.
+
+        P = 1 / (1 + exp(a * distance + b))
+    """
 
     a: float
     b: float
@@ -38,6 +61,10 @@ class DimensionCalibrator:
         lr = LogisticRegression(class_weight="balanced")
         lr.fit(x, y)
 
+        # Equal error rate: the operating point where false accepts equal
+        # false rejects. Recorded here so the combination can weight each
+        # dimension by how well it actually separates the classes, rather
+        # than by a weight someone chose.
         thresholds = np.linspace(min(g.min(), i.min()), max(g.max(), i.max()), 400)
         far = np.array([(i <= t).mean() for t in thresholds])
         frr = np.array([(g > t).mean() for t in thresholds])
@@ -55,17 +82,33 @@ class DimensionCalibrator:
         )
 
     def reliability(self) -> float:
+        """
+        How much this dimension's opinion is worth, from its measured EER.
+
+            EER 0.00 (perfect)  -> 1.0
+            EER 0.15            -> 0.7
+            EER 0.50 (random)   -> 0.0
+
+        Derived from calibration data, not chosen. A dimension that
+        separates poorly contributes proportionally less.
+        """
         return float(max(0.0, 1.0 - 2.0 * self.eer))
 
     def probability(self, distance: float) -> float:
+        """P(impostor) given this distance."""
         return float(np.clip(1.0 / (1.0 + np.exp(self.a * distance + self.b)),
                              EPS, 1 - EPS))
 
     def separation(self) -> float:
+        """
+        How far apart the two classes sit, in units of the genuine mean.
+        A sanity check: below about 1.0 the dimension is not discriminating.
+        """
         return (self.impostor_mean - self.genuine_mean) / max(self.genuine_mean, EPS)
 
 
 class CalibrationSet:
+    """All dimension calibrators, persisted together."""
 
     FILENAME = "calibration.json"
 
@@ -81,6 +124,7 @@ class CalibrationSet:
         return self.calibrators[dimension].probability(distance)
 
     def reliability(self, dimension: str) -> float:
+        """Measured reliability, or neutral weight if uncalibrated."""
         if dimension not in self.calibrators:
             return 1.0
         return self.calibrators[dimension].reliability()
@@ -99,8 +143,29 @@ class CalibrationSet:
         return cls({k: DimensionCalibrator(**v) for k, v in raw.items()})
 
 
+# Dimensions are not conditionally independent: someone typing hesitantly
+# also tends to move the pointer hesitantly, and both correlate with being
+# unfamiliar with the interface. Summing log-odds as though they were
+# independent compounds agreement too fast -- two moderately elevated
+# signals produced 0.9976 in testing, which overstates what the evidence
+# supports.
+#
+# Dividing the summed log-odds by sqrt(n) is a standard correction for
+# correlated evidence. It preserves the ordering and the no-weights
+# property while damping the compounding. The exponent is a judgement,
+# not a measurement: estimating the true correlation needs more enrolled
+# users than a prototype cohort provides.
 CORRELATION_DAMPING = 0.5
 
+# No single dimension may be certain. A calibrated sigmoid saturates at
+# probabilities arbitrarily close to 0 or 1, and logit(1 - 1e-6) is about
+# 13.8 -- enough for one dimension to override every other combined.
+#
+# Testing produced exactly that: keystroke 0.076, session 0.30 and
+# transaction 0.79 were overridden by a single mouse reading of 1.0,
+# denying a genuine user. Capping each contribution at +/-4 bounds any one
+# dimension to roughly p in [0.018, 0.982], so agreement between
+# dimensions decides the outcome rather than one saturated signal.
 MAX_LOGIT_PER_DIMENSION = 4.0
 
 
@@ -108,6 +173,23 @@ def combine(probabilities: dict[str, float | None],
             damping: float = CORRELATION_DAMPING,
             reliability: dict[str, float] | None = None,
             ) -> tuple[float, list[str]]:
+    """
+    Fuse per-dimension impostor probabilities in log-odds space.
+
+        logit(P) = sum(w_d * clip(logit(P_d))) / n**damping
+
+    Naive Bayes combination with three corrections:
+
+      - per-dimension clipping, so no single signal can dominate
+      - reliability weighting from each dimension's measured EER, so a
+        dimension that separates poorly counts for less
+      - correlation damping, since the dimensions are not independent
+
+    None of the weights is chosen by hand; all derive from calibration.
+
+    Dimensions reporting None are skipped, not treated as zero evidence
+    in either direction. Returns (combined probability, dimensions used).
+    """
     used = [d for d, p in probabilities.items() if p is not None]
     if not used:
         return 0.5, []
@@ -128,16 +210,35 @@ def combine(probabilities: dict[str, float | None],
     if total_weight == 0:
         return 0.5, used
 
+    # Normalise by weight so a low-reliability dimension does not simply
+    # shrink the total toward neutral, then damp for correlation.
     total_logit = total_logit / total_weight * len(used) / len(used) ** damping
 
     return float(1.0 / (1.0 + np.exp(-total_logit))), used
 
 
 def confidence(observed: int, full: int) -> float:
+    """
+    How much to trust a dimension whose baseline is still thin.
+
+    A baseline built from the bare minimum number of observations is
+    genuinely weak: statistics from a small sample are noisy, so ordinary
+    variation looks anomalous. Treating a 10-event baseline as equal to a
+    400-event one produces exactly the false positives it should not.
+
+    Returns 0..1, reaching 1.0 at `full` observations.
+    """
     return float(min(max(observed, 0) / max(full, 1), 1.0))
 
 
 def attenuate(probability: float, confidence_: float) -> float:
+    """
+    Pull a probability toward 0.5 in proportion to how little is known.
+
+    0.5 is the neutral point -- no evidence in either direction. A
+    dimension with a thin baseline nudges the result rather than driving
+    it, without being silenced entirely.
+    """
     return 0.5 + (probability - 0.5) * confidence_
 
 
@@ -147,3 +248,45 @@ def band(probability: float) -> str:
     if probability < 0.70:
         return "MEDIUM"
     return "HIGH"
+
+
+# --------------------------------------------------------------------- #
+# Partial and missing challenge responses
+# --------------------------------------------------------------------- #
+
+# Coverage at or above this is treated as a complete response.
+COMPLETE_COVERAGE = 0.9
+
+
+def blend(observed: float | None, penalty: float, coverage: float) -> float:
+    """
+    Score a challenge response by how much of it actually arrived.
+
+        d = c * d_observed + (1 - c) * d_penalty
+
+    where c is coverage (0-1) and d_penalty is the calibrator's measured
+    mean impostor distance -- a typical impostor, not an arbitrary constant.
+
+        full, correct response    -> pure observed distance (unchanged)
+        half the phrase / path    -> halfway toward a typical impostor
+        nothing at all            -> scored exactly as a typical impostor
+
+    A requested challenge that goes unanswered is evidence, not silence. It
+    still passes through the same calibration, per-dimension clipping and
+    reliability weighting as every other score, so it counts strongly but
+    cannot on its own override the other dimensions.
+    """
+    c = float(min(max(coverage, 0.0), 1.0))
+    if observed is None:
+        return float(penalty)
+    if c >= COMPLETE_COVERAGE:
+        return float(observed)
+    return c * float(observed) + (1.0 - c) * float(penalty)
+
+
+def coverage_status(coverage: float) -> str:
+    if coverage >= COMPLETE_COVERAGE:
+        return "OK"
+    if coverage > 0.0:
+        return "PARTIAL"
+    return "MISSING"

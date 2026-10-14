@@ -18,13 +18,14 @@ from amfa.common import artifacts, logs, web
 from amfa.common.contract import (FAILED, ID_PATTERN, INSUFFICIENT_DATA, PASSED, EnrollResult,
                                   FactorResult, VerifyRequest)
 from amfa.factors.base import ReplayGuard, internal_auth, store_for
+from amfa.factors.ueba import dimensions as dm
 from amfa.factors.ueba.features import keystroke as ks
 from amfa.factors.ueba.features import mouse as ms
 from amfa.factors.ueba.features import session as se
 from amfa.factors.ueba.features import shape as sh
 from amfa.factors.ueba.features import transactional as tx
-from amfa.factors.ueba.scoring.combine import (CalibrationSet, attenuate, band, combine,
-                                               confidence)
+from amfa.factors.ueba.scoring.combine import (COMPLETE_COVERAGE, CalibrationSet, attenuate, band,
+                                               combine, confidence)
 
 FACTOR = "UEBA"
 MATCH_THRESHOLD = 0.5
@@ -37,6 +38,7 @@ CHALLENGE_DIMENSIONS = ("keystroke", "shape")
 PREVIEW_DIMENSIONS = ("session", "transaction")
 
 MIN_DWELL_STD_MS = 2.0
+MIN_AUTOMATION_CHECK_KEYS = 5
 REPLAY_MEAN_ABS_MS = 1.5
 MAX_EVENTS_PER_SAMPLE = 400
 MAX_EVENT_MS = 10 * 60 * 1000
@@ -113,20 +115,10 @@ class Reject(Exception):
         self.code = code
 
 
-def typed_text(events: list[dict]) -> str:
-    out: list[str] = []
-    for e in events:
-        k = e.get("key", "")
-        if k == "Backspace":
-            if out:
-                out.pop()
-        elif isinstance(k, str) and len(k) == 1:
-            out.append(k)
-    return "".join(out)
-
-
-def _clean_key_events(raw: Any) -> list[dict]:
-    if not isinstance(raw, list) or not (6 <= len(raw) <= MAX_EVENTS_PER_SAMPLE):
+def _clean_key_events(raw: Any, *, min_events: int = 0) -> list[dict]:
+    if raw is None:
+        raw = []
+    if not isinstance(raw, list) or not (min_events <= len(raw) <= MAX_EVENTS_PER_SAMPLE):
         raise Reject("KEYSTROKE_SAMPLE_INVALID")
     out = []
     for e in raw:
@@ -140,24 +132,19 @@ def _clean_key_events(raw: Any) -> list[dict]:
         if up is not None and not (0 <= up - down <= 5000):
             raise Reject("KEYSTROKE_TIMING_IMPLAUSIBLE")
         out.append({"key": key, "down": float(down), "up": None if up is None else float(up)})
-    if out[-1]["down"] - out[0]["down"] > MAX_EVENT_MS:
+    if out and out[-1]["down"] - out[0]["down"] > MAX_EVENT_MS:
         raise Reject("KEYSTROKE_TIMING_IMPLAUSIBLE")
     return out
 
 
-def _keystroke(raw: Any) -> tuple[dict, list[dict]]:
-    events = _clean_key_events(raw)
-    if typed_text(events) != ks.ENROLL_PHRASE:
-        raise Reject("PHRASE_MISMATCH")
-    sample = ks.extract(events)
-    if sample is None:
-        raise Reject("KEYSTROKE_SAMPLE_TOO_SHORT")
-    if float(np.std(sample["dwell"])) < MIN_DWELL_STD_MS:
-        raise Reject("KEYSTROKE_AUTOMATION_SUSPECTED")
-    return sample, events
+def _automated(sample: dict) -> bool:
+    dwell = sample["dwell"][~np.isnan(sample["dwell"])]
+    return len(dwell) >= MIN_AUTOMATION_CHECK_KEYS and float(np.std(dwell)) < MIN_DWELL_STD_MS
 
 
 def _points(raw: Any, limit: int = 5000) -> list[dict]:
+    if raw is None:
+        return []
     if not isinstance(raw, list) or len(raw) > limit:
         raise Reject("POINTER_TRACE_INVALID")
     out = []
@@ -172,7 +159,7 @@ def _points(raw: Any, limit: int = 5000) -> list[dict]:
 
 
 def _timing_vector(sample: dict) -> np.ndarray:
-    return np.concatenate([sample["dwell"], sample["flight"]]).astype(np.float32)
+    return np.nan_to_num(np.concatenate([sample["dwell"], sample["flight"]])).astype(np.float32)
 
 
 def _digest(sample: dict) -> str:
@@ -184,7 +171,8 @@ def _digest(sample: dict) -> str:
 def enroll_phrase() -> dict:
     return {"phrase": ks.ENROLL_PHRASE, "repetitions": ks.TARGET_SAMPLES,
             "minimum": ks.MIN_SAMPLES + ks.DISCARD_FIRST, "discarded": ks.DISCARD_FIRST,
-            "shape": sh.SHAPE, "shapeTracesRequired": sh.MIN_SAMPLES}
+            "shape": [list(p) for p in sh.SHAPE], "aspectRatio": sh.ASPECT,
+            "shapeTracesRequired": sh.MIN_SAMPLES}
 
 
 class EnrollPayload(BaseModel):
@@ -204,12 +192,22 @@ def enroll(req: EnrollPayload) -> EnrollResult:
         return EnrollResult(factor=FACTOR, enrolled=False, reason="KEYSTROKE_SAMPLES_MISSING", latencyMs=ms_())
 
     usable, rejected = [], {}
+
+    def reject(code: str) -> None:
+        rejected[code] = rejected.get(code, 0) + 1
+
     for raw in raw_samples:
         try:
-            s, _ = _keystroke(raw)
-            usable.append(s)
+            sample = ks.extract(_clean_key_events(raw, min_events=1))
         except Reject as r:
-            rejected[r.code] = rejected.get(r.code, 0) + 1
+            reject(r.code)
+            continue
+        if sample["coverage"] < ks.MIN_ENROLL_COVERAGE:
+            reject("PHRASE_INCOMPLETE")
+        elif _automated(sample):
+            reject("KEYSTROKE_AUTOMATION_SUSPECTED")
+        else:
+            usable.append(sample)
 
     digests = [_digest(s) for s in usable]
     if len(set(digests)) != len(digests):
@@ -219,7 +217,7 @@ def enroll(req: EnrollPayload) -> EnrollResult:
     if tpl is None:
         return EnrollResult(factor=FACTOR, enrolled=False, reason="NOT_ENOUGH_USABLE_SAMPLES",
                             quality={"usable": len(usable), "rejected": rejected,
-                                     "required": ks.MIN_SAMPLES + ks.DISCARD_FIRST},
+                                     "required": ks.MIN_SAMPLES},
                             latencyMs=ms_())
 
     shape_tpl = None
@@ -228,7 +226,7 @@ def enroll(req: EnrollPayload) -> EnrollResult:
         traces = [sh.extract(_points(t)) for t in (p.get("shapeTraces") or [])[:10]]
         shape_tpl = sh.build_template(traces)
         shape_info = ({"status": "ENROLLED", "samples": shape_tpl["n_samples"]} if shape_tpl
-                      else {"status": "NOT_ENROLLED", "reason": "need 5 complete traces"})
+                      else {"status": "NOT_ENROLLED", "reason": f"need {sh.MIN_SAMPLES} complete traces"})
     except Reject as r:
         shape_info = {"status": "NOT_ENROLLED", "reason": r.code}
 
@@ -275,53 +273,37 @@ def verify(req: VerifyRequest) -> FactorResult:
         return result(INSUFFICIENT_DATA, "NO_ENROLLED_TEMPLATE")
 
     try:
-        sample, _ = _keystroke(req.payload.get("keystrokeSample"))
+        key_events = _clean_key_events(req.payload.get("keystrokeSample"))
+        shape_asked = bool(req.challenge.get("shape"))
+        trace = _points(req.payload.get("shapeTrace")) if shape_asked else []
     except Reject as r:
         return result(FAILED, r.code)
 
     ktpl = tpl["keystroke"]
-    vec = _timing_vector(sample)
-    vec_cmp = vec[: ktpl["n_dwell"] + ktpl["n_flight"]]
-    digest = _digest(sample)
-    hit = guard.check(req.tenantId, req.userId, digest, vec_cmp)
-    if hit:
-        from amfa.common.contract import SPOOF_DETECTED
-        return result(SPOOF_DETECTED, hit)
-    guard.remember(req.tenantId, req.userId, digest, vec_cmp)
+    sample = ks.extract(key_events)
+    if _automated(sample):
+        return result(FAILED, "KEYSTROKE_AUTOMATION_SUSPECTED")
+    if sample["coverage"] >= COMPLETE_COVERAGE:
+        vec = _timing_vector(sample)[: ktpl["n_dwell"] + ktpl["n_flight"]]
+        digest = _digest(sample)
+        hit = guard.check(req.tenantId, req.userId, digest, vec)
+        if hit:
+            from amfa.common.contract import SPOOF_DETECTED
+            return result(SPOOF_DETECTED, hit)
+        guard.remember(req.tenantId, req.userId, digest, vec)
 
     dims: dict[str, dict] = {}
     probs: dict[str, Optional[float]] = {}
-    d = ks.distance(ktpl, sample)
-    probs["keystroke"] = calset.probability("keystroke", d)
-    dims["keystroke"] = {"status": "OK", "distance": round(d, 4) if d is not None else None,
-                         "probability": _r(probs["keystroke"])}
-
-    trace = req.payload.get("shapeTrace")
-    if trace is None:
-        dims["shape"] = {"status": "NOT_PROVIDED"}
-        probs["shape"] = None
-    elif tpl.get("shape") is None:
-        dims["shape"] = {"status": "INSUFFICIENT_DATA", "reason": "no shape template enrolled"}
-        probs["shape"] = None
-    else:
-        try:
-            ss = sh.extract(_points(trace))
-        except Reject as r:
-            return result(FAILED, r.code)
-        sd = sh.distance(tpl["shape"], ss)
-        probs["shape"] = calset.probability("shape", sd)
-        dims["shape"] = {"status": "OK" if sd is not None else "INCOMPLETE",
-                         "distance": _r(sd), "probability": _r(probs["shape"])}
+    dims["keystroke"], probs["keystroke"] = dm.score_keystroke(ktpl, key_events, calset)
+    dims["shape"], probs["shape"] = dm.score_shape(tpl.get("shape"), trace, calset,
+                                                   applicable=shape_asked)
 
     pts = req.payload.get("mousePoints") or []
     if tpl.get("mouse") and isinstance(pts, list) and len(pts) >= ms.MIN_POINTS:
         try:
-            msamp = ms.extract(_points(pts), [c for c in (req.payload.get("mouseClicks") or [])
-                                              if isinstance(c, dict)][:500])
-            md = ms.distance(tpl["mouse"], msamp)
-            dims["mouse"] = {"status": "OK", "distance": _r(md),
-                             "probability": _r(calset.probability("mouse", md)),
-                             "excludedFromDecision": True}
+            clicks = [c for c in (req.payload.get("mouseClicks") or []) if isinstance(c, dict)][:500]
+            dims["mouse"], _ = dm.score_mouse(tpl["mouse"], _points(pts), clicks, calset)
+            dims["mouse"]["excludedFromDecision"] = True
         except (Reject, Exception):
             dims["mouse"] = {"status": "UNSCORABLE", "excludedFromDecision": True}
 
@@ -330,9 +312,23 @@ def verify(req: VerifyRequest) -> FactorResult:
     if not used:
         return result(INSUFFICIENT_DATA, "NOTHING_ASSESSABLE", detail={"dimensions": dims})
     score = round(1.0 - risk, 4)
-    status = PASSED if score >= MATCH_THRESHOLD else FAILED
-    return result(status, None if status == PASSED else "BEHAVIOURAL_MISMATCH", score=score,
+    status, reason = _verdict(dims, score)
+    return result(status, reason, score=score,
                   detail={"dimensions": dims, "dimensionsUsed": used, "band": band(risk)})
+
+
+def _verdict(dims: dict[str, dict], score: float) -> tuple[str, Optional[str]]:
+    """Skipping a whole part of the challenge cannot be passed however well the other part went,
+    otherwise that part would be optional in practice."""
+    statuses = [dims[d]["status"] for d in CHALLENGE_DIMENSIONS
+                if d in dims and dims[d]["status"] not in ("NOT_APPLICABLE", "INSUFFICIENT_DATA")]
+    if statuses and all(st == "MISSING" for st in statuses):
+        return FAILED, "CHALLENGE_MISSING"
+    if "MISSING" in statuses:
+        return FAILED, "CHALLENGE_INCOMPLETE"
+    if score >= MATCH_THRESHOLD:
+        return PASSED, None
+    return FAILED, "CHALLENGE_INCOMPLETE" if "PARTIAL" in statuses else "BEHAVIOURAL_MISMATCH"
 
 
 def _r(v: Optional[float]) -> Optional[float]:

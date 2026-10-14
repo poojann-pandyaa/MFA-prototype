@@ -13,7 +13,6 @@ jobs:
         with:
           python-version: "3.13"
           cache: pip
-      # Factor requirements are added here as each branch's tests are ported
-      # (UEBA: requirements/ueba.txt, voice: requirements/voice.txt).
-      - run: pip install -r requirements/base.txt -r requirements/face.txt pytest
+      # Voice requirements (requirements/voice.txt) are added when its tests are ported.
+      - run: pip install -r requirements/base.txt -r requirements/face.txt -r requirements/ueba.txt pytest
       - run: python -m pytest

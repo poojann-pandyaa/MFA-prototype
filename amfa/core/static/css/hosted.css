@@ -76,7 +76,7 @@ button:disabled { opacity: 0.55; cursor: progress; }
 .meter > span { display: block; height: 100%; width: 0; background: var(--ok); transition: width 80ms linear; }
 .progress { height: 6px; border-radius: 999px; background: var(--chip); overflow: hidden; margin: 10px 0; }
 .progress > span { display: block; height: 100%; width: 0; background: var(--brand); }
-canvas.amfa-shape { width: 100%; aspect-ratio: 16 / 9; border-radius: 12px; border: 1px dashed var(--line);
+canvas.amfa-shape { width: 100%; aspect-ratio: 2 / 1; border-radius: 12px; border: 1px dashed var(--line);
   background: var(--bg); touch-action: none; display: block; margin-top: 10px; }
 .qr { display: flex; justify-content: center; margin: 12px 0; }
 .qr img { width: 208px; height: 208px; background: #fff; border-radius: 10px; padding: 8px; }
