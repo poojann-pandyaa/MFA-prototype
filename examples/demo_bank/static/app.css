@@ -226,6 +226,7 @@ select.input { appearance: none; }
 .demo-fab { position: fixed; right: 16px; bottom: calc(96px + env(safe-area-inset-bottom)); z-index: 6; border: 0; border-radius: 999px;
   background: var(--demo); color: #fff; padding: 10px 14px; font-size: 13px; font-weight: 800; box-shadow: var(--shadow);
   display: inline-flex; gap: 6px; align-items: center; }
+.demo-fab.top { bottom: auto; top: 18px; }
 @media (prefers-color-scheme: dark) { .demo-fab { color: #1a1033; } }
 .levels { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
 .levels span { height: 34px; border-radius: 10px; background: var(--line-soft); color: var(--muted); font-size: 13px; font-weight: 700;

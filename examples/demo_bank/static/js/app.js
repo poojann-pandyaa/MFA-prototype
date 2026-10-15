@@ -91,8 +91,9 @@ export async function render() {
       button("Try again", { onClick: () => render() }), h("div", { class: "spacer" })));
   }
   tabs(TAB_OF[route]);
-  demoButton();
+  demoButton(TAB_OF[route] ? "" : TOP_DEMO.has(route) ? "top" : null);
 }
+const TOP_DEMO = new Set(["review", "result"]);   // screens with their own bottom buttons: the demo button sits at the top
 
 // ---------- bottom tabs and the demo button live outside the screen ----------
 const TABS = [["home", "Home", "home", "home"], ["pay", "Pay", "send", "pay"], ["activity", "Activity", "activity", "activity"],
@@ -108,11 +109,11 @@ function tabs(on) {
 }
 
 let fab = null;
-function demoButton() {
+function demoButton(place) {   // place: "" above the tabs, "top", or null for none
   if (fab) fab.remove();
   fab = null;
-  if (!state.signedIn || !state.me.demoTools) return;
-  fab = h("button", { type: "button", class: "demo-fab", onclick: () => import("./screens/demo.js").then((m) => m.open()) },
+  if (place === null || !state.signedIn || !state.me.demoTools) return;
+  fab = h("button", { type: "button", class: `demo-fab ${place}`, onclick: () => import("./screens/demo.js").then((m) => m.open()) },
     icon("spark", 16), "Behind the scenes");
   document.body.appendChild(fab);
 }

@@ -97,10 +97,12 @@ export function iconButton(name, label, onClick) {
 }
 
 export function topbar({ title, back, close, label, right }) {
+  const lead = back ? iconButton("back", "Back", back) : close ? iconButton("close", "Close", close) : null;
+  const pad = () => h("span", { style: { width: "44px", flexShrink: "0" } });   // keeps a centred label centred
   return h("div", { class: "topbar" },
-    back ? iconButton("back", "Back", back) : close ? iconButton("close", "Close", close) : null,
+    lead || (label ? pad() : null),
     title ? h("h2", { text: title }) : label ? h("span", { class: "label", text: label }) : h("span", { class: "spacer" }),
-    right || (label ? h("span", { style: { width: "44px" } }) : null));
+    right || (label ? pad() : null));
 }
 
 export function stepsBar(done, total) {
@@ -128,8 +130,9 @@ export function note(kind, iconName, ...content) {
   return h("div", { class: `note ${kind}`, role: kind === "bad" ? "alert" : null }, icon(iconName, 20), h("span", {}, content));
 }
 
-export function field({ label, id, input, err }) {
-  input.id = id;
+// `control` is the element the label points at when `input` is a wrapper (prefix, show-password button)
+export function field({ label, id, input, control, err }) {
+  (control || input).id = id;
   return h("div", { class: "field" }, h("label", { for: id, text: label }), input, err || null);
 }
 
