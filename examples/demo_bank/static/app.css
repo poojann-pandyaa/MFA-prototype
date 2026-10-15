@@ -41,6 +41,12 @@ button { cursor: pointer; }
 .row-between { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .center { text-align: center; }
 
+/* shown by index.html until the app's first screen replaces it */
+.boot { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; font-size: 18px; }
+.boot-mark { width: 48px; height: 48px; border-radius: 14px; background: var(--brand); animation: boot-pulse 1.2s ease-in-out infinite; }
+@keyframes boot-pulse { 50% { opacity: 0.45; transform: scale(0.92); } }
+@media (prefers-reduced-motion: reduce) { .boot-mark { animation: none; } }
+
 /* ---------- type ---------- */
 h1 { font-size: 28px; line-height: 1.15; font-weight: 800; letter-spacing: -0.6px; margin: 0; }
 h2 { font-size: 22px; line-height: 1.2; font-weight: 800; letter-spacing: -0.4px; margin: 0; }
