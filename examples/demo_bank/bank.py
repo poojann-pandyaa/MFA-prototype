@@ -17,13 +17,13 @@ import uuid
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Annotated, Callable, Literal, Optional
 
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerifyMismatchError
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import AfterValidator, BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "sdk" / "python"))
@@ -179,6 +179,43 @@ def sent_today(c: dict) -> int:
     return c["sent"]["minor"] if c["sent"]["day"] == date.today().isoformat() else 0
 
 
+def initials(display: str) -> str:
+    words = re.findall(r"[A-Za-z]+", display)
+    return "".join(w[0] for w in words[:2]).upper() or "?"
+
+
+# the ways a customer can confirm it's them; a code by SMS or an authenticator app counts once
+METHODS = [("SMS code", lambda e: bool(e.get("OTP_DELIVERY") or e.get("OTP_TOTP"))),
+           ("Face", lambda e: e.get("FACE") == "ENROLLED"),
+           ("Voice", lambda e: e.get("VOICE") == "ENROLLED"),
+           ("Typing", lambda e: e.get("UEBA") == "ENROLLED")]
+
+
+def protection(enrolled: dict) -> dict:
+    have = [name for name, on in METHODS if on(enrolled)]
+    can_add = [name for name, on in METHODS[1:] if not on(enrolled)]
+    if not enrolled.get("OTP_TOTP"):
+        can_add.append("Authenticator app")
+    level = "Strong" if len(have) >= 3 else "Good" if len(have) == 2 else "Basic"
+    return {"level": level, "have": have, "canAdd": can_add}
+
+
+def recent_payees(c: dict) -> list[dict]:
+    refs: list[str] = []
+    for a in c["activity"]:   # newest first
+        ref = a.get("payeeRef")
+        if a["kind"] == "transfer" and a["status"] == "DONE" and ref in c["payees"] and ref not in refs:
+            refs.append(ref)
+    return [{"ref": r, "display": c["payees"][r]["display"], "initials": initials(c["payees"][r]["display"])}
+            for r in refs[:6]]
+
+
+def _embed(url: str) -> str:
+    """AMFA's pages read embed=1 from the query; the token stays in the #fragment, out of logs."""
+    base, _, frag = url.partition("#")
+    return base + ("&" if "?" in base else "?") + "embed=1" + ("#" + frag if frag else "")
+
+
 @app.get("/api/me")
 def me(request: Request, deviceId: str = ""):
     c = customer(request)
@@ -186,22 +223,32 @@ def me(request: Request, deviceId: str = ""):
     if c["amfaUser"]:
         enrolled = AMFA.request("GET", f"/v1/users/{c['amfaUser']}")["enrollment"]
     return {"name": c["name"], "ref": c["ref"], "balance": c["balance"], "enrolled": enrolled,
+            "protection": protection(enrolled or {}), "frozen": c.get("frozen", False),
             "dailyLimit": c["dailyLimit"], "sentToday": sent_today(c),
             "phone": _mask(c["phone"]), "email": _mask(c["email"]),
-            "deviceTrusted": deviceId in c["devices"], "demoTools": DEMO_TOOLS,
-            "payees": [{"ref": k, "display": p["display"], "riskFlag": p.get("riskFlag", False)}
-                       for k, p in c["payees"].items()],
+            "deviceTrusted": deviceId in c["devices"], "devices": len(c["devices"]), "demoTools": DEMO_TOOLS,
+            "payees": [{"ref": k, "display": p["display"], "initials": initials(p["display"]),
+                        "riskFlag": p.get("riskFlag", False)} for k, p in c["payees"].items()],
+            "recentPayees": recent_payees(c),
             "billers": [{"ref": k, "display": v} for k, v in BILLERS.items()]}
 
 
+class Enrol(BaseModel):
+    factors: list[Literal["FACE", "VOICE", "UEBA", "OTP"]] = Field(default_factory=lambda: ["FACE"],
+                                                                     min_length=1, max_length=4)
+
+
 @app.post("/api/amfa/enrol")
-def enrol(request: Request):
+def enrol(request: Request, body: Optional[Enrol] = None):
+    """Progressive setup: the first link asks for the face only (SMS codes come from the mobile number);
+    the security centre asks for one more way at a time."""
     c = customer(request)
     with _lock:
         if not c["amfaUser"]:
             c["amfaUser"] = AMFA.create_user(c["ref"], contact={"channel": "sms", "to": c["phone"]})["id"]
             _save()
-    return {"url": AMFA.enrollment_link(c["amfaUser"])["url"]}
+    factors = (body or Enrol()).factors
+    return {"url": _embed(AMFA.enrollment_link(c["amfaUser"], factors=factors)["url"])}
 
 
 # ---------- protected actions ----------
@@ -216,14 +263,20 @@ class Device(BaseModel):
     pointer: bool = False
 
 
+def _paise(v: float) -> float:
+    if round(v, 2) != v:
+        raise ValueError("amounts have at most two decimal places")
+    return v
+
+
 class Transfer(Device):
     payeeRef: str = Field(pattern=r"^BEN-[A-Z0-9]{2,12}$")
-    amountRupees: float = Field(gt=0, le=1_00_00_000)
+    amountRupees: Annotated[float, Field(gt=0, le=1_00_00_000), AfterValidator(_paise)]
 
 
 class Bill(Device):
     billerRef: str = Field(pattern=r"^BILL-[A-Z]{2,8}$")
-    amountRupees: float = Field(gt=0, le=10_00_000)
+    amountRupees: Annotated[float, Field(gt=0, le=10_00_000), AfterValidator(_paise)]
 
 
 class AddPayee(Device):
@@ -361,9 +414,26 @@ KINDS = {
 
 
 def public(a: dict) -> dict:
-    """What the customer's app sees: never the risk score, threat level or AMFA identifiers."""
-    return {k: a.get(k) for k in ("id", "kind", "title", "amountMinor", "status", "detail", "createdAt",
-                                  "checks", "reason", "scamWarning", "reported")}
+    """What the customer's app sees: never the risk score, threat level, AMFA's decision or identifiers."""
+    out = {k: a.get(k) for k in ("id", "kind", "title", "amountMinor", "status", "detail", "createdAt",
+                                 "checks", "reason", "scamWarning", "reported")}
+    out["payee"] = {"display": a.get("payeeDisplay"), "initials": initials(a.get("payeeDisplay") or "")}
+    out["confirmedWith"] = a.get("confirmedWith", [])
+    out["canContinue"] = a["status"] == "AWAITING_VERIFICATION" and bool(a.get("challengeUrl"))
+    return out
+
+
+AMR_NAMES = {"otp": "SMS code", "face": "Face", "voice": "Voice", "ueba": "Typing", "review": "Bank review"}
+
+
+def _decision(plan: dict) -> dict:
+    """What AMFA decided, kept for the presenter's "Behind the scenes" drawer only."""
+    reasons = [{"feature": k, "text": text, "weight": w}
+               for (k, w), text in zip(plan.get("riskReasons") or [], plan.get("riskReasonText") or [])]
+    return {"threatLevel": plan.get("threatLevel"), "modelLevel": plan.get("modelLevel"),
+            "score": plan.get("riskScore"), "capReason": plan.get("capReason"), "reasons": reasons,
+            "checks": plan.get("required") or [], "rulesBaseline": plan.get("rulesBaseline") or [],
+            "escalate": plan.get("escalate"), "modelVersion": plan.get("modelVersion")}
 
 
 def _client_ip(request: Request) -> str:
@@ -396,6 +466,8 @@ async def start_action(kind: str, request: Request):
 
 def _start(k: Kind, kind: str, username: str, body: Device, request: Request) -> dict:
     c = CUSTOMERS[username]
+    if c.get("frozen"):
+        raise HTTPException(423, "your account is frozen; call us to unfreeze it")
     if not c["amfaUser"]:
         raise HTTPException(409, "set up secure approvals first")
     if k.needs_trusted_device and body.deviceId not in c["devices"]:
@@ -419,7 +491,9 @@ def _start(k: Kind, kind: str, username: str, body: Device, request: Request) ->
 
     notice = txn["plan"].get("customerNotice") or {}
     a.update(amfaTxn=txn["transactionId"], checks=[CHECK_NAMES.get(f, f) for f in txn["plan"]["required"]],
-             reason=notice.get("reason"), scamWarning=bool(notice.get("scamWarning")))
+             reason=notice.get("reason"), scamWarning=bool(notice.get("scamWarning")),
+             challengeUrl=_embed(txn["challengeUrl"]) if txn.get("challengeUrl") else None,
+             decision=_decision(txn["plan"]))
     if txn["status"] == "REVIEW":
         a["status"] = "UNDER_REVIEW"
     with _lock:
@@ -427,7 +501,7 @@ def _start(k: Kind, kind: str, username: str, body: Device, request: Request) ->
         del c["activity"][100:]
         ACTIONS[a["id"]] = (username, a)
         _save()
-    return {"action": public(a), "challengeUrl": txn.get("challengeUrl")}
+    return {"action": public(a), "challengeUrl": a["challengeUrl"]}
 
 
 def settle(c: dict, a: dict) -> dict:
@@ -462,6 +536,7 @@ def settle(c: dict, a: dict) -> dict:
             return a
         problem = KINDS[a["kind"]].apply(c, a)
         a["status"], a["detail"] = ("FAILED", problem) if problem else ("DONE", None)
+        a["confirmedWith"] = [AMR_NAMES.get(m, m) for m in result["claims"].get("amr", [])]
         _save()
     return a
 
@@ -478,6 +553,27 @@ def _own(request: Request, action_id: str) -> tuple[dict, dict]:
 def complete(action_id: str, request: Request):
     c, a = _own(request, action_id)
     return {"action": public(settle(c, a)), "balance": c["balance"]}
+
+
+@app.post("/api/actions/{action_id}/continue")
+def continue_action(action_id: str, request: Request):
+    """Back into the same AMFA session after the customer closed the verification screen."""
+    c, a = _own(request, action_id)
+    settle(c, a)
+    if a["status"] != "AWAITING_VERIFICATION" or not a.get("challengeUrl"):
+        raise HTTPException(409, "this request can't be continued; start it again")
+    return {"challengeUrl": a["challengeUrl"]}
+
+
+@app.post("/api/account/freeze")
+def freeze(request: Request):
+    """The customer's panic button: nothing can be started until the bank unfreezes the account."""
+    c = customer(request)
+    if c["amfaUser"]:
+        AMFA.request("PATCH", f"/v1/users/{c['amfaUser']}", {"status": "SUSPENDED"})
+    c["frozen"] = True
+    _save()
+    return {"frozen": True}
 
 
 @app.post("/api/actions/{action_id}/cancel")
@@ -567,6 +663,25 @@ def demo_payee_risk(body: PayeeFlag, request: Request):
     c["payees"][body.payeeRef]["riskFlag"] = body.flagged
     _save()
     return {"payeeRef": body.payeeRef, "flagged": body.flagged}
+
+
+@app.post("/api/demo/unfreeze")
+def demo_unfreeze(request: Request):
+    """What the bank's support desk does after checking with the customer."""
+    c = _demo(request)
+    if c["amfaUser"]:
+        AMFA.request("PATCH", f"/v1/users/{c['amfaUser']}", {"status": "ACTIVE"})
+    c["frozen"] = False
+    _save()
+    return {"frozen": False}
+
+
+@app.get("/api/demo/last-decision")
+def demo_last_decision(request: Request):
+    """AMFA's decision on the customer's latest action, for the presenter's drawer."""
+    c = _demo(request)
+    a = next((a for a in c["activity"] if a.get("decision")), None)
+    return {"decision": a and {**a["decision"], "title": a["title"], "status": a["status"]}}
 
 
 @app.post("/api/demo/reset")

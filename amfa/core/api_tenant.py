@@ -22,7 +22,7 @@ from amfa.engine.agent import build_agent
 from amfa.engine.context import Segment, TxnType
 from amfa.engine.decide import MonotonicityViolation, decide
 from amfa.engine.policy import TenantPolicy
-from amfa.engine.rationale import customer_notice
+from amfa.engine.rationale import REASON_TEXT, customer_notice
 
 router = APIRouter(prefix="/v1", tags=["tenant"])
 
@@ -343,6 +343,7 @@ def initiate(body: InitiateTxn, request: Request,
                         "threatLevel": plan.threatLevel, "riskScore": plan.riskScore,
                         "modelLevel": plan.modelLevel, "capReason": plan.capReason,
                         "riskReasons": plan.riskReasons, "modelVersion": plan.modelVersion,
+                        "riskReasonText": [REASON_TEXT.get(k, k) for k, _ in plan.riskReasons],
                         "floor": plan.floor.value, "source": plan.source, "reasoning": plan.reasoning,
                         "escalate": plan.escalate, "rulesBaseline": [f.value for f in plan.rulesBaseline],
                         "agentAdded": [f.value for f in plan.agentAdded],

@@ -228,5 +228,87 @@ def test_customers_cannot_touch_each_others_actions(stack, app):
     other = TestClient(stack.bank.app)
     other.post("/api/register", json={"username": f"o{uuid.uuid4().hex[:8]}", "name": "Other", "phone": "+919800000001",
                                       "password": "long-password-1", "deviceId": "device-other-0003"})
-    for path in ("complete", "cancel", "report"):
+    for path in ("complete", "cancel", "report", "continue"):
         assert other.post(f"/api/actions/{aid}/{path}", json={}).status_code == 404
+
+
+def _token(url):
+    return url.split("#token=", 1)[1]
+
+
+def test_enrol_asks_only_for_what_is_requested_and_in_the_banks_colours(stack, app):
+    url = app.post("/api/amfa/enrol", json={"factors": ["VOICE"]}).json()["url"]
+    assert "embed=1" in url.split("#", 1)[0]
+    st = stack.core.get("/c/v1/enrollment", headers={"authorization": f"Bearer {_token(url)}"}).json()
+    assert st["requested"] == ["VOICE"]
+    assert st["theme"]["bank"] == "Demo Bank" and st["theme"]["color"].startswith("#")
+
+
+def test_the_verification_page_gets_the_theme_too(stack, app):
+    url = act(app, "transfer", payeeRef="BEN-42", amountRupees=10).json()["challengeUrl"]
+    assert "embed=1" in url.split("#", 1)[0]
+    st = stack.core.get("/c/v1/session", headers={"authorization": f"Bearer {_token(url)}"}).json()
+    assert st["theme"]["bank"] == "Demo Bank"
+
+
+def test_protection_level_counts_the_ways_to_confirm(stack, app):
+    p = app.get("/api/me", params={"deviceId": PHONE_DEVICE}).json()["protection"]
+    assert p["level"] == "Strong"
+    assert set(p["have"]) == {"SMS code", "Face", "Voice", "Typing"}
+    assert p["canAdd"] == ["Authenticator app"]
+
+
+def test_a_closed_verification_can_be_continued(stack, app):
+    aid = act(app, "transfer", payeeRef="BEN-42", amountRupees=10).json()["action"]["id"]
+    listed = next(a for a in app.get("/api/activity").json()["activity"] if a["id"] == aid)
+    assert listed["canContinue"]
+    url = app.post(f"/api/actions/{aid}/continue").json()["challengeUrl"]
+    verify(stack, url)
+    done = app.post(f"/api/actions/{aid}/complete").json()["action"]
+    assert done["status"] == "DONE" and done["confirmedWith"] == ["SMS code", "Typing"]
+    assert done["payee"] == {"display": "V. Mehta ••4411", "initials": "VM"}
+    assert app.post(f"/api/actions/{aid}/continue").status_code == 409
+
+
+def test_recent_payees_are_the_ones_paid_most_recently(stack, app):
+    started = act(app, "transfer", payeeRef="BEN-42", amountRupees=10).json()
+    verify(stack, started["challengeUrl"])
+    app.post(f"/api/actions/{started['action']['id']}/complete")
+    recent = app.get("/api/me", params={"deviceId": PHONE_DEVICE}).json()["recentPayees"]
+    assert recent == [{"ref": "BEN-42", "display": "V. Mehta ••4411", "initials": "VM"}]
+
+
+def test_a_frozen_account_cannot_start_anything(stack, app):
+    app.post("/api/account/freeze").raise_for_status()
+    with db.session() as s:
+        assert s.get(db.Customer, stack.bank.CUSTOMERS[app.user]["amfaUser"]).status == "SUSPENDED"
+    for kind, body in [("transfer", {"payeeRef": "BEN-42", "amountRupees": 10}),
+                       ("bill", {"billerRef": "BILL-ELEC", "amountRupees": 10}),
+                       ("payee", {"name": "Ravi Kumar", "account": "123456789012", "ifsc": "HDFC0001234"}),
+                       ("limit", {"limitRupees": 5000}), ("contact", {"field": "email", "value": "a@b.co"}),
+                       ("password", {"current": "long-password-1", "new": "another-password-2"}),
+                       ("device", {})]:
+        assert act(app, kind, **body).status_code == 423, kind
+    assert app.get("/api/me", params={"deviceId": PHONE_DEVICE}).json()["frozen"]
+    app.post("/api/demo/unfreeze").raise_for_status()
+    assert act(app, "transfer", payeeRef="BEN-42", amountRupees=10).status_code == 201
+
+
+def test_the_decision_is_for_the_presenter_only(stack, app, monkeypatch):
+    LEVEL["now"] = "T2"
+    action = act(app, "transfer", payeeRef="BEN-42", amountRupees=LARGE).json()["action"]
+    assert "decision" not in action
+    for a in app.get("/api/activity").json()["activity"]:
+        assert "decision" not in a and "challengeUrl" not in a
+    d = app.get("/api/demo/last-decision").json()["decision"]
+    assert d["threatLevel"] == "T2" and d["checks"] and d["reasons"][0] == {
+        "feature": "payee_seen", "text": "payee not paid before", "weight": 0.2}
+    monkeypatch.setattr(stack.bank, "DEMO_TOOLS", False)
+    assert app.get("/api/demo/last-decision").status_code == 404
+
+
+def test_bad_amounts_never_start_anything(stack, app):
+    for amount in (0, -5, 0.001, 10 ** 9):
+        assert act(app, "transfer", payeeRef="BEN-42", amountRupees=amount).status_code == 422, amount
+    over_limit = act(app, "transfer", payeeRef="BEN-42", amountRupees=2_00_001)
+    assert over_limit.status_code == 422 and "daily limit" in over_limit.json()["detail"]
