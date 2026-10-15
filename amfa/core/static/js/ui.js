@@ -146,6 +146,165 @@
       retry: start
     };
   }
+  // ---------- the bank's look, and running inside the bank's app ----------
+  var embedded = new URLSearchParams(global.location.search).get("embed") === "1";
+  if (embedded) document.documentElement.classList.add("embedded");
+  function rgb(hex) {
+    return [ 1, 3, 5 ].map(function(i) {
+      return parseInt(hex.slice(i, i + 2), 16);
+    });
+  }
+  function luminance(c) {
+    var l = c.map(function(v) {
+      v /= 255;
+      return v <= .03928 ? v / 12.92 : Math.pow((v + .055) / 1.055, 2.4);
+    });
+    return .2126 * l[0] + .7152 * l[1] + .0722 * l[2];
+  }
+  function applyTheme(theme) {
+    if (!theme || !/^#[0-9A-Fa-f]{6}$/.test(theme.color || "")) return;
+    var c = rgb(theme.color);
+    if (global.matchMedia && global.matchMedia("(prefers-color-scheme: dark)").matches) {
+      c = c.map(function(v) {
+        return Math.round(v + (255 - v) * .45);   // lift it so it reads on a dark page
+      });
+    }
+    var root = document.documentElement.style;
+    root.setProperty("--brand", "rgb(" + c.join(",") + ")");
+    root.setProperty("--focus", "rgb(" + c.join(",") + ")");
+    root.setProperty("--brand-ink", luminance(c) < .4 ? "#ffffff" : "#0f1b2d");
+    root.setProperty("--brand-soft", "rgba(" + c.join(",") + ",0.12)");
+  }
+  function step(flow, index, total, factor) {
+    postToParent({
+      type: "amfa:step",
+      flow: flow,
+      index: index,
+      total: total,
+      factor: factor
+    });
+  }
+  // ---------- the face camera: a circle with a progress ring and a turn arrow ----------
+  var SVG = "http://www.w3.org/2000/svg";
+  function svgEl(tag, attrs) {
+    var n = document.createElementNS(SVG, tag);
+    Object.keys(attrs).forEach(function(k) {
+      n.setAttribute(k, attrs[k]);
+    });
+    return n;
+  }
+  function faceCamera() {
+    var C = 2 * Math.PI * 47;
+    var video = el("video", {
+      autoplay: true,
+      muted: true,
+      playsinline: true,
+      "aria-label": "Camera preview"
+    });
+    var ring = svgEl("svg", {
+      viewBox: "0 0 100 100",
+      class: "face-ring",
+      "aria-hidden": "true"
+    });
+    ring.appendChild(svgEl("circle", {
+      cx: 50,
+      cy: 50,
+      r: 47,
+      class: "track"
+    }));
+    var bar = svgEl("circle", {
+      cx: 50,
+      cy: 50,
+      r: 47,
+      class: "bar",
+      "stroke-dasharray": C.toFixed(1),
+      "stroke-dashoffset": C.toFixed(1)
+    });
+    ring.appendChild(bar);
+    var arrow = el("div", {
+      class: "face-arrow hidden",
+      "aria-hidden": "true"
+    });
+    var prompt = el("p", {
+      class: "face-prompt",
+      role: "status"
+    });
+    var node = el("div", {
+      class: "face"
+    }, [ prompt, el("div", {
+      class: "face-circle"
+    }, [ el("div", {
+      class: "camera"
+    }, [ video ]), ring, arrow ]) ]);
+    return {
+      node: node,
+      video: video,
+      prompt: prompt,
+      setProgress: function(f) {
+        bar.setAttribute("stroke-dashoffset", (C * (1 - Math.max(0, Math.min(1, f)))).toFixed(1));
+      },
+      setArrow: function(dir) {   // "LEFT", "RIGHT" (the customer's own side) or null
+        arrow.className = "face-arrow" + (dir ? " " + dir.toLowerCase() : " hidden");
+        arrow.textContent = dir === "LEFT" ? "←" : dir === "RIGHT" ? "→" : "";
+      }
+    };
+  }
+  // ---------- six boxes for a one-time code, over one real input so autofill and paste work ----------
+  function codeBoxes(onComplete) {
+    var input = el("input", {
+      type: "tel",
+      class: "code-input",
+      id: "code",
+      inputmode: "numeric",
+      maxlength: "6",
+      autocomplete: "one-time-code",
+      "aria-label": "6-digit code"
+    });
+    var boxes = [ 0, 1, 2, 3, 4, 5 ].map(function() {
+      return el("span", {
+        class: "code-box",
+        "aria-hidden": "true"
+      });
+    });
+    function paint() {
+      var v = input.value.replace(/\D/g, "").slice(0, 6);
+      if (v !== input.value) input.value = v;
+      boxes.forEach(function(b, i) {
+        b.textContent = v[i] || "";
+        b.className = "code-box" + (v[i] ? " filled" : "") + (document.activeElement === input && i === Math.min(v.length, 5) ? " current" : "");
+      });
+      if (v.length === 6 && onComplete) onComplete(v);
+    }
+    [ "input", "focus", "blur" ].forEach(function(e) {
+      input.addEventListener(e, paint);
+    });
+    var node = el("div", {
+      class: "code-boxes"
+    }, boxes.concat([ input ]));
+    node.addEventListener("click", function() {
+      input.focus();
+    });
+    paint();
+    return {
+      node: node,
+      input: input,
+      value: function() {
+        return input.value.replace(/\D/g, "");
+      },
+      clear: function() {
+        input.value = "";
+        paint();
+      }
+    };
+  }
+  function countdown(node, expiresAt, prefix) {
+    function tick() {
+      var s = Math.max(0, Math.round(expiresAt - Date.now() / 1000));
+      node.textContent = s ? prefix + Math.floor(s / 60) + ":" + ("0" + s % 60).slice(-2) : "This code has expired. Ask for a new one.";
+      if (s && node.isConnected) setTimeout(tick, 1000);
+    }
+    tick();
+  }
   global.UI = {
     el: el,
     clear: clear,
@@ -155,6 +314,12 @@
     errorText: errorText,
     postToParent: postToParent,
     mediaErrorText: mediaErrorText,
-    setupCamera: setupCamera
+    setupCamera: setupCamera,
+    embedded: embedded,
+    applyTheme: applyTheme,
+    step: step,
+    faceCamera: faceCamera,
+    codeBoxes: codeBoxes,
+    countdown: countdown
   };
 })(window);

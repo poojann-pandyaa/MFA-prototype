@@ -32,6 +32,11 @@
     }
   }
   function renderHeader(st) {
+    UI.applyTheme(st.theme);
+    var passed = st.steps.filter(function(s) {
+      return s.status === "PASSED";
+    }).length;
+    if (st.challenge) UI.step("session", passed, st.steps.length, st.challenge.factor);
     document.getElementById("bank").textContent = st.approving.bank;
     document.getElementById("kind").textContent = st.approving.type.replace(/_/g, " ");
     document.getElementById("approving-title").textContent = st.approving.amount;
@@ -119,55 +124,55 @@
   }
   function otpStep(ch) {
     var totp = ch.params.mode === "totp";
-    var input = el("input", {
-      type: "tel",
-      class: "code",
-      id: "code",
-      inputmode: "numeric",
-      maxlength: "6",
-      autocomplete: "one-time-code",
-      "aria-describedby": "otp-help"
-    });
     var btn = el("button", {
       type: "submit",
-      text: "Verify code"
+      text: "Verify"
+    });
+    var sent = false;
+    var boxes = UI.codeBoxes(function(code) {
+      if (!sent) {
+        sent = true;
+        submit(ch, {
+          code: code
+        }, btn);
+      }
+    });
+    var timer = el("p", {
+      class: "muted small"
     });
     var form = el("form", {}, [ el("h2", {
-      text: "Enter your code"
+      text: totp ? "Enter your authenticator code" : "Enter the code we sent"
     }), el("p", {
       class: "muted",
       id: "otp-help",
-      text: totp ? "Open your authenticator app and enter the 6-digit code for this bank." : "We sent a 6-digit code to " + ch.params.sentTo + ". The message names this amount and payee — check they match."
-    }), el("label", {
-      for: "code",
-      text: "6-digit code"
-    }), input, btn ]);
+      text: totp ? "Open your authenticator app and enter the 6-digit code for this bank." : "We sent it to " + ch.params.sentTo + ". The message names this amount and payee, so check they match."
+    }), boxes.node, timer, el("p", {
+      class: "notice warn",
+      text: "Never share this code. Anyone asking for it, even someone saying they're from the bank, is trying to take your money."
+    }), btn ]);
+    boxes.input.setAttribute("aria-describedby", "otp-help");
+    UI.countdown(timer, ch.expiresAt, "Enter it within ");
     form.addEventListener("submit", function(e) {
       e.preventDefault();
-      var code = input.value.replace(/\D/g, "");
-      if (code.length !== 6) {
-        input.focus();
+      var code = boxes.value();
+      if (code.length !== 6 || sent) {
+        boxes.input.focus();
         return;
       }
+      sent = true;
       submit(ch, {
         code: code
       }, btn);
     });
     panel.appendChild(form);
-    input.focus();
+    boxes.input.focus();
   }
   function faceStep(ch) {
     var dir = ch.params.action === "TURN_LEFT" ? "LEFT" : "RIGHT";
-    var video = el("video", {
-      autoplay: true,
-      muted: true,
-      playsinline: true,
-      "aria-label": "Camera preview"
-    });
-    var prompt = el("div", {
-      class: "prompt",
-      text: "Look straight at the camera"
-    });
+    var face = UI.faceCamera();
+    var video = face.video;
+    var prompt = face.prompt;
+    prompt.textContent = "Look straight at the camera";
     var btn = el("button", {
       type: "button",
       text: "Start face check"
@@ -177,13 +182,9 @@
     }));
     panel.appendChild(el("p", {
       class: "muted",
-      text: "Keep your face inside the oval. When asked, turn your head to your " + dir.toLowerCase() + " (about a quarter turn) and hold it until the check finishes."
+      text: "Keep your face in the circle. When asked, slowly turn your head to your " + dir.toLowerCase() + " and hold it until the ring is full."
     }));
-    panel.appendChild(el("div", {
-      class: "camera"
-    }, [ video, el("div", {
-      class: "oval"
-    }), prompt ]));
+    panel.appendChild(face.node);
     camera = new AMFA.Camera(video);
     btn.disabled = true;
     UI.setupCamera(camera, panel, function() {
@@ -194,18 +195,23 @@
     panel.appendChild(btn);
     btn.addEventListener("click", function() {
       UI.busy(btn, true, "Hold still…");
-      var frames = [], interval = ch.params.intervalMs || 150;
+      var frames = [], interval = ch.params.intervalMs || 150, total = ch.params.frames || 12;
       AMFA.sleep(600).then(function() {
-        return camera.burst(3, interval);
+        return camera.burst(3, interval, function(i) {
+          face.setProgress((i + 1) / total);
+        });
       }).then(function(f) {
         frames = frames.concat(f);
         prompt.textContent = "Now slowly turn your head to your " + dir.toLowerCase();
-        var n = Math.max(3, (ch.params.frames || 12) - 3);
+        face.setArrow(dir);
+        var n = Math.max(3, total - 3);
         return camera.burst(n, interval, function(i) {
+          face.setProgress((i + 4) / total);
           if (i === n - 6) prompt.textContent = "Hold it there…";   // the last frames must show the turned pose
         });
       }).then(function(f) {
-        prompt.textContent = "Done — checking";
+        face.setArrow(null);
+        prompt.textContent = "Done, checking…";
         submit(ch, {
           frames: frames.concat(f)
         }, btn);

@@ -4,7 +4,7 @@
   var token = AMFA.takeTokenFromFragment();
   var api = token ? new AMFA.Client("", token) : null;
   var panel = document.getElementById("panel");
-  var state = null, steps = [], index = 0, cleanup = [];
+  var state = null, steps = [], names = [], index = 0, cleanup = [];
   var SENTENCES = [ "My voice confirms my identity for my bank.", "Seven orange rivers flow past the quiet mountain.", "I approve payments only when I start them myself." ];
   function done() {
     cleanup.forEach(function(f) {
@@ -77,7 +77,7 @@
     }));
     panel.appendChild(el("p", {
       class: "muted",
-      text: c.retention + "."
+      text: c.retention.charAt(0).toUpperCase() + c.retention.slice(1) + "."
     }));
     var box = el("input", {
       type: "checkbox",
@@ -157,27 +157,17 @@
     });
   }
   function faceStep() {
-    heading("Face", "Hold your device at eye level in good light. We'll take five quick pictures.");
-    var video = el("video", {
-      autoplay: true,
-      muted: true,
-      playsinline: true,
-      "aria-label": "Camera preview"
-    });
-    var prompt = el("div", {
-      class: "prompt",
-      text: "Look straight at the camera"
-    });
+    heading("Set up your face", "Hold your device at eye level in good light. We'll take five pictures and wait for you at each one.");
+    var face = UI.faceCamera();
+    var prompt = face.prompt;
+    prompt.textContent = "Look straight at the camera";
     var btn = el("button", {
       type: "button",
-      text: "Capture"
+      text: "Start"
     });
-    panel.appendChild(el("div", {
-      class: "camera"
-    }, [ video, el("div", {
-      class: "oval"
-    }), prompt ]));
-    var cam = new AMFA.Camera(video);
+    var problem = null;
+    panel.appendChild(face.node);
+    var cam = new AMFA.Camera(face.video);
     cleanup.push(function() {
       cam.stop();
     });
@@ -189,14 +179,21 @@
     });
     panel.appendChild(btn);
     var cues = [ "Look straight at the camera", "Look straight at the camera", "Turn your head slightly to your left", "Turn your head slightly to your right", "Look straight at the camera" ];
+    var arrows = [ null, null, "LEFT", "RIGHT", null ];
     btn.addEventListener("click", function() {
       UI.busy(btn, true, "Hold still…");
+      if (problem) problem.remove();
+      face.setProgress(0);
       AMFA.sleep(500).then(function() {
         return cam.burst(5, 450, function(i) {
-          prompt.textContent = cues[i] + " (" + (i + 1) + " of 5)";
+          prompt.textContent = cues[i] + " · picture " + (i + 1) + " of 5";
+          face.setArrow(arrows[i]);
+          face.setProgress(i / 5);
           return i > 0 && cues[i] !== cues[i - 1] ? 1500 : 0;   // time to move after a new cue
         });
       }).then(function(frames) {
+        face.setProgress(1);
+        face.setArrow(null);
         prompt.textContent = "Checking…";
         return api.post("/c/v1/enrollment/face", {
           frames: frames
@@ -204,8 +201,10 @@
       }).then(function(res) {
         if (res.enrolled) return next();
         UI.busy(btn, false, "Try again");
-        panel.appendChild(UI.notice("bad", rejected(res)));
+        problem = UI.notice("bad", rejected(res));
+        panel.appendChild(problem);
         prompt.textContent = cues[0];
+        face.setProgress(0);
       }, fail);
     });
   }
@@ -416,7 +415,9 @@
   }
   function run() {
     var s = steps[index];
-    if (s) s();
+    if (!s) return;
+    if (s !== completeStep) UI.step("enroll", index, steps.length - 1, names[index]);
+    s();
   }
   if (!api) {
     clear(panel).appendChild(UI.notice("bad", "This link is incomplete. Ask your bank for a new one."));
@@ -424,6 +425,7 @@
   }
   api.get("/c/v1/enrollment").then(function(st) {
     state = st;
+    UI.applyTheme(st.theme);
     document.getElementById("bank").textContent = st.bank;
     var order = {
       OTP: otpStep,
@@ -431,12 +433,17 @@
       VOICE: voiceStep,
       UEBA: typingStep
     };
-    steps = [ consentStep ];
+    steps = st.consent.required ? [ consentStep ] : [];
+    names = st.consent.required ? [ "CONSENT" ] : [];
     [ "OTP", "FACE", "VOICE", "UEBA" ].forEach(function(f) {
       var doneHere = (st.completedWithThisLink || []).indexOf(f) >= 0;
-      if (st.requested.indexOf(f) >= 0 && !doneHere && (!st.enrolled[f] || st.replace)) steps.push(order[f]);
+      if (st.requested.indexOf(f) >= 0 && !doneHere && (!st.enrolled[f] || st.replace)) {
+        steps.push(order[f]);
+        names.push(f);
+      }
     });
     steps.push(deviceStep, completeStep);
+    names.push("DEVICE", "COMPLETE");
     progress();
     run();
   }).catch(fail);
