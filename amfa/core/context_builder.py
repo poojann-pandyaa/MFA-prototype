@@ -10,11 +10,13 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select
 
 from amfa.common import geo
+from amfa.common.contract import FAILED, SPOOF_DETECTED
 from amfa.common.crypto import keyed_hash
 from amfa.core import db, factors
 from amfa.engine.context import (Band, BehaviouralCtx, Capability, Context, DeviceCtx, Enrollment,
                                  Policy, Segment, TransactionCtx, TxnType)
 from amfa.engine.policy import TenantPolicy
+from amfa.engine.risk import features as risk_features
 
 HOUR_HISTORY_MIN = 8
 HOUR_DEVIATION_UNUSUAL = 3.0
@@ -33,6 +35,7 @@ class TxnInput:
     device_first_seen: Optional[float] = None
     capability: Optional[dict] = None
     session: Optional[dict] = None
+    account_events: Optional[dict] = None
     at: float = field(default_factory=time.time)
 
 
@@ -43,6 +46,7 @@ class Assembled:
     facts: dict
     derived: dict
     policy: TenantPolicy
+    features: dict = field(default_factory=dict)
 
 
 def device_key(tenant_id: str, device_id: str) -> str:
@@ -176,12 +180,63 @@ def assemble(s, tenant: db.Tenant, customer: db.Customer, txn_id: str, t: TxnInp
         behavioural=behavioural,
         enrollment=enrollment_of(s, customer),
         capability=capability,
-        policy=Policy(actionFloor=floor, guidance=policy.agent.guidance if policy.agent.enabled else None),
+        policy=Policy(actionFloor=floor, guidance=policy.agent.guidance if policy.agent.enabled else None,
+                      smallPaymentCap=policy.smallPaymentCap),
         org=org,
     )
     facts["network"] = place.network
     facts["placeKey"] = place.place_key
-    return Assembled(ctx=ctx, preview=preview, facts=facts, derived=derived, policy=policy)
+
+    ev = t.account_events or {}
+    cur = risk_features.Event(at=now, hour=local.hour, amount=t.amount_minor / 100.0, type=t.type.value,
+                              channel=t.channel, payee=pkey, device=dkey, network=place.network,
+                              place=place.place_key, country=place.country)
+    profile = risk_features.Profile(
+        segment=customer.segment, account_created_at=customer.created_at,
+        enrolled_factors=_factors_enrolled(ctx.enrollment),
+        device_key_bound=derived["device"]["keyBound"],
+        ueba_risk=None if preview.get("riskScore") is None else float(preview["riskScore"]),
+        sim_changed_at=ev.get("simChangedAt"), contact_changed_at=ev.get("contactChangedAt"),
+        password_reset_at=ev.get("passwordResetAt"), payee_risk_flag=bool(ev.get("payeeRiskFlag")))
+    history = risk_history(s, customer, now, ZoneInfo(policy.timezone))
+    features = risk_features.build(cur, history, profile)
+    exposure = risk_features.exposure_24h(cur, history)
+    ctx.transaction.exposureBand = policy.band_for(int(round(exposure * 100)), t.currency)
+    return Assembled(ctx=ctx, preview=preview, facts=facts, derived=derived, policy=policy, features=features)
+
+
+def _factors_enrolled(e: Enrollment) -> int:
+    """OTP, face, voice and behaviour (typing or shape) count as one factor each, as in the training data."""
+    return int(e.otp) + int(e.face) + int(e.voice) + int(e.keystroke or e.shape)
+
+
+def risk_history(s, customer: db.Customer, now: float, tz: ZoneInfo) -> list[risk_features.Event]:
+    """The customer's recent transactions as risk-model events, with failed/spoofed attempts."""
+    since = now - risk_features.HISTORY_DAYS * 86_400
+    txns = s.execute(select(db.Transaction).where(db.Transaction.customer_id == customer.id,
+                                                  db.Transaction.created_at >= since)
+                     .order_by(db.Transaction.created_at)).scalars().all()
+    sessions = [t.session_id for t in txns if t.session_id]
+    failed: dict[str, int] = {}
+    spoofed: set[str] = set()
+    if sessions:
+        for sid, status in s.execute(select(db.Attempt.session_id, db.Attempt.status)
+                                     .where(db.Attempt.session_id.in_(sessions))):
+            if status in (FAILED, SPOOF_DETECTED):
+                failed[sid] = failed.get(sid, 0) + 1
+            if status == SPOOF_DETECTED:
+                spoofed.add(sid)
+    out = []
+    for t in txns:
+        f = t.facts or {}
+        place = f.get("placeKey")
+        out.append(risk_features.Event(
+            at=t.created_at, hour=datetime.fromtimestamp(t.created_at, tz=timezone.utc).astimezone(tz).hour,
+            amount=t.amount_minor / 100.0, type=t.type, channel=t.channel, payee=f.get("payeeKey", ""),
+            device=f.get("deviceKey", ""), network=f.get("network", ""), place=place,
+            country=place.split(":")[0] if place else None, authorized=t.status == "AUTHORIZED",
+            failed_factors=failed.get(t.session_id, 0), spoof=t.session_id in spoofed))
+    return out
 
 
 def _ueba_action(t: TxnType) -> str:

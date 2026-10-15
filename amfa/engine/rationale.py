@@ -34,9 +34,39 @@ def org_present(ctx: Context) -> list[str]:
     return [phrase(ctx) for pred, phrase in ORG_SIGNALS if pred(ctx)]
 
 
+REASON_TEXT = {
+    "amount_ratio": "amount far above usual", "amount_vs_max": "largest amount so far",
+    "amount_24h_ratio": "unusual total sent today", "amount_log": "transaction size",
+    "velocity_1h": "many payments in the last hour", "velocity_24h": "many payments today",
+    "new_payees_24h": "several new payees today", "payee_seen": "payee not paid before",
+    "payee_age_days": "payee added recently", "device_seen": "device not seen before",
+    "device_age_days": "device new to this customer", "network_seen": "unfamiliar network",
+    "place_seen": "unfamiliar location", "place_changed": "location changed since last payment",
+    "country_changed": "country changed since last payment", "minutes_since_last": "timing since last payment",
+    "days_since_last_ok": "long gap since last verified payment", "hour_deviation": "unusual time of day",
+    "is_night": "night-time payment", "failed_factors_24h": "recent failed verifications",
+    "spoof_7d": "recent spoofing attempt", "history_count": "little payment history",
+    "account_age_days": "account age", "enrolled_factors": "few enrolled factors",
+    "ueba_risk": "behaviour unlike the customer", "sim_changed_hours": "SIM changed recently",
+    "contact_changed_hours": "contact details changed recently",
+    "password_reset_hours": "password reset recently", "payee_risk_flag": "payee on a risk list",
+    "device_key_bound": "device not key-bound", "txn_type": "transaction type", "channel": "channel",
+    "segment": "customer segment",
+}
+
+
+def model_summary(plan: Plan) -> str:
+    if plan.modelError:
+        return f"risk model unavailable, failed closed to {plan.threatLevel}"
+    why = ", ".join(REASON_TEXT.get(k, k) for k, _ in plan.riskReasons)
+    text = f"threat {plan.threatLevel} (risk {plan.riskScore:.2f})" + (f": {why}" if why else "")
+    return text + (f". Model said {plan.modelLevel}; {plan.capReason}" if plan.capReason else "")
+
+
 def reasoning(ctx: Context, plan: Plan) -> str:
     signals = present(ctx)
-    parts = ["; ".join(signals[:4]) if signals else "no risk signal present"]
+    parts = [model_summary(plan) if plan.threatLevel else
+             "; ".join(signals[:4]) if signals else "no risk signal present"]
     org = org_present(ctx)
     if org:
         parts.append("context: " + ", ".join(org))
@@ -44,7 +74,7 @@ def reasoning(ctx: Context, plan: Plan) -> str:
         parts.append("bank policy mandates " + ", ".join(f.value for f in plan.orgAdded))
     if plan.agentAdded:
         parts.append("model added " + ", ".join(f.value for f in plan.agentAdded)
-                     + " beyond the rule baseline")
+                     + " beyond the risk model")
     if plan.agentCapped:
         parts.append("bank's friction budget withheld " + ", ".join(f.value for f in plan.agentCapped))
     if plan.policyFloorApplied:
@@ -53,7 +83,7 @@ def reasoning(ctx: Context, plan: Plan) -> str:
         parts.append("substituted " + ", ".join(f"{k}->{v}" for k, v in plan.substituted.items()))
     if plan.escalate:
         parts.append(f"escalated to {plan.escalate.replace('_', ' ').lower()}")
-    if not signals and not (plan.orgAdded or plan.agentAdded or plan.policyFloorApplied):
+    if not plan.threatLevel and not signals and not (plan.orgAdded or plan.agentAdded or plan.policyFloorApplied):
         return "no risk signal present; minimum assurance only"
     return ". ".join(parts)
 

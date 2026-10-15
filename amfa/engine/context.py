@@ -88,6 +88,8 @@ class TransactionCtx(BaseModel):
     isNewBeneficiary: bool = False
     beneficiaryAgeDays: Optional[int] = None
     type: TxnType = TxnType.TRANSFER
+    # band of this payment plus everything sent in the last 24 h; None = unknown, so no leniency
+    exposureBand: Optional[Band] = None
 
 
 class DeviceCtx(BaseModel):
@@ -136,6 +138,7 @@ class Policy(BaseModel):
     actionFloor: ActionFloor = ActionFloor.L2
     maxFactors: int = 3
     guidance: Optional[str] = Field(default=None, max_length=1000)
+    smallPaymentCap: bool = True
 
 
 class Context(BaseModel):
@@ -173,7 +176,14 @@ class Plan(BaseModel):
     agentName: str = ""
     agentUsage: dict = Field(default_factory=dict)
     latencyMs: int = 0
-    engineVersion: str = "agentic-1.1"
+    riskScore: Optional[float] = None
+    threatLevel: Optional[str] = None
+    modelLevel: Optional[str] = None
+    capReason: Optional[str] = None
+    riskReasons: list[tuple[str, float]] = Field(default_factory=list)
+    modelVersion: str = ""
+    modelError: Optional[str] = None
+    engineVersion: str = "risk-model-1.0"
 
     def sequence(self) -> list[Factor]:
         return self.order or [f for f in FRICTION_ORDER if f in self.required]

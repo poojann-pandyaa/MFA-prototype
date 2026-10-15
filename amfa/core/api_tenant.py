@@ -218,6 +218,13 @@ class SessionInfo(Strict):
     actions: list[float] = Field(default_factory=list, max_length=2000)
 
 
+class AccountEvents(Strict):
+    simChangedAt: Optional[float] = Field(default=None, gt=946684800)
+    contactChangedAt: Optional[float] = Field(default=None, gt=946684800)
+    passwordResetAt: Optional[float] = Field(default=None, gt=946684800)
+    payeeRiskFlag: bool = False
+
+
 class InitiateTxn(Strict):
     userId: str = REF
     externalId: str = REF
@@ -230,6 +237,7 @@ class InitiateTxn(Strict):
     device: DeviceInfo
     capability: Optional[CapabilityInfo] = None
     session: Optional[SessionInfo] = None
+    accountEvents: Optional[AccountEvents] = None
 
 
 def _txn_view(s, txn: db.Transaction, include_proof: bool = True) -> dict:
@@ -288,13 +296,14 @@ def initiate(body: InitiateTxn, request: Request,
             payee_ref=body.payee.ref, channel=body.channel, device_id=body.device.deviceId,
             ip=body.device.ip, payee_created_at=body.payee.createdAt,
             device_first_seen=body.device.firstSeenAt, capability=cap,
-            session=body.session.model_dump() if body.session else None))
+            session=body.session.model_dump() if body.session else None,
+            account_events=body.accountEvents.model_dump() if body.accountEvents else None))
 
         agent = build_agent() if policy.agent.enabled else None
         try:
-            plan = decide(assembled.ctx, agent=agent)
+            plan = decide(assembled.ctx, agent=agent, features=assembled.features)
         except MonotonicityViolation:
-            plan = decide(assembled.ctx, agent=None)
+            plan = decide(assembled.ctx, agent=None, features=assembled.features)
             plan.agentError = "MonotonicityViolation: agent output discarded"
 
         facts = dict(assembled.facts)
@@ -315,7 +324,7 @@ def initiate(body: InitiateTxn, request: Request,
         plan_json = plan.model_dump(mode="json")
         s.add(db.Decision(plan_id=plan.planId, tenant_id=tenant.id, transaction_id=txn.id,
                           customer_id=customer.id, context=assembled.ctx.model_dump(mode="json")
-                          | {"_derived": assembled.derived},
+                          | {"_derived": assembled.derived, "_features": assembled.features},
                           preview={k: v for k, v in assembled.preview.items() if k != "userId"},
                           plan=plan_json, source=plan.source, agent_name=plan.agentName or None,
                           agent_error=plan.agentError, floor=plan.floor.value,
@@ -330,6 +339,9 @@ def initiate(body: InitiateTxn, request: Request,
             txn.status = "REVIEW"
         view = _txn_view(s, txn, include_proof=False)
         view["plan"] = {"required": [f.value for f in plan.sequence()], "riskBand": plan.riskBand.value,
+                        "threatLevel": plan.threatLevel, "riskScore": plan.riskScore,
+                        "modelLevel": plan.modelLevel, "capReason": plan.capReason,
+                        "riskReasons": plan.riskReasons, "modelVersion": plan.modelVersion,
                         "floor": plan.floor.value, "source": plan.source, "reasoning": plan.reasoning,
                         "escalate": plan.escalate, "rulesBaseline": [f.value for f in plan.rulesBaseline],
                         "agentAdded": [f.value for f in plan.agentAdded],

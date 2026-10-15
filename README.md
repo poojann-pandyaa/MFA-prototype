@@ -29,6 +29,7 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements/dev.txt
 .venv/bin/python scripts/fetch_models.py
 .venv/bin/python -m amfa.factors.ueba.training.train
+.venv/bin/python -m amfa.engine.risk.train          # risk model (macOS: brew install libomp first)
 
 .venv/bin/python -m amfa.cli serve face &
 .venv/bin/python -m amfa.cli serve voice &
@@ -42,11 +43,45 @@ AMFA_BOOTSTRAP_PASSWORD='choose-a-long-password' .venv/bin/python -m amfa.cli in
 
 Admin console: http://127.0.0.1:8040/admin
 
+## Risk model
+
+Every transaction's threat level (T0–T4) comes from the risk model in `amfa/engine/risk`, which
+picks the factors: T0 OTP, T1 + behaviour, T2 + face, T3 + voice, T4 manual review. The bank's
+policy floor still applies on top. With no active model, every transaction fails closed to manual
+review.
+
+**Memory.** The model looks at each customer's last 365 days, never longer. Besides usual amounts, devices
+and places, it checks whether the payee has been paid before, how long ago, at about what amount and on
+what schedule (weekly to yearly), so rent, premiums and bills that repeat are recognised as familiar.
+
+**Small payments.** A payment is held at T1 (OTP plus the passive behaviour check, still two factors)
+instead of the model's higher level when all of these hold: the money sent in the last 24 hours is in the
+bank's LOW amount band (under Rs 10,000 by default), the payment is under 5x the customer's usual, and
+no hard warning sign is present (spoof attempt, repeated failed checks, payee on a risk list, SIM
+change within 48 h, password reset or contact change within 24 h, an account setting changed today, or
+3+ new payees today). Account changes are never treated as small. The plan records both levels
+(`modelLevel`, `threatLevel`) and the reason (`capReason`). Switch it off per bank with
+`smallPaymentCap: false` in the tenant policy.
+
+`python -m amfa.engine.risk.train` trains on simulated customers and attacks (`scenarios.py`),
+writes `models/risk/<version>/` (model, calibration, `card.json` with metrics, checksum manifest)
+and activates it only if it beats a logistic-regression baseline and passes the per-segment
+fairness check (`--force` overrides). The rule table is still computed and logged as
+`rulesBaseline` for comparison but no longer decides.
+
+`python -m amfa.engine.risk.export` writes the simulated training data as `data/risk-dataset/dataset.csv`
+plus `coverage.md`: 72 scenarios (14 customer types, 47 genuine situations, 25 attacks), 6 customer age
+groups (18-24 to 75+), 7 payment-size ranges (under Rs 100 to over Rs 1 crore)
+and 5 data feeds, with row counts for each and an age x amount grid. Age and amount are columns in the
+dataset for coverage and fairness checks; the model is never given age. Add a scenario in
+`scenarios.py` and its description in `SCENARIO_DOCS`; the tests fail if any documented scenario has no rows. Banks may send optional `accountEvents`
+(SIM, contact or password changes; payee risk flag) with each transaction.
+
 ## Settings
 
 | Variable | Values |
 |---|---|
-| `AMFA_AGENT_BACKEND` | `local` (Qwen2.5-3B on the server), `off` (rule table only) |
+| `AMFA_AGENT_BACKEND` | `local` (Qwen2.5-3B on the server, can only add checks), `off` (risk model only) |
 | `AMFA_ADMIN_TOTP` | `required` (password + authenticator), `off` (password only) |
 | `AMFA_VOICE_PROMPT_CHECK` | `advisory`, `enforce`, `off` |
 
@@ -57,7 +92,7 @@ authenticator from the customer flow; face or voice then serves as the dynamic f
 ## Layout
 
 ```
-amfa/engine      decision engine: rules, AI agent, bank policy
+amfa/engine      decision engine: risk model, AI agent, bank policy
 amfa/core        platform API, orchestration, proofs, admin console, hosted pages
 amfa/factors     face, voice and behaviour services
 sdk/python       bank client

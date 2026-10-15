@@ -18,3 +18,4 @@ amfa/factors/ueba/ARTIFACTS.sha256
 __pycache__/
 *.py[cod]
 .pytest_cache/
+models/risk/
