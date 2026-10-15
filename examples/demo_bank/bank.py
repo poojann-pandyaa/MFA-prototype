@@ -701,7 +701,7 @@ def index():
     return FileResponse(HERE / "static" / "index.html")
 
 
-@app.get("/static/config.json")
+@app.get("/assets/config.json")
 def page_config():
     return {"amfaBase": os.environ["AMFA_BASE_URL"].rstrip("/"),
             "tenantSlug": os.getenv("AMFA_TENANT_SLUG", "")}
@@ -712,7 +712,7 @@ STATIC_TYPES = {".html": "text/html", ".css": "text/css", ".js": "text/javascrip
                 ".json": "application/json"}
 
 
-@app.get("/static/{name:path}")
+@app.get("/assets/{name:path}")
 def static(name: str):
     path = (STATIC / name).resolve()
     if not path.is_relative_to(STATIC) or not path.is_file() or path.suffix not in STATIC_TYPES:

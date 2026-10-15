@@ -121,7 +121,7 @@ function demoButton(place) {   // place: "" above the tabs, "top", or null for n
 
 // ---------- boot ----------
 async function boot() {
-  state.config = await fetch("/static/config.json").then((r) => r.json());
+  state.config = await fetch("/assets/config.json").then((r) => r.json());
   state.amfaOrigin = new URL(state.config.amfaBase).origin;
   startDevice(state.config);
   try {

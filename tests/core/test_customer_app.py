@@ -232,12 +232,17 @@ def test_customers_cannot_touch_each_others_actions(stack, app):
         assert other.post(f"/api/actions/{aid}/{path}", json={}).status_code == 404
 
 
-def test_the_app_is_served_as_modules_and_nothing_outside_static(stack):
+def test_the_app_is_served_as_modules_and_nothing_outside_its_assets(stack):
+    """The bank's files live under /assets, so the bank and AMFA (whose files are under /static) can share
+    one address."""
     client = TestClient(stack.bank.app)
-    for path in ("/static/js/app.js", "/static/js/screens/welcome.js"):
+    for path in ("/assets/js/app.js", "/assets/js/screens/welcome.js"):
         r = client.get(path)
         assert r.status_code == 200 and "javascript" in r.headers["content-type"], path
-    for path in ("/static/%2e%2e/bank.py", "/static/js/%2e%2e/%2e%2e/bank.py", "/static/js/nope.js"):
+    assert client.get("/assets/config.json").json()["amfaBase"]
+    page = client.get("/").text
+    assert "/assets/app.css" in page and "/assets/js/app.js" in page and "/static/" not in page
+    for path in ("/assets/%2e%2e/bank.py", "/assets/js/%2e%2e/%2e%2e/bank.py", "/assets/js/nope.js", "/static/js/app.js"):
         assert client.get(path).status_code == 404, path
 
 
