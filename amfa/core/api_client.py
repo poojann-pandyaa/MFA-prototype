@@ -85,7 +85,7 @@ def enrollment_state(caller: ClientCaller = Depends(enroll_caller)):
         done = _enrolled(s, customer.id)
         requested = [f for f in caller.scope if f in ("OTP", "FACE", "VOICE", "UEBA")]
         phrase = factors.ueba_phrase() if "UEBA" in requested else None
-        return {"bank": tenant.name, "requested": requested, "replace": caller.may_replace,
+        return {"bank": tenant.name, "theme": _theme(s, tenant), "requested": requested, "replace": caller.may_replace,
                 "completedWithThisLink": [x[5:] for x in caller.scope if x.startswith("DONE:")],
                 "enrolled": {f: done.get(f, False) for f in requested},
                 "consent": {"required": not (customer.consent and customer.consent.get("version") == CONSENT_VERSION),
@@ -234,6 +234,11 @@ def _policy(s, tenant_id: str):
     return TenantPolicy.model_validate(s.get(db.Tenant, tenant_id).policy)
 
 
+def _theme(s, tenant: db.Tenant) -> dict:
+    """The bank's name and colour, so the hosted pages look like part of the bank's app."""
+    return {"bank": tenant.name, "color": _policy(s, tenant.id).branding.color}
+
+
 def _check_attestation(att: Optional[Attestation], challenge: bytes, pol, *, jwk: Optional[dict]):
     from amfa.core import attestation as A
     ap = pol.attestation
@@ -337,6 +342,7 @@ def _state(s, sess, txn, tenant, customer) -> dict:
     return {
         "sessionId": sess.id,
         "status": sess.status,
+        "theme": _theme(s, tenant),
         "approving": {"bank": tenant.name, "type": txn.type,
                       "amount": orchestrator.format_amount(txn.amount_minor, txn.currency),
                       "payee": txn.payee_display or orchestrator.mask_ref(txn.payee_ref)},

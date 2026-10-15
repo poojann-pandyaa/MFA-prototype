@@ -105,6 +105,13 @@ class AttestationPolicy(BaseModel):
     allowDevelopment: bool = False
 
 
+class Branding(BaseModel):
+    """How the hosted setup and verification pages look for this bank. The colour is written into
+    their CSS, so only a plain #RRGGBB is accepted."""
+    model_config = ConfigDict(extra="forbid")
+    color: str = Field(default="#1B4FD8", pattern=r"^#[0-9A-Fa-f]{6}$")
+
+
 class QuietHours(BaseModel):
     model_config = ConfigDict(extra="forbid")
     start: int = Field(default=23, ge=0, le=23)
@@ -159,6 +166,7 @@ class TenantPolicy(BaseModel):
     agent: AgentPolicy = Field(default_factory=AgentPolicy)
     allowedEmbedOrigins: list[str] = Field(default_factory=list, max_length=10)
     attestation: AttestationPolicy = Field(default_factory=AttestationPolicy)
+    branding: Branding = Field(default_factory=Branding)
 
     @field_validator("permittedFactors")
     @classmethod
