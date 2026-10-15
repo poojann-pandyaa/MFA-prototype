@@ -93,7 +93,7 @@ export async function render() {
   tabs(TAB_OF[route]);
   demoButton(TAB_OF[route] ? "" : TOP_DEMO.has(route) ? "top" : null);
 }
-const TOP_DEMO = new Set(["review", "result"]);   // screens with their own bottom buttons: the demo button sits at the top
+const TOP_DEMO = new Set(["review", "result", "frozen"]);   // screens with their own bottom buttons: the demo button sits at the top
 
 // ---------- bottom tabs and the demo button live outside the screen ----------
 const TABS = [["home", "Home", "home", "home"], ["pay", "Pay", "send", "pay"], ["activity", "Activity", "activity", "activity"],

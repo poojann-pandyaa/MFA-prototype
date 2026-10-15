@@ -172,7 +172,8 @@
     var root = document.documentElement.style;
     root.setProperty("--brand", "rgb(" + c.join(",") + ")");
     root.setProperty("--focus", "rgb(" + c.join(",") + ")");
-    root.setProperty("--brand-ink", luminance(c) < .4 ? "#ffffff" : "#0f1b2d");
+    var L = luminance(c), dark = luminance([ 15, 27, 45 ]);   // text on the brand colour: whichever contrasts more
+    root.setProperty("--brand-ink", 1.05 / (L + .05) >= (L + .05) / (dark + .05) ? "#ffffff" : "#0f1b2d");
     root.setProperty("--brand-soft", "rgba(" + c.join(",") + ",0.12)");
   }
   function step(flow, index, total, factor) {

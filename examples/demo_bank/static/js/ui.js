@@ -142,11 +142,18 @@ export function field({ label, id, input, control, err }) {
   return h("div", { class: "field" }, h("label", { for: id, text: label }), input, err || null);
 }
 
-export function sheet(build) {
+export function sheet(build, onClose) {
   const scrim = h("div", { class: "scrim", role: "dialog", "aria-modal": "true" });
   const box = h("div", { class: "sheet" }, h("span", { class: "grip", "aria-hidden": "true" }));
   scrim.appendChild(box);
-  const close = () => { scrim.remove(); document.removeEventListener("keydown", onKey); };
+  let open = true;
+  const close = () => {
+    if (!open) return;
+    open = false;
+    scrim.remove();
+    document.removeEventListener("keydown", onKey);
+    if (onClose) onClose();
+  };
   const onKey = (e) => { if (e.key === "Escape") close(); };
   scrim.addEventListener("click", (e) => { if (e.target === scrim) close(); });
   document.addEventListener("keydown", onKey);

@@ -1,7 +1,7 @@
 import { cancel, find } from "../actions.js";
 import { api } from "../api.js";
-import { go, refresh } from "../app.js";
-import { MONEY, add, button, chip, h, icon, rupees, sheet, toast, when } from "../ui.js";
+import { go, refresh, state } from "../app.js";
+import { MONEY, add, button, chip, h, icon, note, rupees, sheet, toast, when } from "../ui.js";
 
 const DONE_TITLE = {
   payee: "Payee added", limit: "Daily limit updated", contact: "Contact details updated",
@@ -67,6 +67,9 @@ function held(page, a, money) {
       step("done", money ? "Payment requested" : "Request made", when(a.createdAt)),
       step("now", "Security review", "Usually within 15 minutes. This page updates by itself."),
       step("", money ? `Sent to ${a.payee.display}` : "Done")),
+    state.me.protection.have.length < 3 ? note("brand", "shieldCheck", h("strong", { text: "Skip the wait next time" }),
+      "Add your voice or typing in Security, and you can approve bigger payments and account changes yourself. ",
+      h("button", { type: "button", class: "link", text: "Add a way now", onclick: () => go("security") })) : null,
     h("div", { class: "spacer" }),
     h("p", { class: "muted center", text: "Didn't start this? Cancel it, then call us on 1800 000 0000." }),
     button(money ? "Cancel payment" : "Cancel request", { kind: "danger", onClick: async () => { await cancel(a.id); toast("Cancelled. Nothing was sent."); go(`result/${a.id}`); } }),

@@ -70,8 +70,10 @@ p { margin: 0; }
 .btn.secondary { background: var(--card); color: var(--ink); border: 1.5px solid var(--line); }
 .btn.danger { background: var(--card); color: var(--bad); border: 1.5px solid var(--bad); }
 .btn.soft { background: var(--brand-soft); color: var(--brand); min-height: 40px; width: auto; padding: 0 14px; font-size: 14px; border-radius: 12px; }
+.btn.soft.solid { background: var(--brand); color: var(--brand-ink); }
 .btn.small { min-height: 44px; font-size: 15px; }
 .btn:disabled { opacity: 0.5; cursor: default; }
+a.btn { text-decoration: none; }
 .link { border: 0; background: none; padding: 0; color: var(--brand); font-weight: 700; text-decoration: none; cursor: pointer; }
 .link.bad { color: var(--bad); }
 .btn-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
@@ -120,7 +122,8 @@ p { margin: 0; }
 .note svg { flex-shrink: 0; margin-top: 1px; }
 .note.brand { background: var(--brand-soft); color: var(--brand-deep); }
 .note.warn { background: var(--warn-soft); color: var(--warn-ink); }
-.note.warn strong { display: block; color: var(--ink); }
+.note strong { display: block; }
+.note.warn strong { color: var(--ink); }
 .note.bad { background: var(--bad-soft); color: var(--bad); }
 .note.plain { background: var(--card); color: var(--muted); }
 .banner { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-radius: var(--r-lg); background: var(--warn-soft);
