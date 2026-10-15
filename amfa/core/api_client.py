@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any, Literal, Optional
 
@@ -14,6 +15,7 @@ from amfa.core.auth import ClientCaller, client_caller
 from amfa.core.context_builder import device_key
 
 router = APIRouter(prefix="/c/v1", tags=["customer"])
+log = logging.getLogger("amfa.client")
 enroll_caller = client_caller("ENROLL")
 session_caller = client_caller("SESSION")
 
@@ -185,6 +187,7 @@ def _biometric_enroll(caller: ClientCaller, factor: str, payload: dict, rate_key
         replaced = _guard_overwrite(s, caller, customer, factor)
     res = factors.enroll(factor, tenant=caller.tenant_id, user=caller.customer_id, payload=payload)
     if not res.enrolled:
+        log.info("enrolment rejected", extra={"factor": factor, "reason": res.reason, "quality": res.quality})
         return {"enrolled": False, "factor": factor, "reason": res.reason, "quality": res.quality}
     detail = {"model": res.modelVersion}
     if factor == "UEBA":

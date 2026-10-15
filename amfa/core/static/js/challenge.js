@@ -199,8 +199,11 @@
         return camera.burst(3, interval);
       }).then(function(f) {
         frames = frames.concat(f);
-        prompt.textContent = "Now slowly turn your head to your " + dir.toLowerCase() + " and hold it";
-        return camera.burst(Math.max(3, (ch.params.frames || 12) - 3), interval);
+        prompt.textContent = "Now slowly turn your head to your " + dir.toLowerCase();
+        var n = Math.max(3, (ch.params.frames || 12) - 3);
+        return camera.burst(n, interval, function(i) {
+          if (i === n - 6) prompt.textContent = "Hold it there…";   // the last frames must show the turned pose
+        });
       }).then(function(f) {
         prompt.textContent = "Done — checking";
         submit(ch, {

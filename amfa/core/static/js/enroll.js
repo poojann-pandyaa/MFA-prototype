@@ -188,12 +188,13 @@
       btn.disabled = true;
     });
     panel.appendChild(btn);
-    var cues = [ "Look straight at the camera", "Look straight at the camera", "Tilt your head slightly left", "Tilt your head slightly right", "Look straight at the camera" ];
+    var cues = [ "Look straight at the camera", "Look straight at the camera", "Turn your head slightly to your left", "Turn your head slightly to your right", "Look straight at the camera" ];
     btn.addEventListener("click", function() {
       UI.busy(btn, true, "Hold still…");
       AMFA.sleep(500).then(function() {
         return cam.burst(5, 450, function(i) {
-          prompt.textContent = cues[i];
+          prompt.textContent = cues[i] + " (" + (i + 1) + " of 5)";
+          return i > 0 && cues[i] !== cues[i - 1] ? 1500 : 0;   // time to move after a new cue
         });
       }).then(function(frames) {
         prompt.textContent = "Checking…";

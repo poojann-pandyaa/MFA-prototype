@@ -25,6 +25,9 @@ PENDING, VERIFIED, BLOCKED, EXPIRED, REVIEW = "PENDING", "VERIFIED", "BLOCKED", 
 TERMINAL_SESSION = {VERIFIED, BLOCKED, EXPIRED, REVIEW}
 CHALLENGE_TTL_S = 120
 MAX_OTP_SENDS = 3
+# 3 frames straight on, then 17 at 150 ms (about 2.5 s) to read the cue, turn and hold: the turn check
+# compares the first and last 3 frames, so the customer must have finished turning before the end
+FACE_FRAMES = 20
 PAD_FLAGS_BEFORE_BLOCK = 2
 VOICE_WORDS = ["river", "maple", "orbit", "violet", "copper", "harbor", "falcon", "meadow",
                "silver", "canyon", "lantern", "summit", "willow", "ember", "island", "garden"]
@@ -128,7 +131,7 @@ def issue_challenge(s, sess: db.AuthSession, customer: db.Customer, txn: db.Tran
             params = {"mode": "delivered", "sentTo": otp.mask_contact(contact.get("to", "")),
                       "digits": otp.DIGITS}
     elif factor == "FACE":
-        params = {"action": secrets.choice(["TURN_LEFT", "TURN_RIGHT"]), "frames": 12,
+        params = {"action": secrets.choice(["TURN_LEFT", "TURN_RIGHT"]), "frames": FACE_FRAMES,
                   "intervalMs": 150}
     elif factor == "VOICE":
         words = [secrets.choice(VOICE_WORDS) for _ in range(3)]

@@ -64,6 +64,16 @@ def test_real_turn_by_the_enrolled_user_passes(run):
     assert res.status == PASSED, res.failureReason
 
 
+def test_a_customer_given_time_to_react_passes(run):
+    """What the challenge page now captures: 3 frames straight on, then ~1 s of reaction while still
+    frontal, a turn, and a hold. Every frame of the longer window must be accepted."""
+    from amfa.core.orchestrator import FACE_FRAMES
+    frames = turn(n_front=9, n_ramp=4, n_turned=FACE_FRAMES - 13)
+    assert len(frames) == FACE_FRAMES
+    res = run(frames)
+    assert res.status == PASSED, res.failureReason
+
+
 def test_two_photos_do_not_pass_the_turn(run):
     res = run(turn(n_front=6, n_ramp=0, n_turned=6))
     assert res.status == FAILED

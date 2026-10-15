@@ -512,13 +512,17 @@
     c.getContext("2d").drawImage(v, 0, 0, c.width, c.height);
     return c.toDataURL("image/jpeg", .92).split(",")[1];
   };
+  // onTick(i) runs before frame i; it may return a number of ms to wait before that frame is taken,
+  // so a customer shown a new cue has time to follow it before the picture.
   Camera.prototype.burst = function(n, intervalMs, onTick) {
     var self = this, frames = [];
     function step(i) {
       if (i >= n) return Promise.resolve(frames);
-      if (onTick) onTick(i);
-      frames.push(self.frame());
-      return sleep(intervalMs).then(function() {
+      var lead = onTick ? onTick(i) : 0;
+      return sleep(lead || 0).then(function() {
+        frames.push(self.frame());
+        return i + 1 < n ? sleep(intervalMs) : null;
+      }).then(function() {
         return step(i + 1);
       });
     }
