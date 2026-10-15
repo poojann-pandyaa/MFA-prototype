@@ -232,6 +232,15 @@ def test_customers_cannot_touch_each_others_actions(stack, app):
         assert other.post(f"/api/actions/{aid}/{path}", json={}).status_code == 404
 
 
+def test_the_app_is_served_as_modules_and_nothing_outside_static(stack):
+    client = TestClient(stack.bank.app)
+    for path in ("/static/js/app.js", "/static/js/screens/welcome.js"):
+        r = client.get(path)
+        assert r.status_code == 200 and "javascript" in r.headers["content-type"], path
+    for path in ("/static/%2e%2e/bank.py", "/static/js/%2e%2e/%2e%2e/bank.py", "/static/js/nope.js"):
+        assert client.get(path).status_code == 404, path
+
+
 def _token(url):
     return url.split("#token=", 1)[1]
 

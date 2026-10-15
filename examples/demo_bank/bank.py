@@ -707,9 +707,14 @@ def page_config():
             "tenantSlug": os.getenv("AMFA_TENANT_SLUG", "")}
 
 
-@app.get("/static/{name}")
+STATIC = (HERE / "static").resolve()
+STATIC_TYPES = {".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".svg": "image/svg+xml",
+                ".json": "application/json"}
+
+
+@app.get("/static/{name:path}")
 def static(name: str):
-    path = (HERE / "static" / name).resolve()
-    if path.parent != (HERE / "static").resolve() or not path.exists():
+    path = (STATIC / name).resolve()
+    if not path.is_relative_to(STATIC) or not path.is_file() or path.suffix not in STATIC_TYPES:
         raise HTTPException(404)
-    return FileResponse(path)
+    return FileResponse(path, media_type=STATIC_TYPES[path.suffix])
