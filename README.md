@@ -68,13 +68,35 @@ account is approved by AMFA before the bank carries it out:
 | Use a device not yet verified | `DEVICE_BINDING` | the device; other actions are refused from it until then |
 
 The bank acts only after it verifies the proof's signature and binding and consumes it, so an approval
-can never be replayed or applied to a different amount. Before the checks the customer sees which ones
-are needed, a plain reason (`plan.customerNotice`: never the score or threat level, and never a spoof or
-risk-list signal) and, from T2 on payments, a scam warning. T4 payments wait for manual review, can be
-cancelled while they wait, and the app follows them to the operator's verdict. "This wasn't me" on a
-completed item calls `POST /v1/transactions/{id}/feedback`, which stores a `FRAUD` label for retraining
-and raises a security event; review verdicts are stored as labels too (`risk_label`). The Profile tab's
-demo tools (switch off with `BANK_DEMO_TOOLS=0`) stage a SIM swap, a payee on a mule list, or a new phone.
+can never be replayed or applied to a different amount.
+
+**The journey.** Every action has the same shape: review (what, to whom, which checks are coming and why,
+and a scam warning when AMFA asks for one) → "Confirm it's you" (AMFA's own pages, full screen, one step at
+a time) → result (sent, held for review with a live timeline, or not sent with what to do next). The reason
+comes from `plan.customerNotice`: never the score or threat level, and never a spoof or risk-list signal.
+A customer who closes the checks midway can continue from Activity (`POST /api/actions/{id}/continue`).
+
+**Progressive setup.** Opening an account asks only for the face (SMS codes come from the mobile number),
+so it takes about a minute. Voice, typing and an authenticator app are added later from Security, one at a
+time (`POST /api/amfa/enrol {"factors": ["VOICE"]}`). With two ways the bank's three-check floor for limit,
+contact and device changes and high-value transfers can't be met, so those go to manual review; the app says
+so and offers to add a way.
+
+**One app.** AMFA's setup and verification pages take the bank's name and colour from the tenant policy
+(`branding.color`), drop their own header when opened with `embed=1`, and post `amfa:step` progress to the
+bank app, which shows it in its own header. Capture stays on AMFA's origin, so the bank never handles a
+frame or recording.
+
+**Safety and labels.** "This wasn't me" calls `POST /v1/transactions/{id}/feedback`, which stores a `FRAUD`
+label for retraining and raises a security event; review verdicts become labels too (`risk_label`).
+"Freeze my account" suspends the customer in AMFA and blocks every action until the bank unfreezes it.
+
+**Demo mode** (`BANK_DEMO_TOOLS=1`, the default; set `0` for a real deployment). A "Behind the scenes" button
+opens AMFA's decision on the last action (threat level, fraud probability, the model's reasons, the checks
+asked against the old rule table) and stages a SIM swap, a payee on a mule list, a new phone, or an unfreeze.
+
+Layout: `static/js/app.js` (router, guards), `ui.js` (components), `amfa-frame.js` (the full-screen host for
+AMFA's pages), `actions.js`, and one module per screen in `static/js/screens/`. No build step.
 
 ## Risk model
 
