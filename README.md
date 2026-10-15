@@ -43,6 +43,39 @@ AMFA_BOOTSTRAP_PASSWORD='choose-a-long-password' .venv/bin/python -m amfa.cli in
 
 Admin console: http://127.0.0.1:8040/admin
 
+Customer app (the Demo Bank): add `http://127.0.0.1:8050` to the tenant's `allowedEmbedOrigins` in the
+admin console's policy editor, then
+
+```bash
+AMFA_BASE_URL=http://127.0.0.1:8040 AMFA_TENANT_ID=<tn_id> AMFA_TENANT_SLUG=demo-bank \
+AMFA_KEY_ID=<ak_id> AMFA_KEY_SECRET=<secret> BANK_SESSION_SECRET=$(openssl rand -hex 32) \
+BANK_STATE_FILE=data/demo-bank-state.json .venv/bin/uvicorn examples.demo_bank.bank:app --port 8050
+```
+
+and open http://127.0.0.1:8050 on a laptop or phone. Development OTP codes are printed in the core's log.
+
+## Customer app
+
+`examples/demo_bank` is a phone-first banking app in which every action that moves money or changes the
+account is approved by AMFA before the bank carries it out:
+
+| In the app | AMFA type | The proof is bound to |
+|---|---|---|
+| Send money, pay a bill | `TRANSFER`, `PAYMENT` | the amount and payee or biller |
+| Add a payee (usable only once approved) | `ADD_BENEFICIARY` | the new payee |
+| Change the daily limit | `CHANGE_LIMIT` | the new limit |
+| Change mobile, email or password | `PROFILE_CHANGE` | the change; later payments report it as `accountEvents` |
+| Use a device not yet verified | `DEVICE_BINDING` | the device; other actions are refused from it until then |
+
+The bank acts only after it verifies the proof's signature and binding and consumes it, so an approval
+can never be replayed or applied to a different amount. Before the checks the customer sees which ones
+are needed, a plain reason (`plan.customerNotice`: never the score or threat level, and never a spoof or
+risk-list signal) and, from T2 on payments, a scam warning. T4 payments wait for manual review, can be
+cancelled while they wait, and the app follows them to the operator's verdict. "This wasn't me" on a
+completed item calls `POST /v1/transactions/{id}/feedback`, which stores a `FRAUD` label for retraining
+and raises a security event; review verdicts are stored as labels too (`risk_label`). The Profile tab's
+demo tools (switch off with `BANK_DEMO_TOOLS=0`) stage a SIM swap, a payee on a mule list, or a new phone.
+
 ## Risk model
 
 Every transaction's threat level (T0–T4) comes from the risk model in `amfa/engine/risk`, which

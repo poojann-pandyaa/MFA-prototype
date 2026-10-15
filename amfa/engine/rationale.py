@@ -55,6 +55,36 @@ REASON_TEXT = {
 }
 
 
+# What a customer may be told. Spoof, failure, behaviour and risk-list signals are left out so a
+# fraudster learns nothing about what was detected; segment and account facts are not reasons to show.
+CUSTOMER_REASONS = {
+    "amount_ratio": "the amount is larger than usual", "amount_vs_max": "the amount is larger than usual",
+    "amount_24h_ratio": "you have sent more than usual today", "amount_vs_payee_avg": "the amount is unusual for this payee",
+    "velocity_1h": "several payments in a short time", "velocity_24h": "several payments today",
+    "new_payees_24h": "new payees were added today", "payee_seen": "this payee has not been paid before",
+    "payee_age_days": "this payee was added recently", "device_seen": "this device is new to your account",
+    "device_age_days": "this device is new to your account", "network_seen": "you are on an unfamiliar network",
+    "place_seen": "you are in an unfamiliar place", "place_changed": "your location has changed",
+    "country_changed": "your location has changed", "hour_deviation": "this is an unusual time for you",
+    "is_night": "this is an unusual time for you", "sim_changed_hours": "your SIM was changed recently",
+    "contact_changed_hours": "your contact details were changed recently",
+    "password_reset_hours": "your password was changed recently",
+}
+SCAM_WARNING_FROM = "T2"
+MONEY_TYPES = {TxnType.TRANSFER, TxnType.PAYMENT, TxnType.CARD_NOT_PRESENT}
+
+
+def customer_notice(plan: Plan, txn_type: TxnType) -> dict:
+    """What the customer sees before the checks: a plain reason and, for riskier payments, a scam
+    warning. Never the score, the threat level or the thresholds."""
+    why = list(dict.fromkeys(CUSTOMER_REASONS[k] for k, _ in plan.riskReasons if k in CUSTOMER_REASONS))
+    reason = ("We need a quick extra check because " + " and ".join(why[:2]) + "." if why
+              else "This is a routine check to keep your account safe.")
+    warn = (txn_type in MONEY_TYPES and plan.threatLevel is not None
+            and plan.threatLevel >= SCAM_WARNING_FROM)
+    return {"reason": reason, "scamWarning": warn, "underReview": plan.escalate == "MANUAL_REVIEW"}
+
+
 def model_summary(plan: Plan) -> str:
     if plan.modelError:
         return f"risk model unavailable, failed closed to {plan.threatLevel}"

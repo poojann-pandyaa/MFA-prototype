@@ -22,6 +22,7 @@ from amfa.engine.agent import build_agent
 from amfa.engine.context import Segment, TxnType
 from amfa.engine.decide import MonotonicityViolation, decide
 from amfa.engine.policy import TenantPolicy
+from amfa.engine.rationale import customer_notice
 
 router = APIRouter(prefix="/v1", tags=["tenant"])
 
@@ -345,7 +346,8 @@ def initiate(body: InitiateTxn, request: Request,
                         "floor": plan.floor.value, "source": plan.source, "reasoning": plan.reasoning,
                         "escalate": plan.escalate, "rulesBaseline": [f.value for f in plan.rulesBaseline],
                         "agentAdded": [f.value for f in plan.agentAdded],
-                        "orgAdded": [f.value for f in plan.orgAdded]}
+                        "orgAdded": [f.value for f in plan.orgAdded],
+                        "customerNotice": customer_notice(plan, body.type)}
         if sess.status == orchestrator.PENDING:
             view["challengeUrl"] = f"{config.get().public_url}/hosted/challenge?t={tenant.slug}#token={client_token}"
             view["clientToken"] = client_token
@@ -408,6 +410,34 @@ def cancel(txn_id: str, caller: TenantCaller = Depends(require_scope("transactio
         if sess and sess.status in (orchestrator.PENDING, orchestrator.REVIEW):
             sess.status, sess.resolution, sess.resolved_at = orchestrator.BLOCKED, "CANCELLED", time.time()
         return _txn_view(s, txn, include_proof=False)
+
+
+class Feedback(Strict):
+    label: Literal["FRAUD", "GENUINE", "DISPUTED"]
+    source: Literal["customer_report", "chargeback", "bank_ops"] = "customer_report"
+    reason: Optional[str] = Field(default=None, max_length=280, pattern=r"^[^\x00-\x1f]*$")
+
+
+@router.post("/transactions/{txn_id}/feedback", status_code=201)
+def feedback(txn_id: str, body: Feedback, caller: TenantCaller = Depends(require_scope("transactions:write"))):
+    """The bank reports what a transaction turned out to be ("this wasn't me", a chargeback, its own
+    investigation). Stored as a training label; a fraud report also raises a security event."""
+    with db.session() as s:
+        txn = s.get(db.Transaction, txn_id)
+        if txn is None or txn.tenant_id != caller.tenant.id:
+            raise ApiError(404, "TXN_NOT_FOUND", "no such transaction")
+        row = db.RiskLabel(tenant_id=txn.tenant_id, transaction_id=txn.id, label=body.label,
+                           source=body.source, reason=body.reason)
+        s.add(row)
+        if body.label == "FRAUD":
+            s.add(db.SecurityEvent(tenant_id=txn.tenant_id, customer_id=txn.customer_id,
+                                   session_id=txn.session_id, severity="HIGH", kind="FRAUD_REPORTED",
+                                   message=f"{body.source}: transaction {txn.external_id} reported as fraud"))
+        audit.record(f"apikey:{caller.key_id}", "transaction.feedback", txn.id,
+                     {"label": body.label, "source": body.source}, txn.tenant_id, s=s)
+        s.flush()
+        return {"transactionId": txn.id, "label": row.label, "source": row.source,
+                "reportedAt": int(row.reported_at)}
 
 
 class VerifyProof(Strict):

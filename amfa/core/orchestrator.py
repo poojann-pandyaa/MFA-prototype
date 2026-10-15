@@ -605,6 +605,9 @@ def review_decision(s, case: db.ReviewCase, approve: bool, operator: db.Operator
             "reviewedBy": [case.first_approver, operator.id], "expiresAt": proof["expiresAt"]})
     elif not approve:
         txn.status = "DENIED"
+    # a rejection is the reviewer's judgement, not a confirmed fraud: training weighs labels by source
+    s.add(db.RiskLabel(tenant_id=tenant.id, transaction_id=txn.id, label="GENUINE" if approve else "FRAUD",
+                       source="review_verdict", reason=note[:280] or None))
     webhooks.emit(s, tenant.id, "review.resolved", {"caseId": case.id, "transactionId": txn.id,
                                                      "approved": approve})
     audit.record(f"operator:{operator.id}", "review.approve" if approve else "review.reject", case.id,

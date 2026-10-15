@@ -1,21 +1,30 @@
+"""Demo Bank: a customer banking app in which every action that moves money or changes the account is
+approved by AMFA first. The bank starts an AMFA transaction, the customer completes the checks AMFA asks
+for, and the bank only acts after verifying and consuming a signed proof bound to that exact action."""
 from __future__ import annotations
 
 import hashlib
 import hmac
+import ipaddress
 import json
 import os
+import re
 import secrets
 import sys
 import threading
 import time
 import uuid
+from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
+from typing import Callable, Optional
 
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerifyMismatchError
 from fastapi import FastAPI, HTTPException, Request, Response
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "sdk" / "python"))
 from amfa_client import AmfaClient, AmfaError, verify_webhook
@@ -25,24 +34,29 @@ AMFA = AmfaClient(os.environ["AMFA_BASE_URL"], os.environ["AMFA_KEY_ID"], os.env
 TENANT = os.environ["AMFA_TENANT_ID"]
 WEBHOOK_SECRET = os.getenv("AMFA_WEBHOOK_SECRET", "")
 SESSION_SECRET = os.environ["BANK_SESSION_SECRET"].encode()
-DAILY_LIMIT_MINOR = 10_00_000_00
+DEMO_TOOLS = os.getenv("BANK_DEMO_TOOLS", "1") == "1"
+STATE_FILE = Path(os.environ["BANK_STATE_FILE"]) if os.getenv("BANK_STATE_FILE") else None
+
+OPENING_BALANCE = 5_00_000_00
+DEFAULT_DAILY_LIMIT = 2_00_000_00
+MAX_DAILY_LIMIT = 10_00_000_00
+BILLERS = {"BILL-ELEC": "City Electricity", "BILL-MOBILE": "Mobile postpaid", "BILL-GAS": "Piped gas"}
+BILLERS_SINCE = 1_600_000_000.0   # long-standing billers, not new payees
+FINAL = {"DONE", "DECLINED", "EXPIRED", "CANCELLED", "FAILED"}
+CHECK_NAMES = {"OTP": "one-time code", "UEBA": "typing check", "FACE": "face check", "VOICE": "voice check"}
 
 _lock = threading.RLock()
-STATE_FILE = Path(os.environ["BANK_STATE_FILE"]) if os.getenv("BANK_STATE_FILE") else None
-OPENING_BALANCE = 5_00_000_00
 _ph = PasswordHasher()
 _DUMMY_HASH = _ph.hash(secrets.token_hex(16))
 
 
-def _default_payees() -> dict:
-    return {"BEN-42": {"name": "Vikram Mehta", "display": "V. Mehta ••4411", "createdAt": time.time() - 240 * 86400},
-            "BEN-77": {"name": "City Electricity", "display": "City Electricity", "createdAt": time.time() - 900 * 86400}}
-
-
 def _load() -> dict:
-    if STATE_FILE and STATE_FILE.exists():
-        return json.loads(STATE_FILE.read_text())
-    return {}
+    data = json.loads(STATE_FILE.read_text()) if STATE_FILE and STATE_FILE.exists() else {}
+    for c in data.values():   # accounts saved by an earlier version of this app
+        for key, default in (("activity", []), ("devices", []), ("events", {}), ("phone", None), ("email", None),
+                             ("dailyLimit", DEFAULT_DAILY_LIMIT), ("sent", {"day": "", "minor": 0})):
+            c.setdefault(key, default)
+    return data
 
 
 def _save() -> None:
@@ -57,8 +71,8 @@ def _save() -> None:
 
 
 CUSTOMERS: dict[str, dict] = _load()
-PENDING: dict[str, dict] = {}
-EVENTS: list[dict] = []
+# every action by id, for the webhook and polling; the record itself lives in its customer's activity
+ACTIONS: dict[str, tuple[str, dict]] = {a["id"]: (u, a) for u, c in CUSTOMERS.items() for a in c["activity"]}
 
 app = FastAPI(title="Demo Bank", docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -75,25 +89,37 @@ async def headers(request: Request, call_next):
     return r
 
 
+# ---------- sign-in ----------
+
 def _sign(v: str) -> str:
     return v + "." + hmac.new(SESSION_SECRET, v.encode(), hashlib.sha256).hexdigest()
 
 
-def customer(request: Request) -> dict:
+def _username(request: Request) -> str:
     raw = request.cookies.get("bank_session", "")
-    v, _, sig = raw.rpartition(".")
+    v, _, _ = raw.rpartition(".")
     if not v or not hmac.compare_digest(_sign(v), raw) or v not in CUSTOMERS:
         raise HTTPException(401, "sign in to the bank first")
-    return CUSTOMERS[v]
+    return v
+
+
+def customer(request: Request) -> dict:
+    return CUSTOMERS[_username(request)]
 
 
 USERNAME = r"^[a-z0-9][a-z0-9_-]{2,23}$"
+DEVICE_ID = r"^[A-Za-z0-9._:-]{8,128}$"
+PHONE = r"^\+?[0-9]{10,13}$"
+EMAIL = r"^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,180}\.[A-Za-z]{2,24}$"
+NAME = r"^[^\x00-\x1f<>]+$"
 
 
 class Register(BaseModel):
     username: str = Field(pattern=USERNAME)
-    name: str = Field(min_length=2, max_length=60, pattern=r"^[^\x00-\x1f<>]+$")
+    name: str = Field(min_length=2, max_length=60, pattern=NAME)
     password: str = Field(min_length=8, max_length=128)
+    phone: str = Field(pattern=PHONE)
+    deviceId: str = Field(pattern=DEVICE_ID)
 
 
 class Login(BaseModel):
@@ -112,10 +138,14 @@ def register(body: Register, response: Response):
     with _lock:
         if username in CUSTOMERS:
             raise HTTPException(409, "that username is taken")
-        CUSTOMERS[username] = {"ref": f"CUST-{username}", "name": body.name.strip(),
-                               "password": _ph.hash(body.password), "balance": OPENING_BALANCE,
-                               "amfaUser": None, "payees": _default_payees(), "sentToday": 0,
-                               "createdAt": time.time()}
+        now = time.time()
+        CUSTOMERS[username] = {
+            "ref": f"CUST-{username}", "name": body.name.strip(), "password": _ph.hash(body.password),
+            "phone": body.phone, "email": None, "balance": OPENING_BALANCE, "amfaUser": None,
+            "dailyLimit": DEFAULT_DAILY_LIMIT, "sent": {"day": "", "minor": 0},
+            "payees": {"BEN-42": {"name": "Vikram Mehta", "display": "V. Mehta ••4411", "createdAt": now - 240 * 86400}},
+            # the device the account was opened on is trusted; any other one must be verified first
+            "devices": [body.deviceId], "events": {}, "activity": [], "createdAt": now}
         _save()
     _start_session(response, username)
     return {"signedIn": True}
@@ -141,99 +171,355 @@ def logout(response: Response):
     return {"signedIn": False}
 
 
+def _mask(v: Optional[str]) -> Optional[str]:
+    return None if not v else ("••" + v[-4:] if "@" not in v else v[0] + "•••@" + v.split("@", 1)[1])
+
+
+def sent_today(c: dict) -> int:
+    return c["sent"]["minor"] if c["sent"]["day"] == date.today().isoformat() else 0
+
+
 @app.get("/api/me")
-def me(request: Request):
+def me(request: Request, deviceId: str = ""):
     c = customer(request)
     enrolled = None
     if c["amfaUser"]:
         enrolled = AMFA.request("GET", f"/v1/users/{c['amfaUser']}")["enrollment"]
     return {"name": c["name"], "ref": c["ref"], "balance": c["balance"], "enrolled": enrolled,
-            "payees": [{"ref": k, "display": p["display"]} for k, p in c["payees"].items()]}
+            "dailyLimit": c["dailyLimit"], "sentToday": sent_today(c),
+            "phone": _mask(c["phone"]), "email": _mask(c["email"]),
+            "deviceTrusted": deviceId in c["devices"], "demoTools": DEMO_TOOLS,
+            "payees": [{"ref": k, "display": p["display"], "riskFlag": p.get("riskFlag", False)}
+                       for k, p in c["payees"].items()],
+            "billers": [{"ref": k, "display": v} for k, v in BILLERS.items()]}
 
 
 @app.post("/api/amfa/enrol")
 def enrol(request: Request):
     c = customer(request)
-    if not c["amfaUser"]:
-        c["amfaUser"] = AMFA.create_user(c["ref"])["id"]
-        _save()
+    with _lock:
+        if not c["amfaUser"]:
+            c["amfaUser"] = AMFA.create_user(c["ref"], contact={"channel": "sms", "to": c["phone"]})["id"]
+            _save()
     return {"url": AMFA.enrollment_link(c["amfaUser"])["url"]}
 
 
-class Transfer(BaseModel):
-    payeeRef: str = Field(pattern=r"^[A-Za-z0-9-]{1,32}$")
-    amountRupees: float = Field(gt=0, le=1_00_00_000)
-    remarks: str = Field(default="", max_length=140)
-    deviceId: str = Field(pattern=r"^[A-Za-z0-9._:-]{8,128}$")
+# ---------- protected actions ----------
+#
+# Each kind says what AMFA is asked to approve (type, amount, payee the proof is bound to), how it reads
+# in the activity list, a check before it starts, and the effect applied only after a consumed proof.
+
+class Device(BaseModel):
+    deviceId: str = Field(pattern=DEVICE_ID)
     camera: bool = True
     microphone: bool = True
     pointer: bool = False
 
 
-@app.post("/api/transfers")
-def start_transfer(body: Transfer, request: Request):
-    c = customer(request)
+class Transfer(Device):
+    payeeRef: str = Field(pattern=r"^BEN-[A-Z0-9]{2,12}$")
+    amountRupees: float = Field(gt=0, le=1_00_00_000)
+
+
+class Bill(Device):
+    billerRef: str = Field(pattern=r"^BILL-[A-Z]{2,8}$")
+    amountRupees: float = Field(gt=0, le=10_00_000)
+
+
+class AddPayee(Device):
+    name: str = Field(min_length=2, max_length=40, pattern=r"^[A-Za-z][A-Za-z .'&-]+$")
+    account: str = Field(pattern=r"^[0-9]{9,18}$")
+    ifsc: str = Field(pattern=r"^[A-Z]{4}0[A-Z0-9]{6}$")
+
+
+class Limit(Device):
+    limitRupees: float = Field(ge=1000, le=MAX_DAILY_LIMIT / 100)
+
+
+class Contact(Device):
+    field: str = Field(pattern=r"^(phone|email)$")
+    value: str = Field(max_length=254)
+
+
+class Password(Device):
+    current: str = Field(max_length=128)
+    new: str = Field(min_length=8, max_length=128)
+
+
+@dataclass(frozen=True)
+class Kind:
+    model: type[BaseModel]
+    amfa_type: str
+    start: Callable[[dict, BaseModel], dict]                # validate, describe; raises HTTPException
+    apply: Callable[[dict, dict], Optional[str]]            # the effect; returns a problem or None
+    needs_trusted_device: bool = True
+
+
+def _minor(rupees: float) -> int:
+    return round(rupees * 100)
+
+
+def _check_money(c: dict, amount: int) -> None:
+    if amount > c["balance"]:
+        raise HTTPException(422, "not enough balance")
+    if sent_today(c) + amount > c["dailyLimit"]:
+        raise HTTPException(422, "this would go over your daily limit")
+
+
+def _debit(c: dict, a: dict) -> Optional[str]:
+    try:
+        _check_money(c, a["amountMinor"])
+    except HTTPException as e:
+        return e.detail
+    c["balance"] -= a["amountMinor"]
+    c["sent"] = {"day": date.today().isoformat(), "minor": sent_today(c) + a["amountMinor"]}
+    return None
+
+
+def start_transfer(c: dict, b: Transfer) -> dict:
+    p = c["payees"].get(b.payeeRef)
+    if p is None:
+        raise HTTPException(404, "unknown payee")
+    amount = _minor(b.amountRupees)
+    _check_money(c, amount)
+    return {"title": f"Sent to {p['display']}", "amountMinor": amount, "payeeRef": b.payeeRef,
+            "payeeDisplay": p["display"], "payeeCreatedAt": p["createdAt"], "payeeRiskFlag": p.get("riskFlag", False)}
+
+
+def start_bill(c: dict, b: Bill) -> dict:
+    if b.billerRef not in BILLERS:
+        raise HTTPException(404, "unknown biller")
+    amount = _minor(b.amountRupees)
+    _check_money(c, amount)
+    return {"title": f"Paid {BILLERS[b.billerRef]}", "amountMinor": amount, "payeeRef": b.billerRef,
+            "payeeDisplay": BILLERS[b.billerRef], "payeeCreatedAt": BILLERS_SINCE}
+
+
+def start_add_payee(c: dict, b: AddPayee) -> dict:
+    ref = "BEN-" + hashlib.sha256(f"{b.ifsc}:{b.account}".encode()).hexdigest()[:8].upper()
+    if ref in c["payees"]:
+        raise HTTPException(409, "this payee is already saved")
+    display = f"{b.name.strip()[:24]} ••{b.account[-4:]}"
+    return {"title": f"Added payee {display}", "amountMinor": 0, "payeeRef": ref, "payeeDisplay": display,
+            "params": {"name": b.name.strip()}}
+
+
+def apply_add_payee(c: dict, a: dict) -> None:
+    c["payees"][a["payeeRef"]] = {"name": a["params"]["name"], "display": a["payeeDisplay"], "createdAt": time.time()}
+
+
+def start_limit(c: dict, b: Limit) -> dict:
+    limit = _minor(b.limitRupees)
+    return {"title": f"Daily limit set to ₹{b.limitRupees:,.0f}", "amountMinor": limit, "payeeRef": "LIMIT",
+            "payeeDisplay": "Daily limit"}
+
+
+def start_contact(c: dict, b: Contact) -> dict:
+    if not re.match(PHONE if b.field == "phone" else EMAIL, b.value):
+        raise HTTPException(422, f"that is not a valid {b.field}")
+    return {"title": f"Changed {b.field} to {_mask(b.value)}", "amountMinor": 0,
+            "payeeRef": f"PROFILE-{b.field.upper()}", "payeeDisplay": f"New {b.field}",
+            "params": {"field": b.field, "value": b.value}}
+
+
+def apply_contact(c: dict, a: dict) -> None:
+    c[a["params"]["field"]] = a["params"]["value"]
+    c["events"]["contactChangedAt"] = time.time()
+
+
+def start_password(c: dict, b: Password) -> dict:
+    try:
+        _ph.verify(c["password"], b.current)
+    except (VerifyMismatchError, InvalidHashError):
+        raise HTTPException(422, "your current password is not right") from None
+    return {"title": "Changed password", "amountMinor": 0, "payeeRef": "PROFILE-PASSWORD",
+            "payeeDisplay": "New password", "params": {"hash": _ph.hash(b.new)}}
+
+
+def apply_password(c: dict, a: dict) -> None:
+    c["password"] = a["params"].pop("hash")
+    c["events"]["passwordResetAt"] = time.time()
+
+
+def start_device(c: dict, b: Device) -> dict:
+    if b.deviceId in c["devices"]:
+        raise HTTPException(409, "this device is already verified")
+    return {"title": "Verified a new device", "amountMinor": 0, "payeeRef": "DEVICE",
+            "payeeDisplay": "This device", "params": {"deviceId": b.deviceId}}
+
+
+KINDS = {
+    "transfer": Kind(Transfer, "TRANSFER", start_transfer, _debit),
+    "bill": Kind(Bill, "PAYMENT", start_bill, _debit),
+    "payee": Kind(AddPayee, "ADD_BENEFICIARY", start_add_payee, apply_add_payee),
+    "limit": Kind(Limit, "CHANGE_LIMIT", start_limit, lambda c, a: c.update(dailyLimit=a["amountMinor"])),
+    "contact": Kind(Contact, "PROFILE_CHANGE", start_contact, apply_contact),
+    "password": Kind(Password, "PROFILE_CHANGE", start_password, apply_password),
+    "device": Kind(Device, "DEVICE_BINDING", start_device,
+                   lambda c, a: c["devices"].append(a["params"]["deviceId"]), needs_trusted_device=False),
+}
+
+
+def public(a: dict) -> dict:
+    """What the customer's app sees: never the risk score, threat level or AMFA identifiers."""
+    return {k: a.get(k) for k in ("id", "kind", "title", "amountMinor", "status", "detail", "createdAt",
+                                  "checks", "reason", "scamWarning", "reported")}
+
+
+def _client_ip(request: Request) -> str:
+    host = request.client.host if request.client else ""
+    try:
+        return str(ipaddress.ip_address(host))
+    except ValueError:
+        return "127.0.0.1"
+
+
+def _account_events(c: dict, a: dict) -> dict:
+    ev = {k: v for k, v in c["events"].items() if v}
+    if a.get("payeeRiskFlag"):
+        ev["payeeRiskFlag"] = True
+    return ev
+
+
+@app.post("/api/actions/{kind}", status_code=201)
+async def start_action(kind: str, request: Request):
+    k = KINDS.get(kind)
+    if k is None:
+        raise HTTPException(404, "unknown action")
+    username = _username(request)
+    try:
+        body = k.model.model_validate(await request.json())
+    except ValueError:
+        raise HTTPException(422, "please check the details and try again") from None
+    return await run_in_threadpool(_start, k, kind, username, body, request)
+
+
+def _start(k: Kind, kind: str, username: str, body: Device, request: Request) -> dict:
+    c = CUSTOMERS[username]
     if not c["amfaUser"]:
         raise HTTPException(409, "set up secure approvals first")
-    payee = c["payees"].get(body.payeeRef)
-    if payee is None:
-        raise HTTPException(404, "unknown payee")
-    amount = round(body.amountRupees * 100)
-    tid = f"IMPS{uuid.uuid4().hex[:12].upper()}"
-    try:
-        txn = AMFA.initiate(
-            user_id=c["amfaUser"], external_id=tid, amount_minor=amount, currency="INR",
-            payee_ref=body.payeeRef, payee_display=payee["display"], payee_created_at=payee["createdAt"],
-            device_id=body.deviceId, ip=request.client.host if request.client else "127.0.0.1",
-            capability={"camera": body.camera, "microphone": body.microphone, "pointer": body.pointer},
-            idempotency_key=f"bank-{tid}")
-    except AmfaError as e:
-        raise HTTPException(502, f"authentication service: {e.code}") from None
-    PENDING[tid] = {"amfaTxn": txn["transactionId"], "payeeRef": body.payeeRef, "amount": amount,
-                    "customer": c, "status": "AWAITING_AUTH"}
-    return {"transferId": tid, "plan": txn["plan"], "challengeUrl": txn.get("challengeUrl")}
-
-
-@app.post("/api/transfers/{tid}/complete")
-def complete(tid: str, request: Request):
-    c = customer(request)
-    t = PENDING.get(tid)
-    if t is None or t["customer"] is not c:
-        raise HTTPException(404, "no such transfer")
-    if t["status"] == "EXECUTED":
-        return {"status": "EXECUTED", "balance": c["balance"]}
-
-    status = AMFA.transaction(t["amfaTxn"])["status"]
-    if status != "AUTHORIZED":
-        t["status"] = f"NOT_AUTHORIZED ({status})"
-        return {"status": t["status"]}
-
-    token = AMFA.fetch_proof(t["amfaTxn"])["token"]
-    binding = dict(user_ref=c["ref"], external_txn=tid, amount_minor=t["amount"], currency="INR",
-                   payee_ref=t["payeeRef"])
-    try:
-        AMFA.verify_proof_offline(token, tenant_id=TENANT, **binding)
-    except AmfaError as e:
-        t["status"] = f"PROOF_REJECTED ({e.code})"
-        return {"status": t["status"]}
+    if k.needs_trusted_device and body.deviceId not in c["devices"]:
+        raise HTTPException(403, "verify this device before using it for banking")
 
     with _lock:
-        if c["balance"] < t["amount"]:
-            t["status"] = "INSUFFICIENT_FUNDS"
-            return {"status": t["status"]}
-        if c["sentToday"] + t["amount"] > DAILY_LIMIT_MINOR:
-            t["status"] = "DAILY_LIMIT_EXCEEDED"
-            return {"status": t["status"]}
+        a = {"id": f"ACT{uuid.uuid4().hex[:12].upper()}", "kind": kind, "status": "AWAITING_VERIFICATION",
+             "createdAt": time.time(), "detail": None, "reported": False, "params": {}, **k.start(c, body)}
+    try:
+        txn = AMFA.initiate(
+            user_id=c["amfaUser"], external_id=a["id"], type=k.amfa_type, amount_minor=a["amountMinor"],
+            currency="INR", payee_ref=a["payeeRef"], payee_display=a["payeeDisplay"],
+            payee_created_at=a.get("payeeCreatedAt"), device_id=body.deviceId,
+            ip=_client_ip(request),
+            capability={"camera": body.camera, "microphone": body.microphone, "pointer": body.pointer},
+            account_events=_account_events(c, a) or None, idempotency_key=f"bank-{a['id']}")
+    except AmfaError as e:
+        if e.code == "USER_NOT_ACTIVE":
+            raise HTTPException(423, "secure approvals are locked on this account; please contact the bank") from None
+        raise HTTPException(502, "the approval service is not available right now") from None
+
+    notice = txn["plan"].get("customerNotice") or {}
+    a.update(amfaTxn=txn["transactionId"], checks=[CHECK_NAMES.get(f, f) for f in txn["plan"]["required"]],
+             reason=notice.get("reason"), scamWarning=bool(notice.get("scamWarning")))
+    if txn["status"] == "REVIEW":
+        a["status"] = "UNDER_REVIEW"
+    with _lock:
+        c["activity"].insert(0, a)
+        del c["activity"][100:]
+        ACTIONS[a["id"]] = (username, a)
+        _save()
+    return {"action": public(a), "challengeUrl": txn.get("challengeUrl")}
+
+
+def settle(c: dict, a: dict) -> dict:
+    """Bring an action up to date with AMFA. The effect is applied once, only after the proof is verified
+    against this action (signature, amount, payee, type) and consumed so it can never be replayed."""
+    if a["status"] in FINAL:
+        return a
+    status = AMFA.transaction(a["amfaTxn"])["status"]
+    outcome = {"PENDING_AUTH": "AWAITING_VERIFICATION", "REVIEW": "UNDER_REVIEW", "DENIED": "DECLINED",
+               "EXPIRED": "EXPIRED", "CANCELLED": "CANCELLED"}.get(status)
+    if outcome:
+        a["status"] = outcome
+        return a
+    if status != "AUTHORIZED":
+        a["status"], a["detail"] = "FAILED", f"unexpected state {status}"
+        return a
+
+    binding = dict(user_ref=c["ref"], external_txn=a["id"], amount_minor=a["amountMinor"], currency="INR",
+                   payee_ref=a["payeeRef"], type=KINDS[a["kind"]].amfa_type)
+    with _lock:
+        if a["status"] in FINAL:   # settled by a concurrent call while we were asking AMFA
+            return a
+        try:
+            token = AMFA.fetch_proof(a["amfaTxn"])["token"]
+            AMFA.verify_proof_offline(token, tenant_id=TENANT, **binding)
+        except AmfaError as e:
+            a["status"], a["detail"] = "FAILED", f"approval could not be verified ({e.code})"
+            return a
         result = AMFA.verify_proof(token, **binding, consume=True)
         if not result["valid"]:
-            t["status"] = f"PROOF_REJECTED ({result['reason']})"
-            return {"status": t["status"]}
-        c["balance"] -= t["amount"]
-        c["sentToday"] += t["amount"]
-        t["status"] = "EXECUTED"
+            a["status"], a["detail"] = "FAILED", f"approval could not be verified ({result['reason']})"
+            return a
+        problem = KINDS[a["kind"]].apply(c, a)
+        a["status"], a["detail"] = ("FAILED", problem) if problem else ("DONE", None)
         _save()
-    return {"status": "EXECUTED", "balance": c["balance"], "reference": tid,
-            "authorisedBy": result["claims"]["amr"]}
+    return a
+
+
+def _own(request: Request, action_id: str) -> tuple[dict, dict]:
+    username = _username(request)
+    hit = ACTIONS.get(action_id)
+    if hit is None or hit[0] != username:
+        raise HTTPException(404, "no such action")
+    return CUSTOMERS[username], hit[1]
+
+
+@app.post("/api/actions/{action_id}/complete")
+def complete(action_id: str, request: Request):
+    c, a = _own(request, action_id)
+    return {"action": public(settle(c, a)), "balance": c["balance"]}
+
+
+@app.post("/api/actions/{action_id}/cancel")
+def cancel(action_id: str, request: Request):
+    c, a = _own(request, action_id)
+    if a["status"] in ("AWAITING_VERIFICATION", "UNDER_REVIEW"):
+        try:
+            AMFA.cancel(a["amfaTxn"])
+            a["status"] = "CANCELLED"
+        except AmfaError:
+            settle(c, a)   # it moved on (approved or declined) before the cancel arrived
+        _save()
+    return {"action": public(a)}
+
+
+class Report(BaseModel):
+    reason: str = Field(default="", max_length=200, pattern=r"^[^\x00-\x1f<>]*$")
+
+
+@app.post("/api/actions/{action_id}/report")
+def report(action_id: str, body: Report, request: Request):
+    """"This wasn't me": the bank tells AMFA, which records a fraud label for the risk model."""
+    c, a = _own(request, action_id)
+    if a["status"] != "DONE":
+        raise HTTPException(409, "only completed actions can be reported")
+    if not a["reported"]:
+        AMFA.feedback(a["amfaTxn"], "FRAUD", "customer_report", body.reason or None)
+        a["reported"] = True
+        _save()
+    return {"action": public(a)}
+
+
+@app.get("/api/activity")
+def activity(request: Request):
+    c = customer(request)
+    for a in c["activity"][:10]:   # refresh recent unfinished ones, e.g. a review an operator just decided
+        if a["status"] not in FINAL:
+            try:
+                settle(c, a)
+            except AmfaError:
+                pass
+    return {"activity": [public(a) for a in c["activity"]], "balance": c["balance"]}
 
 
 @app.post("/webhooks/amfa")
@@ -244,15 +530,56 @@ async def webhook(request: Request):
                                                 request.headers.get("x-amfa-webhook-signature", "")):
         raise HTTPException(401, "bad signature")
     evt = json.loads(body)
-    EVENTS.append({"type": evt["type"], "at": evt["createdAt"], "txn": evt["data"].get("externalId")})
+    hit = ACTIONS.get((evt.get("data") or {}).get("externalId", ""))
+    if hit is not None:
+        settle(CUSTOMERS[hit[0]], hit[1])
     return {"received": True}
 
 
-@app.get("/api/events")
-def events(request: Request):
-    customer(request)
-    return {"events": EVENTS[-20:]}
+# ---------- demo tools: stage the signals a real bank would learn from its own systems ----------
 
+class PayeeFlag(BaseModel):
+    payeeRef: str = Field(pattern=r"^BEN-[A-Z0-9]{2,12}$")
+    flagged: bool
+
+
+def _demo(request: Request) -> dict:
+    if not DEMO_TOOLS:
+        raise HTTPException(404)
+    return customer(request)
+
+
+@app.post("/api/demo/sim-swap")
+def demo_sim_swap(request: Request):
+    """As if the telecom operator reported a SIM change on the customer's number just now."""
+    c = _demo(request)
+    c["events"]["simChangedAt"] = time.time()
+    _save()
+    return {"simChangedAt": c["events"]["simChangedAt"]}
+
+
+@app.post("/api/demo/payee-risk")
+def demo_payee_risk(body: PayeeFlag, request: Request):
+    """As if a mule-account list (for example the bank's own, or a national one) flagged this payee."""
+    c = _demo(request)
+    if body.payeeRef not in c["payees"]:
+        raise HTTPException(404, "unknown payee")
+    c["payees"][body.payeeRef]["riskFlag"] = body.flagged
+    _save()
+    return {"payeeRef": body.payeeRef, "flagged": body.flagged}
+
+
+@app.post("/api/demo/reset")
+def demo_reset(request: Request):
+    c = _demo(request)
+    c["events"].pop("simChangedAt", None)
+    for p in c["payees"].values():
+        p.pop("riskFlag", None)
+    _save()
+    return {"reset": True}
+
+
+# ---------- pages ----------
 
 @app.get("/")
 def index():

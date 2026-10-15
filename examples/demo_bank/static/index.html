@@ -2,56 +2,173 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#7a1f2b">
   <title>Demo Bank</title>
   <link rel="stylesheet" href="/static/bank.css">
 </head>
 <body>
-  <header><strong>Demo Bank</strong><span class="who"><span id="who"></span><button id="logout" class="link hidden" type="button">Sign out</button></span></header>
-  <main>
-    <section class="card" id="signin">
-      <h1 id="auth-title">Sign in to internet banking</h1>
+  <header class="top">
+    <strong>Demo Bank</strong>
+    <span class="who"><span id="who"></span><button id="logout" class="link hidden" type="button">Sign out</button></span>
+  </header>
+
+  <!-- signed out -->
+  <main id="auth" class="page">
+    <section class="card">
+      <h1 id="auth-title">Sign in</h1>
       <form id="auth-form" novalidate>
         <label for="username">Username</label>
-        <input id="username" name="username" autocomplete="username" required minlength="3" maxlength="24"
-               pattern="[a-z0-9][a-z0-9_\-]{2,23}" autocapitalize="none" spellcheck="false">
-        <div id="name-row" class="hidden">
+        <input id="username" autocomplete="username" required maxlength="24" autocapitalize="none" spellcheck="false">
+        <div id="register-only" class="hidden">
           <label for="fullname">Full name</label>
-          <input id="fullname" name="fullname" autocomplete="name" maxlength="60">
+          <input id="fullname" autocomplete="name" maxlength="60">
+          <label for="phone">Mobile number</label>
+          <input id="phone" type="tel" autocomplete="tel" inputmode="tel" maxlength="14" placeholder="+91 98123 45678">
         </div>
         <label for="password">Password</label>
-        <input id="password" name="password" type="password" autocomplete="current-password" required minlength="8" maxlength="128">
-        <p id="auth-hint" class="muted hidden">3–24 characters: lowercase letters, digits, - or _. Password at least 8 characters.</p>
-        <button type="submit" id="auth-submit">Sign in</button>
+        <input id="password" type="password" autocomplete="current-password" required maxlength="128">
+        <p id="auth-hint" class="muted hidden">Username: 3–24 lowercase letters, digits, - or _. Password: at least 8 characters.</p>
+        <button type="submit" id="auth-submit" class="primary wide">Sign in</button>
         <p id="auth-error" class="error" role="alert"></p>
       </form>
-      <p class="muted"><span id="switch-text">New to Demo Bank?</span>
+      <p class="muted center"><span id="switch-text">New to Demo Bank?</span>
         <button id="switch" class="link" type="button">Open an account</button></p>
     </section>
+  </main>
 
-    <section class="card hidden" id="account">
-      <h2>Current account</h2>
-      <p class="balance" id="balance"></p>
-      <p id="enrolment"></p>
-      <button id="enrol" class="secondary">Set up secure approvals</button>
+  <!-- signed in -->
+  <main id="app" class="page hidden">
+    <div id="banner" class="banner hidden" role="status">
+      <p id="banner-text"></p>
+      <button id="banner-action" type="button" class="primary"></button>
+    </div>
+
+    <section id="tab-home" class="tab">
+      <div class="card balance-card">
+        <p class="muted">Savings account <span id="acct-ref"></span></p>
+        <p class="balance" id="balance"></p>
+        <div class="meter"><span id="limit-bar"></span></div>
+        <p class="muted small" id="limit-text"></p>
+      </div>
+      <h2>Activity</h2>
+      <ul id="activity" class="list"></ul>
+      <p id="activity-empty" class="muted center">No activity yet.</p>
     </section>
 
-    <section class="card hidden" id="transfer">
-      <h2>Send money (IMPS)</h2>
-      <form id="form">
-        <label for="payee">To</label>
-        <select id="payee"></select>
-        <label for="amount">Amount (₹)</label>
-        <input id="amount" type="number" min="1" step="0.01" value="4500">
-        <label for="remarks">Remarks (never reaches the decision engine)</label>
-        <input id="remarks" type="text" maxlength="140" value="Rent for September">
-        <button type="submit" id="send">Continue</button>
+    <section id="tab-pay" class="tab hidden">
+      <div class="segmented" role="tablist">
+        <button type="button" class="seg active" data-pay="transfer" role="tab">Send money</button>
+        <button type="button" class="seg" data-pay="bill" role="tab">Pay a bill</button>
+      </div>
+      <form id="transfer-form" class="card">
+        <label for="t-payee">To</label>
+        <select id="t-payee" required></select>
+        <label for="t-amount">Amount (₹)</label>
+        <input id="t-amount" type="number" inputmode="decimal" min="1" step="0.01" required>
+        <button type="submit" class="primary wide">Continue</button>
+        <p class="error" role="alert"></p>
       </form>
-      <p id="plan" class="muted"></p>
-      <div id="frame" class="frame hidden"></div>
-      <p id="outcome"></p>
+      <form id="bill-form" class="card hidden">
+        <label for="b-biller">Biller</label>
+        <select id="b-biller" required></select>
+        <label for="b-amount">Amount (₹)</label>
+        <input id="b-amount" type="number" inputmode="decimal" min="1" step="0.01" required>
+        <button type="submit" class="primary wide">Pay bill</button>
+        <p class="error" role="alert"></p>
+      </form>
+    </section>
+
+    <section id="tab-payees" class="tab hidden">
+      <h2>Saved payees</h2>
+      <ul id="payees" class="list"></ul>
+      <form id="payee-form" class="card">
+        <h3>Add a payee</h3>
+        <label for="p-name">Name on account</label>
+        <input id="p-name" maxlength="40" required autocomplete="off">
+        <label for="p-account">Account number</label>
+        <input id="p-account" inputmode="numeric" maxlength="18" required autocomplete="off">
+        <label for="p-ifsc">IFSC</label>
+        <input id="p-ifsc" maxlength="11" required autocapitalize="characters" autocomplete="off" placeholder="HDFC0001234">
+        <button type="submit" class="primary wide">Add payee</button>
+        <p class="error" role="alert"></p>
+      </form>
+    </section>
+
+    <section id="tab-profile" class="tab hidden">
+      <div class="card">
+        <h3>Secure approvals</h3>
+        <p id="enrolment" class="muted"></p>
+        <button id="enrol" type="button" class="secondary">Set up or update</button>
+      </div>
+      <form id="limit-form" class="card">
+        <h3>Daily transfer limit</h3>
+        <label for="l-amount">New limit (₹)</label>
+        <input id="l-amount" type="number" inputmode="numeric" min="1000" step="1000" required>
+        <button type="submit" class="secondary">Change limit</button>
+        <p class="error" role="alert"></p>
+      </form>
+      <form id="contact-form" class="card">
+        <h3>Contact details</h3>
+        <p class="muted">Mobile <span id="cur-phone"></span> · Email <span id="cur-email"></span></p>
+        <label for="c-field">Change</label>
+        <select id="c-field"><option value="phone">Mobile number</option><option value="email">Email</option></select>
+        <label for="c-value">New value</label>
+        <input id="c-value" maxlength="254" required autocomplete="off">
+        <button type="submit" class="secondary">Update</button>
+        <p class="error" role="alert"></p>
+      </form>
+      <form id="password-form" class="card">
+        <h3>Password</h3>
+        <label for="pw-current">Current password</label>
+        <input id="pw-current" type="password" autocomplete="current-password" required maxlength="128">
+        <label for="pw-new">New password</label>
+        <input id="pw-new" type="password" autocomplete="new-password" required minlength="8" maxlength="128">
+        <button type="submit" class="secondary">Change password</button>
+        <p class="error" role="alert"></p>
+      </form>
+
+      <details id="demo" class="card demo hidden">
+        <summary>Demo tools</summary>
+        <p class="muted small">Stage the signals a real bank gets from its own systems, then try a payment to see the checks change.</p>
+        <button id="d-sim" type="button" class="secondary">Simulate a SIM swap now</button>
+        <label for="d-payee">Payee on a mule-account list</label>
+        <select id="d-payee"></select>
+        <button id="d-flag" type="button" class="secondary">Flag this payee</button>
+        <button id="d-device" type="button" class="secondary">Pretend this is a new phone</button>
+        <button id="d-reset" type="button" class="link">Reset demo signals</button>
+        <p id="d-status" class="muted small" role="status"></p>
+      </details>
     </section>
   </main>
+
+  <nav id="tabs" class="tabs hidden" aria-label="Sections">
+    <button type="button" data-tab="home" class="active">Home</button>
+    <button type="button" data-tab="pay">Pay</button>
+    <button type="button" data-tab="payees">Payees</button>
+    <button type="button" data-tab="profile">Profile</button>
+  </nav>
+
+  <!-- verification sheet: shown for every protected action -->
+  <div id="sheet" class="sheet hidden" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+    <div class="sheet-body">
+      <div class="sheet-head">
+        <h2 id="sheet-title">Confirm it's you</h2>
+        <button id="sheet-close" type="button" class="link" aria-label="Close">Close</button>
+      </div>
+      <p id="sheet-what" class="what"></p>
+      <p id="sheet-reason" class="muted"></p>
+      <p id="sheet-checks" class="checks"></p>
+      <div id="scam" class="scam hidden" role="alert">
+        <strong>Stop if someone asked you to do this.</strong>
+        Your bank will never ask you to move money to keep it safe, share a code, or pay to receive a refund or prize.
+      </div>
+      <div id="sheet-frame"></div>
+      <p id="sheet-outcome" class="outcome" role="status"></p>
+      <button id="sheet-cancel" type="button" class="secondary hidden">Cancel this request</button>
+    </div>
+  </div>
+
   <script src="/static/bank.js"></script>
 </body>
 </html>

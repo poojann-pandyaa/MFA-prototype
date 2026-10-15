@@ -92,7 +92,7 @@ class AmfaClient:
                  channel: str = "MOBILE", payee_created_at: Optional[float] = None,
                  payee_display: Optional[str] = None, device_first_seen: Optional[float] = None,
                  capability: Optional[dict] = None, session: Optional[dict] = None,
-                 idempotency_key: Optional[str] = None):
+                 account_events: Optional[dict] = None, idempotency_key: Optional[str] = None):
         payee: dict = {"ref": payee_ref}
         if payee_created_at:
             payee["createdAt"] = payee_created_at
@@ -107,11 +107,23 @@ class AmfaClient:
             body["capability"] = capability
         if session:
             body["session"] = session
+        if account_events:
+            body["accountEvents"] = account_events
         return self.request("POST", "/v1/transactions", body,
                             headers={"Idempotency-Key": idempotency_key or f"idem-{uuid.uuid4().hex}"})
 
     def transaction(self, txn_id: str):
         return self.request("GET", f"/v1/transactions/{txn_id}")
+
+    def cancel(self, txn_id: str):
+        return self.request("POST", f"/v1/transactions/{txn_id}/cancel", {})
+
+    def feedback(self, txn_id: str, label: str, source: str = "customer_report", reason: Optional[str] = None):
+        """Report what a transaction turned out to be: FRAUD, GENUINE or DISPUTED."""
+        body = {"label": label, "source": source}
+        if reason:
+            body["reason"] = reason
+        return self.request("POST", f"/v1/transactions/{txn_id}/feedback", body)
 
     def fetch_proof(self, txn_id: str):
         return self.request("POST", f"/v1/transactions/{txn_id}/proof", {})

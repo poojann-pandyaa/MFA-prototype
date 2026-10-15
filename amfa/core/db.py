@@ -367,6 +367,19 @@ class ReviewCase(Base):
     created_at: Mapped[float] = mapped_column(Float, default=now)
 
 
+class RiskLabel(Base):
+    """The truth about a transaction, which arrives after the decision: the bank's fraud or genuine
+    report, or a manual-review verdict. Training joins these to `decision` by transaction id."""
+    __tablename__ = "risk_label"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(40), index=True)
+    transaction_id: Mapped[str] = mapped_column(String(40), index=True)
+    label: Mapped[str] = mapped_column(String(16))
+    source: Mapped[str] = mapped_column(String(24))
+    reason: Mapped[Optional[str]] = mapped_column(String(280), nullable=True)
+    reported_at: Mapped[float] = mapped_column(Float, default=now, index=True)
+
+
 class AuditLog(Base):
     __tablename__ = "audit_log"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
