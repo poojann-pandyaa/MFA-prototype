@@ -52,6 +52,21 @@ def _crop(img, bbox, scale, out_w, out_h):
     return cv2.resize(img[t:b + 1, l:r + 1], (out_w, out_h))
 
 
+# The upstream code shrinks to 192x192 worth of pixels, sized for phone selfies where the face fills the
+# frame. On a landscape laptop webcam that leaves the face ~55 px and RetinaFace scores it 0.0, so a real
+# person reads as "no face, not live". 480 keeps a typical webcam face ~150 px (measured 0.97 confidence).
+DETECT_SIDE = 480
+
+
+def detector_input(img):
+    height, width = img.shape[:2]
+    if width * height < DETECT_SIDE * DETECT_SIDE:
+        return img
+    aspect = width / height
+    return cv2.resize(img, (int(DETECT_SIDE * math.sqrt(aspect)), int(DETECT_SIDE / math.sqrt(aspect))),
+                      interpolation=cv2.INTER_LINEAR)
+
+
 @dataclass
 class PadFrame:
     live_prob: float
@@ -81,12 +96,7 @@ class FacePAD:
 
     def _bbox(self, img) -> Optional[list[int]]:
         height, width = img.shape[:2]
-        aspect = width / height
-        small = img
-        if width * height >= 192 * 192:
-            small = cv2.resize(img, (int(192 * math.sqrt(aspect)), int(192 / math.sqrt(aspect))),
-                               interpolation=cv2.INTER_LINEAR)
-        blob = cv2.dnn.blobFromImage(small, 1, mean=(104, 117, 123))
+        blob = cv2.dnn.blobFromImage(detector_input(img), 1, mean=(104, 117, 123))
         with self._det_lock:
             self._det.setInput(blob, "data")
             out = self._det.forward("detection_out").squeeze()
