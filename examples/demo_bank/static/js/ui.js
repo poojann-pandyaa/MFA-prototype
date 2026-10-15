@@ -17,6 +17,12 @@ export function h(tag, props, ...children) {
   return el;
 }
 
+// Element.append turns null into the text "null"; this skips empty slots like h() does.
+export function add(parent, ...kids) {
+  parent.append(...kids.flat().filter((k) => k !== null && k !== undefined && k !== false));
+  return parent;
+}
+
 export function clear(el) {
   while (el.firstChild) el.removeChild(el.firstChild);
   return el;
@@ -165,6 +171,23 @@ export function keypad(onKey) {
   return h("div", { class: "keypad" }, keys.map((k) => k === "del"
     ? h("button", { type: "button", class: "flat", "aria-label": "Delete", onclick: () => onKey(k) }, icon("del", 26))
     : h("button", { type: "button", class: k === "." ? "flat" : "", onclick: () => onKey(k), text: k })));
+}
+
+// "V. Mehta ••4411" -> "Mehta", "City Electricity" -> "City": a short name for an avatar caption.
+export function shortName(display) {
+  const words = (display || "").replace(/[•\d]/g, " ").split(/\s+/).filter(Boolean);
+  const first = words.find((w) => w.replace(/\./g, "").length > 1) || words[0] || "";
+  return first.replace(/\.$/, "");
+}
+
+// Amount keypad typing: digits, one dot, two decimals, eight whole digits, no leading zeros.
+export function press(text, key) {
+  if (key === "del") return text.slice(0, -1);
+  if (key === ".") return text.includes(".") ? text : (text || "0") + ".";
+  const [whole, dec] = text.split(".");
+  if (dec !== undefined) return dec.length >= 2 ? text : text + key;
+  if (whole === "0") return key;
+  return whole.length >= 8 ? text : text + key;
 }
 
 export function rupees(minor, { decimals = true } = {}) {

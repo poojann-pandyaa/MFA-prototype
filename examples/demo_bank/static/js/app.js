@@ -113,8 +113,9 @@ function demoButton(place) {   // place: "" above the tabs, "top", or null for n
   if (fab) fab.remove();
   fab = null;
   if (place === null || !state.signedIn || !state.me.demoTools) return;
-  fab = h("button", { type: "button", class: `demo-fab ${place}`, onclick: () => import("./screens/demo.js").then((m) => m.open()) },
-    icon("spark", 16), "Behind the scenes");
+  fab = h("button", { type: "button", class: `demo-fab ${place}`, "aria-label": "Behind the scenes",
+    onclick: () => import("./screens/demo.js").then((m) => m.open()) },
+    icon("spark", 16), place === "top" ? null : "Behind the scenes");
   document.body.appendChild(fab);
 }
 
