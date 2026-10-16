@@ -40,6 +40,8 @@
       RATE_LIMITED: "Too many attempts. Please wait a minute and try again.",
       CHALLENGE_INVALID: "That step timed out. We've prepared a fresh one.",
       CONSENT_REQUIRED: "Please accept the notice first.",
+      OTP_RESEND_WAIT: "Please wait a few seconds before asking for another code.",
+      OTP_SEND_LIMIT: "We've sent the most codes we can for this request. Use the latest one, or go back and start again.",
       CUSTOMER_UNAVAILABLE: "This account can't be used right now. Please contact your bank."
     };
     return e && map[e.code] || e && e.message || "Something went wrong. Please try again.";
@@ -299,11 +301,15 @@
       }
     };
   }
-  function countdown(node, expiresAt, prefix) {
+  // keeps counting until the time is up or the screen it was shown on is replaced; it may start before it's shown
+  function countdown(node, expiresAt, prefix, onDone) {
+    var shown = false;
     function tick() {
+      shown = shown || node.isConnected;
+      if (shown && !node.isConnected) return;
       var s = Math.max(0, Math.round(expiresAt - Date.now() / 1000));
       node.textContent = s ? prefix + Math.floor(s / 60) + ":" + ("0" + s % 60).slice(-2) : "This code has expired. Ask for a new one.";
-      if (s && node.isConnected) setTimeout(tick, 1000);
+      if (s) setTimeout(tick, 1000); else if (onDone) onDone();
     }
     tick();
   }

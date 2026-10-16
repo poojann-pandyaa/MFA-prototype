@@ -151,7 +151,39 @@
       text: "Never share this code. Anyone asking for it, even someone saying they're from the bank, is trying to take your money."
     }), btn ]);
     boxes.input.setAttribute("aria-describedby", "otp-help");
-    UI.countdown(timer, ch.expiresAt, "Enter it within ");
+    if (!totp) {
+      // a new code can be asked for after a short wait (the server enforces it too), or at once when this one expires
+      var resend = el("button", {
+        type: "button",
+        class: "secondary",
+        disabled: "disabled"
+      });
+      var canResendAt = Date.now() / 1000 + 30, problem = null;
+      var waitTick = function() {
+        var s = Math.ceil(canResendAt - Date.now() / 1000);
+        resend.textContent = s > 0 ? "Resend code in " + s + "s" : "Resend code";
+        resend.disabled = s > 0;
+        if (s > 0) setTimeout(waitTick, 1000);
+      };
+      resend.addEventListener("click", function() {
+        UI.busy(resend, true, "Sending…");
+        api.post("/c/v1/session/otp/resend", {}).then(function(st) {
+          show(st, UI.notice("ok", "We've sent a new code to " + ch.params.sentTo + ". Earlier codes no longer work."));
+        }).catch(function(e) {
+          if (problem) problem.remove();
+          problem = form.insertBefore(UI.notice("bad", UI.errorText(e)), btn);
+          if (e.code === "OTP_SEND_LIMIT") return UI.busy(resend, true, "No more codes for this request");
+          canResendAt = Date.now() / 1000 + 30;
+          waitTick();
+        });
+      });
+      form.appendChild(resend);
+      waitTick();
+      UI.countdown(timer, ch.expiresAt, "Enter it within ", function() {
+        canResendAt = 0;
+        waitTick();
+      });
+    }
     form.addEventListener("submit", function(e) {
       e.preventDefault();
       var code = boxes.value();

@@ -25,6 +25,7 @@ PENDING, VERIFIED, BLOCKED, EXPIRED, REVIEW = "PENDING", "VERIFIED", "BLOCKED", 
 TERMINAL_SESSION = {VERIFIED, BLOCKED, EXPIRED, REVIEW}
 CHALLENGE_TTL_S = 120
 MAX_OTP_SENDS = 3
+OTP_RESEND_WAIT_S = 30
 # 3 frames straight on, then 17 at 150 ms (about 2.5 s) to read the cue, turn and hold: the turn check
 # compares the first and last 3 frames, so the customer must have finished turning before the end
 FACE_FRAMES = 20
@@ -151,11 +152,35 @@ def issue_challenge(s, sess: db.AuthSession, customer: db.Customer, txn: db.Tran
         ctx = _ctx(sess)
         params = {"phrase": phrase.get("phrase"),
                   "shape": phrase.get("shape") if (ctx.capability.pointer and ctx.enrollment.shape) else None}
+    ttl = otp.DELIVERED_TTL_S if params.get("mode") == "delivered" else CHALLENGE_TTL_S   # the code's own life
     ch = db.Challenge(id=f"ch_{uuid.uuid4().hex[:20]}", session_id=sess.id, factor=factor,
-                      params=params, expires_at=now + CHALLENGE_TTL_S)
+                      params=params, expires_at=now + ttl)
     s.add(ch)
     s.flush()
     return _public_challenge(ch)
+
+
+def resend_otp(s, sess: db.AuthSession, customer: db.Customer, txn: db.Transaction, tenant: db.Tenant) -> None:
+    """Close the open emailed/texted code and send a fresh one; issue_challenge enforces MAX_OTP_SENDS."""
+    item = next_item(sess.checklist)
+    now = time.time()
+    ch = s.execute(select(db.Challenge).where(
+        db.Challenge.session_id == sess.id, db.Challenge.factor == "OTP",
+        db.Challenge.consumed_at.is_(None))).scalars().first()
+    if (sess.status != PENDING or item is None or item["factor"] != "OTP" or ch is None
+            or ch.params.get("mode") != "delivered"):
+        raise ApiError(409, "NO_CODE_TO_RESEND", "there is no sent code waiting to be entered")
+    last = s.execute(select(func.max(db.OtpCode.created_at)).where(
+        db.OtpCode.session_id == sess.id)).scalar() or 0
+    if now - last < OTP_RESEND_WAIT_S:
+        raise ApiError(429, "OTP_RESEND_WAIT", "wait a few seconds before asking for another code",
+                       headers={"retry-after": str(int(OTP_RESEND_WAIT_S - (now - last)) + 1)})
+    sends = s.execute(select(func.count()).select_from(db.OtpCode).where(
+        db.OtpCode.session_id == sess.id)).scalar_one()
+    if sends >= MAX_OTP_SENDS:
+        raise ApiError(429, "OTP_SEND_LIMIT", "too many codes requested for this session")
+    ch.consumed_at = now
+    s.flush()
 
 
 def _public_challenge(ch: db.Challenge) -> dict:

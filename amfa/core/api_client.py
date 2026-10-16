@@ -360,6 +360,17 @@ def session_state(caller: ClientCaller = Depends(session_caller)):
         return _state(s, *_session(s, caller))
 
 
+@router.post("/session/otp/resend")
+def resend_code(caller: ClientCaller = Depends(session_caller)):
+    rate_limit(f"sess:{caller.session_id}:resend", 5, 600)
+    with db.session() as s:
+        sess, txn, tenant, customer = _session(s, caller)
+        if customer.status != "ACTIVE":
+            raise ApiError(403, "CUSTOMER_UNAVAILABLE", "this account cannot be used right now")
+        orchestrator.resend_otp(s, sess, customer, txn, tenant)
+        return _state(s, sess, txn, tenant, customer)
+
+
 class DeviceProof(Strict):
     deviceId: str = Field(min_length=16, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$")
     signature: Optional[str] = Field(default=None, max_length=200)

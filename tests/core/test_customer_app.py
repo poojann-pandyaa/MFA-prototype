@@ -5,6 +5,7 @@ threat level each test sets; the biometric services are scripted; OTP codes are 
 import importlib
 import os
 import re
+import time
 import uuid
 from types import SimpleNamespace
 
@@ -427,3 +428,40 @@ def test_sign_up_needs_a_real_email(stack):
                                                "password": "long-password-1", "phone": "+919812345678",
                                                "deviceId": "device-x-000001"})
         assert r.status_code == 422, bad
+
+
+def code_session(stack, started):
+    auth = {"authorization": f"Bearer {started['challengeUrl'].split('#token=', 1)[1]}"}
+    ch = stack.core.get("/c/v1/session", headers=auth).json()["challenge"]
+    assert ch["factor"] == "OTP"
+    return auth, ch
+
+
+def test_a_code_can_be_resent_and_only_the_newest_one_works(stack, app, monkeypatch):
+    started = act(app, "transfer", payeeRef="BEN-42", amountRupees=2500).json()
+    auth, first = code_session(stack, started)
+    old_code = re.match(r"(\d+)", SENT[-1]).group(1)
+    assert first["expiresAt"] >= int(time.time()) + otp.DELIVERED_TTL_S - 5   # the timer matches the code's life
+    too_soon = stack.core.post("/c/v1/session/otp/resend", headers=auth)
+    assert too_soon.status_code == 429 and too_soon.json()["error"]["code"] == "OTP_RESEND_WAIT"
+
+    monkeypatch.setattr(orchestrator, "OTP_RESEND_WAIT_S", 0)
+    sends = len(SENT)
+    again = stack.core.post("/c/v1/session/otp/resend", headers=auth)
+    assert again.status_code == 200, again.text
+    assert len(SENT) == sends + 1 and again.json()["challenge"]["challengeId"] != first["challengeId"]
+    stale = stack.core.post("/c/v1/session/factors/OTP", headers=auth,
+                            json={"challengeId": first["challengeId"], "payload": {"code": old_code}})
+    assert stale.status_code == 409                       # the old code's screen is closed
+    assert verify(stack, started["challengeUrl"])["status"] == "VERIFIED"
+
+
+def test_codes_stop_after_the_send_limit(stack, app, monkeypatch):
+    monkeypatch.setattr(orchestrator, "OTP_RESEND_WAIT_S", 0)
+    started = act(app, "transfer", payeeRef="BEN-42", amountRupees=2500).json()
+    auth, _ = code_session(stack, started)
+    for _ in range(orchestrator.MAX_OTP_SENDS - 1):
+        stack.core.post("/c/v1/session/otp/resend", headers=auth).raise_for_status()
+    over = stack.core.post("/c/v1/session/otp/resend", headers=auth)
+    assert over.status_code == 429 and over.json()["error"]["code"] == "OTP_SEND_LIMIT"
+    assert verify(stack, started["challengeUrl"])["status"] == "VERIFIED"   # the last code still works
