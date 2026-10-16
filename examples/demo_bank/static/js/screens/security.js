@@ -4,7 +4,7 @@ import { openAmfa } from "../amfa-frame.js";
 import { add, button, chip, h, icon, item, list, rupees, sheet, tile, toast, topbar } from "../ui.js";
 
 const WAYS = [
-  ["SMS code", "phone", "Codes sent to your mobile", null],
+  ["code", "mail", "", null],   // the one-time code: by email (or SMS for older accounts), filled in below
   ["Face", "face", "A quick head turn", "FACE"],
   ["Voice", "mic", "Read three short sentences", "VOICE"],
   ["Typing", "keyboard", "Type a phrase a few times", "UEBA"],
@@ -29,11 +29,13 @@ export function render(root) {
     }
   }
 
+  const byEmail = (me.codeTo || "").includes("@");
   const ways = WAYS.map(([name, ic, sub, factor]) => {
+    if (name === "code") [name, ic, sub] = [byEmail ? "Email code" : "SMS code", byEmail ? "mail" : "phone", `Sent to ${me.codeTo}`];
     const on = p.have.includes(name);
     const can = p.canAdd.includes(name);
     if (!on && !can) return null;
-    return item({ lead: tile(ic, on ? "" : "grey"), title: name, sub: on ? null : sub,
+    return item({ lead: tile(ic, on ? "" : "grey"), title: name, sub: on && !factor ? sub : on ? null : sub,
       trail: on ? chip("On", "ok") : button("Add", { kind: "soft", cls: name === p.canAdd[0] ? "solid" : "",
         onClick: () => addWay(factor, name) }) });
   }).filter(Boolean);

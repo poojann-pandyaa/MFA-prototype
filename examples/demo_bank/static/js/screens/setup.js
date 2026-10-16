@@ -3,10 +3,11 @@ import { go, refresh, state } from "../app.js";
 import { openAmfa } from "../amfa-frame.js";
 import { button, chip, h, item, list, note, stepsBar, tile, toast, topbar } from "../ui.js";
 
-// Progressive setup: SMS codes come from the mobile number, so the face is the only thing to set up now.
+// Progressive setup: one-time codes go to the email given at sign-up, so the face is the only thing to set up now.
 export function render(root) {
   const me = state.me;
-  const hasSms = me.protection.have.includes("SMS code");
+  const byEmail = (me.codeTo || "").includes("@");
+  const hasCode = me.protection.have.some((w) => w.endsWith("code"));
   const hasFace = me.protection.have.includes("Face");
   const error = h("p", { class: "form-error", role: "alert" });
   const go_ = button(hasFace ? "Continue" : "Set up my face", { onClick: begin });
@@ -35,8 +36,8 @@ export function render(root) {
     h("h1", { text: "Let's protect your account" }),
     h("p", { class: "lede", text: "Two things, then you can start banking. We'll only ask for a check when a payment looks unusual." }),
     list([
-      item({ lead: tile("phone"), title: "SMS codes", sub: hasSms ? `Sent to +91 ${me.phone || ""}` : "From your mobile number",
-        trail: chip(hasSms ? "Ready" : "Setting up", hasSms ? "ok" : "") }),
+      item({ lead: tile(byEmail ? "mail" : "phone"), title: byEmail ? "Codes by email" : "SMS codes",
+        sub: `Sent to ${me.codeTo}`, trail: chip(hasCode ? "Ready" : "Setting up", hasCode ? "ok" : "") }),
       item({ lead: tile("face"), title: "Your face", sub: "Five quick pictures, about 30 seconds",
         trail: chip(hasFace ? "Ready" : "Next", hasFace ? "ok" : "") }),
     ]),

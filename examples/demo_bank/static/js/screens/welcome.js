@@ -8,7 +8,7 @@ export function render(root) {
       h("div", { class: "disc" }),
       h("div", { class: "core" }, icon("shieldCheck", 96)),
       h("div", { class: "pill a" }, icon("face", 16), "Face"),
-      h("div", { class: "pill b" }, icon("phone", 16), "SMS code"))),
+      h("div", { class: "pill b" }, icon("mail", 16), "Email code"))),
     h("h1", { text: "Banking that knows it's really you" }),
     h("p", { class: "lede", text: "Everyday payments stay one tap. Anything unusual gets a quick face or code check, so nobody else can move your money." }),
     h("div", { class: "stack" },

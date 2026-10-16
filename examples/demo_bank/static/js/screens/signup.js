@@ -5,6 +5,7 @@ import { button, field, h, icon, topbar } from "../ui.js";
 const RULES = {
   name: (v) => v.trim().length >= 2 || "Enter your full name.",
   phone: (v) => /^[6-9][0-9]{9}$/.test(v) || "Enter your 10-digit mobile number.",
+  email: (v) => /^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$/.test(v) || "Enter an email address like you@example.com.",
   username: (v) => /^[a-z0-9][a-z0-9_-]{2,23}$/.test(v) || "3 to 24 lowercase letters, digits, - or _.",
   password: (v) => v.length >= 8 || "Use at least 8 characters.",
 };
@@ -13,6 +14,8 @@ export function render(root) {
   const inputs = {
     name: h("input", { class: "input", autocomplete: "name", maxlength: "60" }),
     phone: h("input", { type: "tel", inputmode: "numeric", autocomplete: "tel-national", maxlength: "10", placeholder: "98123 45678" }),
+    email: h("input", { class: "input", type: "email", inputmode: "email", autocomplete: "email", maxlength: "254",
+      autocapitalize: "none", spellcheck: "false", placeholder: "you@example.com" }),
     username: h("input", { class: "input", autocomplete: "username", maxlength: "24", autocapitalize: "none", spellcheck: "false" }),
     password: h("input", { type: "password", autocomplete: "new-password", maxlength: "128" }),
   };
@@ -28,6 +31,7 @@ export function render(root) {
 
   const form = h("form", { class: "stack", novalidate: true },
     field({ label: "Full name", id: "su-name", input: inputs.name, err: errs.name }),
+    field({ label: "Email (we send your one-time codes here)", id: "su-email", input: inputs.email, err: errs.email }),
     field({ label: "Mobile number", id: "su-phone", control: inputs.phone,
       input: h("div", { class: "input-wrap" }, h("span", { class: "prefix", text: "+91" }), inputs.phone), err: errs.phone }),
     field({ label: "Username", id: "su-username", input: inputs.username, err: errs.username }),
@@ -38,7 +42,7 @@ export function render(root) {
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     formError.textContent = "";
-    const values = { name: inputs.name.value, phone: inputs.phone.value.replace(/\D/g, ""),
+    const values = { name: inputs.name.value, phone: inputs.phone.value.replace(/\D/g, ""), email: inputs.email.value.trim(),
       username: inputs.username.value.trim().toLowerCase(), password: inputs.password.value };
     let ok = true;
     for (const [k, rule] of Object.entries(RULES)) {
@@ -49,7 +53,8 @@ export function render(root) {
     if (!ok) return;
     submit.disabled = true;
     try {
-      await api("POST", "/api/register", { name: values.name.trim(), phone: "+91" + values.phone, username: values.username,
+      await api("POST", "/api/register", { name: values.name.trim(), phone: "+91" + values.phone, email: values.email,
+        username: values.username,
         password: values.password, deviceId: currentDevice() });
       await refresh();
       go("setup");
@@ -62,7 +67,7 @@ export function render(root) {
   root.appendChild(h("div", { class: "page" },
     topbar({ back: () => go("welcome") }),
     h("h1", { text: "Open an account" }),
-    h("p", { class: "lede", text: "It takes about a minute. Use the mobile number your SMS codes should go to." }),
+    h("p", { class: "lede", text: "It takes about a minute. Use an email you can open on this phone: your one-time codes go there." }),
     form,
     h("p", { class: "muted center" }, "Already a customer? ", h("a", { class: "link", href: "#/signin", text: "Sign in" }))));
   inputs.name.focus();

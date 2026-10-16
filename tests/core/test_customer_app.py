@@ -23,6 +23,8 @@ PHONE_DEVICE = "device-phone-0001"
 LARGE = 20_000   # rupees: above the bank's LOW band, so the small-payment cap keeps the model's level
 LEVEL = {"now": "T1"}
 SENT: list[str] = []
+SENT_TO: list[dict] = []
+EMAIL = "asha.rao@example.com"
 
 
 @pytest.fixture(scope="module")
@@ -48,7 +50,7 @@ def scripted(monkeypatch):
                                                               "dimensionsUsed": [], "latencyMs": 1})
     monkeypatch.setattr(factors, "verify", lambda factor, **kw: FactorResult(
         factor=factor, status="PASSED", score=0.9, threshold=0.5))
-    monkeypatch.setattr(otp, "deliver", lambda contact, message: SENT.append(message) or "sms")
+    monkeypatch.setattr(otp, "deliver", lambda contact, message: SENT.append(message) or SENT_TO.append(contact) or "email")
 
 
 @pytest.fixture
@@ -57,7 +59,7 @@ def app(stack):
     client = TestClient(stack.bank.app)
     user = f"u{uuid.uuid4().hex[:8]}"
     r = client.post("/api/register", json={"username": user, "name": "Asha Rao", "password": "long-password-1",
-                                           "phone": "+919812345678", "deviceId": PHONE_DEVICE})
+                                           "phone": "+919812345678", "email": EMAIL, "deviceId": PHONE_DEVICE})
     assert r.status_code == 201
     client.post("/api/amfa/enrol").raise_for_status()
     amfa_user = stack.bank.CUSTOMERS[user]["amfaUser"]
@@ -298,7 +300,8 @@ def test_customers_cannot_touch_each_others_actions(stack, app):
     aid = act(app, "transfer", payeeRef="BEN-42", amountRupees=10).json()["action"]["id"]
     other = TestClient(stack.bank.app)
     other.post("/api/register", json={"username": f"o{uuid.uuid4().hex[:8]}", "name": "Other", "phone": "+919800000001",
-                                      "password": "long-password-1", "deviceId": "device-other-0003"})
+                                      "email": "other@example.com", "password": "long-password-1",
+                                      "deviceId": "device-other-0003"})
     for path in ("complete", "cancel", "report", "continue"):
         assert other.post(f"/api/actions/{aid}/{path}", json={}).status_code == 404
 
@@ -339,7 +342,7 @@ def test_the_verification_page_gets_the_theme_too(stack, app):
 def test_protection_level_counts_the_ways_to_confirm(stack, app):
     p = app.get("/api/me", params={"deviceId": PHONE_DEVICE}).json()["protection"]
     assert p["level"] == "Strong"
-    assert set(p["have"]) == {"SMS code", "Face", "Voice", "Typing"}
+    assert set(p["have"]) == {"Email code", "Face", "Voice", "Typing"}
     assert p["canAdd"] == ["Authenticator app"]
 
 
@@ -350,7 +353,7 @@ def test_a_closed_verification_can_be_continued(stack, app):
     url = app.post(f"/api/actions/{aid}/continue").json()["challengeUrl"]
     verify(stack, url)
     done = app.post(f"/api/actions/{aid}/complete").json()["action"]
-    assert done["status"] == "DONE" and done["confirmedWith"] == ["SMS code", "Typing"]
+    assert done["status"] == "DONE" and done["confirmedWith"] == ["Email code", "Typing"]
     assert done["payee"] == {"display": "V. Mehta ••4411", "initials": "VM"}
     assert app.post(f"/api/actions/{aid}/continue").status_code == 409
 
@@ -397,3 +400,30 @@ def test_bad_amounts_never_start_anything(stack, app):
         assert act(app, "transfer", payeeRef="BEN-42", amountRupees=amount).status_code == 422, amount
     over_limit = act(app, "transfer", payeeRef="BEN-42", amountRupees=2_00_001)
     assert over_limit.status_code == 422 and "daily limit" in over_limit.json()["detail"]
+
+
+def test_one_time_codes_go_to_the_customers_email(stack, app):
+    started = act(app, "transfer", payeeRef="BEN-42", amountRupees=10).json()
+    verify(stack, started["challengeUrl"])
+    assert SENT_TO[-1] == {"channel": "email", "to": EMAIL}
+    me = app.get("/api/me", params={"deviceId": PHONE_DEVICE}).json()
+    assert me["codeTo"] == "a***@example.com" and me["email"] == "a•••@example.com"
+
+
+def test_changing_the_email_moves_the_codes_to_the_new_address(stack, app):
+    started = act(app, "contact", field="email", value="asha.new@example.com").json()
+    verify(stack, started["challengeUrl"])
+    assert SENT_TO[-1]["to"] == EMAIL                    # the change itself is confirmed at the old address
+    app.post(f"/api/actions/{started['action']['id']}/complete").raise_for_status()
+    nxt = act(app, "transfer", payeeRef="BEN-42", amountRupees=10).json()
+    verify(stack, nxt["challengeUrl"])
+    assert SENT_TO[-1] == {"channel": "email", "to": "asha.new@example.com"}
+
+
+def test_sign_up_needs_a_real_email(stack):
+    client = TestClient(stack.bank.app)
+    for bad in ("", "not-an-email", "a@b"):
+        r = client.post("/api/register", json={"username": f"x{uuid.uuid4().hex[:8]}", "name": "Asha Rao", "email": bad,
+                                               "password": "long-password-1", "phone": "+919812345678",
+                                               "deviceId": "device-x-000001"})
+        assert r.status_code == 422, bad

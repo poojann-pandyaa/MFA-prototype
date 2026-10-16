@@ -119,6 +119,7 @@ class Register(BaseModel):
     name: str = Field(min_length=2, max_length=60, pattern=NAME)
     password: str = Field(min_length=8, max_length=128)
     phone: str = Field(pattern=PHONE)
+    email: str = Field(max_length=254, pattern=EMAIL)
     deviceId: str = Field(pattern=DEVICE_ID)
 
 
@@ -141,7 +142,7 @@ def register(body: Register, response: Response):
         now = time.time()
         CUSTOMERS[username] = {
             "ref": f"CUST-{username}", "name": body.name.strip(), "password": _ph.hash(body.password),
-            "phone": body.phone, "email": None, "balance": OPENING_BALANCE, "amfaUser": None,
+            "phone": body.phone, "email": body.email.strip().lower(), "balance": OPENING_BALANCE, "amfaUser": None,
             "dailyLimit": DEFAULT_DAILY_LIMIT, "sent": {"day": "", "minor": 0},
             "payees": {"BEN-42": {"name": "Vikram Mehta", "display": "V. Mehta ••4411", "createdAt": now - 240 * 86400}},
             # the device the account was opened on is trusted; any other one must be verified first
@@ -184,15 +185,31 @@ def initials(display: str) -> str:
     return "".join(w[0] for w in words[:2]).upper() or "?"
 
 
-# the ways a customer can confirm it's them; a code by SMS or an authenticator app counts once
-METHODS = [("SMS code", lambda e: bool(e.get("OTP_DELIVERY") or e.get("OTP_TOTP"))),
+def code_contact(c: dict) -> dict:
+    """Where AMFA sends this customer's one-time codes: their email, or their mobile for accounts
+    opened before email was asked for."""
+    return {"channel": "email", "to": c["email"]} if c.get("email") else {"channel": "sms", "to": c["phone"]}
+
+
+def code_label(c: dict) -> str:
+    return "Email code" if c.get("email") else "SMS code"
+
+
+def code_to(c: dict) -> str:
+    to = code_contact(c)["to"]
+    name, _, dom = to.partition("@")
+    return f"{name[:1]}***@{dom}" if dom else f"••{to[-4:]}"
+
+
+# the ways a customer can confirm it's them; a one-time code (email, SMS or authenticator app) counts once
+METHODS = [("code", lambda e: bool(e.get("OTP_DELIVERY") or e.get("OTP_TOTP"))),
            ("Face", lambda e: e.get("FACE") == "ENROLLED"),
            ("Voice", lambda e: e.get("VOICE") == "ENROLLED"),
            ("Typing", lambda e: e.get("UEBA") == "ENROLLED")]
 
 
-def protection(enrolled: dict) -> dict:
-    have = [name for name, on in METHODS if on(enrolled)]
+def protection(enrolled: dict, code_name: str = "SMS code") -> dict:
+    have = [code_name if name == "code" else name for name, on in METHODS if on(enrolled)]
     can_add = [name for name, on in METHODS[1:] if not on(enrolled)]
     if not enrolled.get("OTP_TOTP"):
         can_add.append("Authenticator app")
@@ -223,7 +240,8 @@ def me(request: Request, deviceId: str = ""):
     if c["amfaUser"]:
         enrolled = AMFA.request("GET", f"/v1/users/{c['amfaUser']}")["enrollment"]
     return {"name": c["name"], "ref": c["ref"], "balance": c["balance"], "enrolled": enrolled,
-            "protection": protection(enrolled or {}), "frozen": c.get("frozen", False),
+            "protection": protection(enrolled or {}, code_label(c)), "frozen": c.get("frozen", False),
+            "codeTo": code_to(c),
             "dailyLimit": c["dailyLimit"], "sentToday": sent_today(c),
             "phone": _mask(c["phone"]), "email": _mask(c["email"]),
             "deviceTrusted": deviceId in c["devices"], "devices": len(c["devices"]), "demoTools": DEMO_TOOLS,
@@ -245,7 +263,7 @@ def enrol(request: Request, body: Optional[Enrol] = None):
     c = customer(request)
     with _lock:
         if not c["amfaUser"]:
-            c["amfaUser"] = AMFA.create_user(c["ref"], contact={"channel": "sms", "to": c["phone"]})["id"]
+            c["amfaUser"] = AMFA.create_user(c["ref"], contact=code_contact(c))["id"]
             _save()
     factors = (body or Enrol()).factors
     return {"url": _embed(AMFA.enrollment_link(c["amfaUser"], factors=factors)["url"])}
@@ -378,6 +396,8 @@ def start_contact(c: dict, b: Contact) -> dict:
 def apply_contact(c: dict, a: dict) -> None:
     c[a["params"]["field"]] = a["params"]["value"]
     c["events"]["contactChangedAt"] = time.time()
+    if c["amfaUser"]:   # one-time codes follow the customer to their new address
+        AMFA.request("PATCH", f"/v1/users/{c['amfaUser']}", {"contact": code_contact(c)})
 
 
 def start_password(c: dict, b: Password) -> dict:
@@ -537,7 +557,8 @@ def settle(c: dict, a: dict) -> dict:
             return a
         problem = KINDS[a["kind"]].apply(c, a)
         a["status"], a["detail"] = ("FAILED", problem) if problem else ("DONE", None)
-        a["confirmedWith"] = [AMR_NAMES.get(m, m) for m in result["claims"].get("amr", [])]
+        names = {**AMR_NAMES, "otp": code_label(c)}
+        a["confirmedWith"] = [names.get(m, m) for m in result["claims"].get("amr", [])]
         _save()
     return a
 
