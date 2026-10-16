@@ -79,7 +79,7 @@ The model alone isn't enough, because a model can be wrong or be fooled. Rules a
 
 **The flow we chose.** The model grades the request on a scale from T0 (very ordinary) to T4 (severe). Each grade maps to a set of checks, from just the code up to everything. Policy and regulation then raise (never lower) the set if it falls short of their floors. Checks the customer can't do are replaced or escalated (see 2.5).
 
-**An optional AI helper, with a one-way rule.** The platform can optionally let an AI assistant suggest *extra* checks. The rule is that it may only **add** checks, never remove any the rules already committed. If it ever tried to drop one, the system treats that as an error. This lets us experiment with smarter suggestions without any risk of weakening protection. In the demo this helper is switched off.
+**An optional AI helper, with a one-way rule.** The platform can optionally let an AI assistant suggest *extra* checks. The rule is that it may only **add** checks, never remove any the rules already committed. If it ever tried to drop one, the system treats that as an error. This lets us experiment with smarter suggestions without any risk of weakening protection. In the demo it is switched on, using a small AI model that runs on the same machine (see D33).
 
 **What if the model can't give an answer?** Principle 3: fail safe. No model, a broken model, or missing information means the request is treated as severe and goes to review, not waved through.
 
@@ -500,6 +500,16 @@ Every significant choice, in the order it was made. Each entry says **what** was
 ### D32. This documentation stays high level
 - **Decision:** `flow.md` and `decision.md` explain the system and the reasoning; exact thresholds, tuning values and detection details are left out on purpose.
 - **Why:** these documents may be shared widely. Precise numbers about what triggers extra checks, how many flags cause a lock, or which warning signs matter would help someone trying to get around the controls. The exact values live in the bank's policy and the code, where access is controlled.
+
+---
+
+## AI helper
+
+### D33. Switch on the existing AI helper that suggests extra checks, using a local model
+- **Decision:** the helper that can suggest additional checks for a request is on in the demo. It uses a small AI model that runs on the same machine, so no customer data leaves it and there is no usage cost. A review-assistant agent was discussed and postponed.
+- **Why:** the helper already existed and is safe by design: it can only *add* checks, never remove any, its answer must fit a fixed format, and it never sees customer-typed text such as payee names. If it is slow or wrong the system simply carries on without it. Turning it on gives the demo a real "smarter than fixed rules" step with almost no new risk.
+- **Alternatives:** a hosted Claude model (better reasoning, but case data leaves the machine and it needs an API key); leaving it off.
+- **Cost:** a 2 GB model file and a few seconds' extra start-up. In a check, it answers in about a second. A small local model is less capable than a large hosted one, which is acceptable here because it only ever makes checks stricter.
 
 ---
 
