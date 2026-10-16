@@ -80,6 +80,7 @@
       return "The camera picture is completely dark. Open the privacy shutter or press your laptop's camera key, " + "turn on a light, or choose another camera below.";
     }
     if (name === "NoPicture") return "The camera opened but isn't sending a picture. Choose another camera below, or press Try again.";
+    if (name === "CameraStalled") return "Your camera stopped sending new pictures. Move to brighter light, keep this page open, and press Try again.";
     if (name === "PolicyBlocked") {
       return "Your bank's page doesn't allow the " + dev + " here. (For the bank: the frame needs allow=\"camera; microphone\".)";
     }

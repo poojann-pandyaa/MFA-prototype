@@ -205,7 +205,15 @@
         panel.appendChild(problem);
         prompt.textContent = cues[0];
         face.setProgress(0);
-      }, fail);
+      }, function(err) {
+        if (err.name !== "CameraStalled") return fail(err);
+        UI.busy(btn, false, "Try again");   // nothing was sent: the camera stopped, so let them retry
+        problem = UI.notice("bad", UI.mediaErrorText(err, "camera"));
+        panel.appendChild(problem);
+        prompt.textContent = cues[0];
+        face.setArrow(null);
+        face.setProgress(0);
+      });
     });
   }
   function voiceStep() {

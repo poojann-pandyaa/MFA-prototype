@@ -29,6 +29,7 @@ MAX_OTP_SENDS = 3
 # compares the first and last 3 frames, so the customer must have finished turning before the end
 FACE_FRAMES = 20
 PAD_FLAGS_BEFORE_BLOCK = 2
+SPOOF_ATTEMPTS_BEFORE_LOCK = 3
 VOICE_WORDS = ["river", "maple", "orbit", "violet", "copper", "harbor", "falcon", "meadow",
                "silver", "canyon", "lantern", "summit", "willow", "ember", "island", "garden"]
 
@@ -287,10 +288,19 @@ def submit(s, *, sess: db.AuthSession, customer: db.Customer, txn: db.Transactio
         else:
             item["status"] = FAILED
     elif status == SPOOF_DETECTED:
-        item["status"] = SPOOF_DETECTED
-        for other in checklist:
-            if other["status"] == "PENDING":
-                other["status"] = "NOT_ATTEMPTED"
+        # A genuine customer can trip a spoof check (a stalled camera, bad light), so the first ones only
+        # cost a retry; the third in a session ends it and locks the customer pending review.
+        spoofs = s.execute(select(func.count()).select_from(db.Attempt).where(
+            db.Attempt.session_id == sess.id, db.Attempt.status == SPOOF_DETECTED)).scalar_one()
+        if spoofs < SPOOF_ATTEMPTS_BEFORE_LOCK:
+            item["status"] = "PENDING"
+            _event(s, sess, "MEDIUM", "PRESENTATION_ATTACK_SUSPECTED",
+                   f"{factor}: {res.get('failureReason') or 'spoof'} (attempt {spoofs} of {SPOOF_ATTEMPTS_BEFORE_LOCK}); retry allowed")
+        else:
+            item["status"] = SPOOF_DETECTED
+            for other in checklist:
+                if other["status"] == "PENDING":
+                    other["status"] = "NOT_ATTEMPTED"
     elif status in (INSUFFICIENT_DATA, UNAVAILABLE):
         item["status"] = status
         if status == UNAVAILABLE:

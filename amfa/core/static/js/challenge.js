@@ -215,6 +215,12 @@
         submit(ch, {
           frames: frames.concat(f)
         }, btn);
+      }, function(err) {   // the camera stalled: nothing was sent, so let the customer try again
+        face.setArrow(null);
+        face.setProgress(0);
+        prompt.textContent = "Look straight at the camera";
+        UI.busy(btn, false, "Try again");
+        panel.insertBefore(UI.notice("bad", UI.mediaErrorText(err, "camera")), btn);
       });
     });
   }

@@ -514,13 +514,40 @@
   };
   // onTick(i) runs before frame i; it may return a number of ms to wait before that frame is taken,
   // so a customer shown a new cue has time to follow it before the picture.
+  // Many phone cameras slow to 7-10 frames a second in ordinary light, so two captures can land on the
+  // same camera frame. The face service rejects a burst with repeated frames as a replay attack (and locks
+  // the customer), so never send a repeat: wait for the camera's next frame. A camera that stops sending
+  // new pictures gives a CameraStalled error the page can show, instead of a burst that looks like an attack.
   Camera.prototype.burst = function(n, intervalMs, onTick) {
-    var self = this, frames = [];
+    var self = this, frames = [], last = null;
+    function nextVideoFrame() {
+      var v = self.video;
+      return new Promise(function(r) {
+        var done = false, go = function() {
+          if (!done) {
+            done = true;
+            r();
+          }
+        };
+        if (v && v.requestVideoFrameCallback) v.requestVideoFrameCallback(go);
+        setTimeout(go, v && v.requestVideoFrameCallback ? 120 : 40);
+      });
+    }
+    function fresh() {
+      var deadline = Date.now() + 1500;
+      return function attempt() {
+        var f = self.frame();
+        if (f !== last) return Promise.resolve(f);
+        if (Date.now() > deadline) return Promise.reject(mediaError("CameraStalled"));
+        return nextVideoFrame().then(attempt);
+      }();
+    }
     function step(i) {
       if (i >= n) return Promise.resolve(frames);
       var lead = onTick ? onTick(i) : 0;
-      return sleep(lead || 0).then(function() {
-        frames.push(self.frame());
+      return sleep(lead || 0).then(fresh).then(function(f) {
+        last = f;
+        frames.push(f);
         return i + 1 < n ? sleep(intervalMs) : null;
       }).then(function() {
         return step(i + 1);

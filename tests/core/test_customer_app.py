@@ -221,6 +221,51 @@ def test_a_held_request_can_be_approved_by_two_reviewers(stack, app):
     assert done["balance"] == before - LARGE * 100
 
 
+def _face_results(monkeypatch, statuses):
+    """FACE answers with `statuses` in turn (then keeps the last one); every other check passes."""
+    seq = iter(statuses)
+    last = {"s": statuses[-1]}
+
+    def verify_(factor, **kw):
+        if factor != "FACE":
+            return FactorResult(factor=factor, status="PASSED", score=0.9, threshold=0.5)
+        last["s"] = next(seq, last["s"])
+        reason = "REPLAY_DUPLICATE_FRAMES" if last["s"] == "SPOOF_DETECTED" else None
+        return FactorResult(factor=factor, status=last["s"], score=0.9, threshold=0.5, failureReason=reason)
+    monkeypatch.setattr(factors, "verify", verify_)
+
+
+def _customer_status(stack, app):
+    with db.session() as s:
+        return s.get(db.Customer, stack.bank.CUSTOMERS[app.user]["amfaUser"]).status
+
+
+def test_a_face_flagged_as_an_attack_twice_can_still_pass_on_the_third_try(stack, app, monkeypatch):
+    _face_results(monkeypatch, ["SPOOF_DETECTED", "SPOOF_DETECTED", "PASSED"])
+    LEVEL["now"] = "T2"
+    started = act(app, "transfer", payeeRef="BEN-42", amountRupees=LARGE).json()
+    assert "face check" in started["action"]["checks"]
+    verify(stack, started["challengeUrl"])
+    done = app.post(f"/api/actions/{started['action']['id']}/complete").json()["action"]
+    assert done["status"] == "DONE"
+    assert _customer_status(stack, app) == "ACTIVE"
+
+
+def test_the_third_attack_flag_locks_the_customer(stack, app, monkeypatch):
+    _face_results(monkeypatch, ["SPOOF_DETECTED"])
+    LEVEL["now"] = "T2"
+    started = act(app, "transfer", payeeRef="BEN-42", amountRupees=LARGE).json()
+    verify(stack, started["challengeUrl"])
+    out = app.post(f"/api/actions/{started['action']['id']}/complete").json()["action"]
+    assert out["status"] == "DECLINED"
+    assert _customer_status(stack, app) == "LOCKED"
+    with db.session() as s:
+        txn = _txn(s, started["action"]["id"])
+        spoofs = s.execute(select(db.Attempt).where(db.Attempt.session_id == txn.session_id,
+                                                    db.Attempt.status == "SPOOF_DETECTED")).scalars().all()
+        assert len(spoofs) == 3
+
+
 def test_a_rejected_review_is_declined_and_labelled(stack, app):
     action = held_after_checks(stack, app)
     with db.session() as s:
