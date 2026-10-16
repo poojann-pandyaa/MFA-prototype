@@ -120,8 +120,20 @@ def issue_challenge(s, sess: db.AuthSession, customer: db.Customer, txn: db.Tran
     params: dict = {}
     if factor == "OTP":
         cred = s.get(db.TotpCredential, customer.id)
+        sent = s.execute(select(db.OtpCode).where(
+            db.OtpCode.session_id == sess.id, db.OtpCode.consumed_at.is_(None),
+            db.OtpCode.expires_at > now + 10).order_by(db.OtpCode.created_at.desc())).scalars().first()
+        last = s.execute(select(db.Challenge).where(db.Challenge.session_id == sess.id, db.Challenge.factor == "OTP")
+                         .order_by(db.Challenge.expires_at.desc())).scalars().first()
         if cred is not None and cred.confirmed:
             params = {"mode": "totp", "digits": otp.DIGITS}
+        elif sent is not None and last is not None and last.params.get("mode") == "delivered":
+            # a retry after a wrong code: the code already sent still works, so don't send another
+            ch = db.Challenge(id=f"ch_{uuid.uuid4().hex[:20]}", session_id=sess.id, factor=factor,
+                              params=last.params, expires_at=sent.expires_at)
+            s.add(ch)
+            s.flush()
+            return _public_challenge(ch)
         else:
             sends = s.execute(select(func.count()).select_from(db.OtpCode).where(
                 db.OtpCode.session_id == sess.id)).scalar_one()
@@ -180,6 +192,9 @@ def resend_otp(s, sess: db.AuthSession, customer: db.Customer, txn: db.Transacti
     if sends >= MAX_OTP_SENDS:
         raise ApiError(429, "OTP_SEND_LIMIT", "too many codes requested for this session")
     ch.consumed_at = now
+    for old in s.execute(select(db.OtpCode).where(db.OtpCode.session_id == sess.id,
+                                                  db.OtpCode.consumed_at.is_(None))).scalars():
+        old.consumed_at = now                                        # earlier codes stop working
     s.flush()
 
 

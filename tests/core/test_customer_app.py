@@ -456,6 +456,35 @@ def test_a_code_can_be_resent_and_only_the_newest_one_works(stack, app, monkeypa
     assert verify(stack, started["challengeUrl"])["status"] == "VERIFIED"
 
 
+def test_a_wrong_code_can_be_retried_with_the_same_code(stack, app, monkeypatch):
+    started = act(app, "transfer", payeeRef="BEN-42", amountRupees=2500).json()
+    auth, ch = code_session(stack, started)
+    code, sends = re.match(r"(\d+)", SENT[-1]).group(1), len(SENT)
+    wrong = "000000" if code != "000000" else "111111"
+    out = stack.core.post("/c/v1/session/factors/OTP", headers=auth,
+                          json={"challengeId": ch["challengeId"], "payload": {"code": wrong}}).json()
+    assert out["result"]["retry"] and out["result"]["guidance"] == "That code is not valid. Check it and try again."
+    retry = out["state"]["challenge"]
+    assert retry["factor"] == "OTP" and len(SENT) == sends            # no new email: the same code still works
+    assert retry["expiresAt"] == ch["expiresAt"]                       # and the timer carries on
+    ok = stack.core.post("/c/v1/session/factors/OTP", headers=auth,
+                         json={"challengeId": retry["challengeId"], "payload": {"code": code}}).json()
+    assert ok["result"]["status"] == "PASSED"
+
+
+def test_a_resent_code_replaces_the_old_one(stack, app, monkeypatch):
+    monkeypatch.setattr(orchestrator, "OTP_RESEND_WAIT_S", 0)
+    started = act(app, "transfer", payeeRef="BEN-42", amountRupees=2500).json()
+    auth, _ = code_session(stack, started)
+    old = re.match(r"(\d+)", SENT[-1]).group(1)
+    ch = stack.core.post("/c/v1/session/otp/resend", headers=auth).json()["challenge"]
+    if re.match(r"(\d+)", SENT[-1]).group(1) == old:
+        return                                                         # one in a million: the same digits again
+    out = stack.core.post("/c/v1/session/factors/OTP", headers=auth,
+                          json={"challengeId": ch["challengeId"], "payload": {"code": old}}).json()
+    assert out["result"]["status"] == "PENDING" and out["result"]["retry"]
+
+
 def test_codes_stop_after_the_send_limit(stack, app, monkeypatch):
     monkeypatch.setattr(orchestrator, "OTP_RESEND_WAIT_S", 0)
     started = act(app, "transfer", payeeRef="BEN-42", amountRupees=2500).json()
