@@ -416,7 +416,7 @@ KINDS = {
 def public(a: dict) -> dict:
     """What the customer's app sees: never the risk score, threat level, AMFA's decision or identifiers."""
     out = {k: a.get(k) for k in ("id", "kind", "title", "amountMinor", "status", "detail", "createdAt",
-                                 "checks", "reason", "scamWarning", "reported")}
+                                 "checks", "reason", "scamWarning", "reviewAfter", "reported")}
     out["payee"] = {"display": a.get("payeeDisplay"), "initials": initials(a.get("payeeDisplay") or "")}
     out["confirmedWith"] = a.get("confirmedWith", [])
     out["canContinue"] = a["status"] == "AWAITING_VERIFICATION" and bool(a.get("challengeUrl"))
@@ -492,6 +492,7 @@ def _start(k: Kind, kind: str, username: str, body: Device, request: Request) ->
     notice = txn["plan"].get("customerNotice") or {}
     a.update(amfaTxn=txn["transactionId"], checks=[CHECK_NAMES.get(f, f) for f in txn["plan"]["required"]],
              reason=notice.get("reason"), scamWarning=bool(notice.get("scamWarning")),
+             reviewAfter=bool(notice.get("underReview")),
              challengeUrl=_embed(txn["challengeUrl"]) if txn.get("challengeUrl") else None,
              decision=_decision(txn["plan"]))
     if txn["status"] == "REVIEW":

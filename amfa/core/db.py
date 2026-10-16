@@ -12,7 +12,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sess
 
 from amfa import config
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 def now() -> float:
@@ -269,6 +269,9 @@ class AuthSession(Base):
     device_bound: Mapped[bool] = mapped_column(Boolean, default=False)
     pad_flags: Mapped[int] = mapped_column(Integer, default=0)
     device_checked: Mapped[bool] = mapped_column(Boolean, default=False)
+    # set when the engine wants a person to decide: the customer still does the checks they can, then
+    # the request goes to the review queue for this reason instead of being authorised
+    review_reason: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
     resolution: Mapped[Optional[str]] = mapped_column(String(48), nullable=True)
     expires_at: Mapped[float] = mapped_column(Float)
     created_at: Mapped[float] = mapped_column(Float, default=now)
@@ -426,6 +429,7 @@ UPGRADES = [
     (3, "device", "platform", "VARCHAR(12) DEFAULT 'web'"),
     (3, "device", "sign_count", "BIGINT DEFAULT 0"),
     (4, "attempt", "detail", "JSON"),
+    (5, "auth_session", "review_reason", "VARCHAR(300)"),
 ]
 
 

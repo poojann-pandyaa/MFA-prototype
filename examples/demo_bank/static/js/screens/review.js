@@ -37,6 +37,8 @@ export async function render(root, [id]) {
         h("strong", { text: n ? `We'll confirm it's you in ${n} quick ${n === 1 ? "step" : "steps"}` : "We'll confirm it's you" })),
       h("div", { class: "chips" }, a.checks.map((c, i) => chip(`${i + 1} · ${c.charAt(0).toUpperCase() + c.slice(1)}`))),
       a.reason ? h("p", { class: "muted", text: a.reason }) : null),
+    a.reviewAfter ? note("brand", "shieldClock", h("strong", { text: "Then a quick check by our team" }),
+      "After these steps, someone at Demo Bank will look at this before it goes through. Your money stays in your account until then.") : null,
     a.scamWarning ? note("warn", "warn", h("strong", { text: "Did someone ask you to make this payment?" }),
       "Demo Bank will never ask you to move money to keep it safe, to share a code, or to pay to receive a refund or prize.") : null,
     h("div", { class: "spacer" }),

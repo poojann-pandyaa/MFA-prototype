@@ -186,17 +186,43 @@ def test_risky_payments_warn_about_scams(stack, app):
     assert not act(app, "contact", field="phone", value="+919800000000").json()["action"]["scamWarning"]
 
 
-def test_severe_risk_waits_for_a_person_and_can_be_cancelled(stack, app):
+def held_after_checks(stack, app):
+    """A T4 request: the customer still does the checks they can, then it waits for a person."""
     LEVEL["now"] = "T4"
     started = act(app, "transfer", payeeRef="BEN-42", amountRupees=LARGE).json()
-    assert started["action"]["status"] == "UNDER_REVIEW" and started["challengeUrl"] is None
-    out = app.post(f"/api/actions/{started['action']['id']}/cancel").json()["action"]
+    assert started["action"]["status"] == "AWAITING_VERIFICATION" and started["challengeUrl"]
+    assert started["action"]["reviewAfter"]
+    verify(stack, started["challengeUrl"])
+    out = app.post(f"/api/actions/{started['action']['id']}/complete").json()["action"]
+    assert out["status"] == "UNDER_REVIEW"
+    return started["action"]
+
+
+def test_severe_risk_waits_for_a_person_after_the_checks_and_can_be_cancelled(stack, app):
+    action = held_after_checks(stack, app)
+    out = app.post(f"/api/actions/{action['id']}/cancel").json()["action"]
     assert out["status"] == "CANCELLED"
 
 
+def test_a_held_request_can_be_approved_by_two_reviewers(stack, app):
+    """Before, a request held for review never had a customer code in it, so it could only be rejected."""
+    before = balance(app)
+    action = held_after_checks(stack, app)
+    with db.session() as s:
+        txn = _txn(s, action["id"])
+        case = s.execute(select(db.ReviewCase).where(db.ReviewCase.transaction_id == txn.id)).scalar_one()
+        assert "T4" in case.reason
+        first = orchestrator.review_decision(s, case, approve=True, operator=SimpleNamespace(id="op_a"), note="called her back")
+        assert first["status"] == "AWAITING_SECOND_APPROVAL"
+        assert orchestrator.review_decision(s, case, approve=True, operator=SimpleNamespace(id="op_b"),
+                                            note="confirmed by phone")["proofIssued"]
+    done = app.post(f"/api/actions/{action['id']}/complete").json()
+    assert done["action"]["status"] == "DONE" and "Bank review" in done["action"]["confirmedWith"]
+    assert done["balance"] == before - LARGE * 100
+
+
 def test_a_rejected_review_is_declined_and_labelled(stack, app):
-    LEVEL["now"] = "T4"
-    action = act(app, "transfer", payeeRef="BEN-42", amountRupees=LARGE).json()["action"]
+    action = held_after_checks(stack, app)
     with db.session() as s:
         txn = _txn(s, action["id"])
         case = s.execute(select(db.ReviewCase).where(db.ReviewCase.transaction_id == txn.id)).scalar_one()

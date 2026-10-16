@@ -16,7 +16,7 @@ from amfa.common.web import ApiError
 from amfa.core import audit, db, factors, otp, proofs, webhooks
 from amfa.engine.agent import reassess
 from amfa.engine.availability import available
-from amfa.engine.context import Band, Context, Factor
+from amfa.engine.context import Band, Context, Factor, dynamic_factors
 from amfa.engine.policy import TenantPolicy
 
 log = logging.getLogger("amfa.orchestrator")
@@ -72,9 +72,17 @@ def create_session(s, *, tenant: db.Tenant, txn: db.Transaction, customer: db.Cu
         context=ctx.model_dump(mode="json"), risk_band=plan.riskBand.value,
         expires_at=time.time() + ttl)
     if plan.escalate == "MANUAL_REVIEW":
-        sess.status, sess.resolution = REVIEW, "PLAN_NOT_ASSEMBLABLE"
-        for item in sess.checklist:
-            item["status"] = "NOT_ATTEMPTED"
+        # A reviewer may only approve a session in which the customer passed a dynamic factor, so the
+        # customer still does every check that can run here first; only if none of them is dynamic does
+        # the request go straight to the queue (reject-only).
+        runnable = [f for f in plan.sequence() if available(f, ctx)]
+        if set(runnable) & set(dynamic_factors(ctx.org.permitted)):
+            sess.checklist = new_checklist(runnable)
+            sess.review_reason = (plan.escalateReason or "referred for review")[:300]
+        else:
+            sess.status, sess.resolution = REVIEW, "PLAN_NOT_ASSEMBLABLE"
+            for item in sess.checklist:
+                item["status"] = "NOT_ATTEMPTED"
     s.add(sess)
     s.flush()
     client_token = crypto.token("ct", 32)
@@ -383,8 +391,13 @@ def _has_device_key(s, customer: db.Customer, txn: db.Transaction) -> bool:
 
 def _resolve(s, sess, txn, customer, tenant, policy: TenantPolicy, verdict: str) -> None:
     now = time.time()
-    sess.status, sess.resolved_at = verdict, now
     passed = [i["factor"] for i in sess.checklist if i["status"] == PASSED]
+    if verdict == VERIFIED and sess.review_reason:   # checks done; a person decides, no proof yet
+        sess.status, sess.resolved_at, sess.resolution = REVIEW, now, "REVIEW_AFTER_CHECKS"
+        txn.updated_at = now
+        _open_review(s, sess, txn, f"{sess.review_reason}; customer passed {', '.join(passed)}")
+        return
+    sess.status, sess.resolved_at = verdict, now
     if verdict == VERIFIED:
         txn.status, txn.updated_at = "AUTHORIZED", now
         proof = proofs.issue(tenant_id=tenant.id, customer_ref=customer.external_ref, txn=txn,
