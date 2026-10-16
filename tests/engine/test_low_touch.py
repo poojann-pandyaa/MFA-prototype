@@ -200,6 +200,46 @@ def test_a_new_customer_still_gets_every_check_on_a_very_large_payment(model_say
     assert {Factor.FACE, Factor.VOICE} <= set(plan.required)
 
 
+class AlwaysAddsFace:
+    """A stand-in AI helper that asks for a face check whenever it is consulted."""
+    name = "fake"
+    consulted = 0
+
+    def system_prompt(self):
+        return "system"
+
+    def render(self, ctx, baseline):
+        return "prompt"
+
+    def propose(self, system, prompt):
+        type(self).consulted += 1
+        return '{"factors": ["FACE"], "reasoning": "looks new"}'
+
+
+def test_the_ai_helper_is_not_consulted_when_the_risk_is_already_low(model_says):
+    """It can only add friction, so at a low level there is nothing for it to improve."""
+    AlwaysAddsFace.consulted = 0
+    model_says("T1")
+    low = decide(ctx(new=False, exposure=Band.LOW, amount=Band.LOW), agent=AlwaysAddsFace(), features=CALM)
+    assert AlwaysAddsFace.consulted == 0 and Factor.FACE not in low.required
+    model_says("T2")
+    mid = decide(ctx(), agent=AlwaysAddsFace(), features=CALM)
+    assert AlwaysAddsFace.consulted == 1 and Factor.FACE in mid.required
+    AlwaysAddsFace.consulted = 0
+    model_says("T4")                                    # a relief already judged this ordinary: don't second-guess it
+    relieved = decide(ctx(exposure=Band.MEDIUM), agent=AlwaysAddsFace(), features=NEWBIE)
+    assert relieved.capReason and AlwaysAddsFace.consulted == 0
+    model_says("T2")                                    # and not for a customer with no history: its inputs are all "unfamiliar"
+    newbie = decide(ctx(exposure=Band.MEDIUM), agent=AlwaysAddsFace(), features=NEWBIE)
+    assert AlwaysAddsFace.consulted == 0 and Factor.FACE in newbie.required       # face is T2's own, not the helper's
+    assert Factor.VOICE not in newbie.required
+    AlwaysAddsFace.consulted = 0
+    model_says("T1")                                    # with low-touch off the helper is consulted as before
+    old = decide(ctx(new=False, exposure=Band.LOW, amount=Band.LOW, low_touch=False), agent=AlwaysAddsFace(),
+                 features=CALM)
+    assert AlwaysAddsFace.consulted == 1 and Factor.FACE in old.required
+
+
 def test_large_first_payments_always_carry_the_scam_warning(model_says):
     model_says("T1")
     plan = decide(ctx(new=True, exposure=Band.HIGH, amount=Band.HIGH), features=CALM)

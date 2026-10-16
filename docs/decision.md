@@ -574,6 +574,7 @@ Every significant choice, in the order it was made. Each entry says **what** was
 ### D38. A language model suggests extra checks but never waives or approves
 - **Decision:** the AI helper keeps its add-only role. Waiving checks and ending reviews is done by explainable rules.
 - **Why:** a language model can be talked into a mistake; a wrong waiver is the costly kind of error, while a wrong addition only costs a little friction.
+- **Where it is consulted:** only where it can help. Not when the risk is already low, not where a relief has already judged the request ordinary, and not for a customer with no history, because every signal it sees about a brand-new account reads "unfamiliar" and says nothing about fraud. In testing, the first version of this rule had the helper adding a face check to a ₹500 payment to an established payee for exactly that reason.
 
 ---
 

@@ -10,7 +10,8 @@ from .availability import apply_availability, apply_org_requirements, enforce_fl
 from .context import SELECTABLE, Band, Context, Plan, dynamic_factors
 from .rationale import counterfactual, reasoning
 from .risk import scorer
-from .risk.threat import BAND, RESPONSE, REVIEW_LEVEL, new_customer_relief, regular_payee_relief, small_payment_cap
+from .risk.threat import (BAND, COLD_START_PAYMENTS, RESPONSE, REVIEW_LEVEL, new_customer_relief,
+                          regular_payee_relief, small_payment_cap)
 from .rules import select_by_rules
 
 
@@ -61,6 +62,13 @@ def decide(ctx: Context, agent: Optional[AgentClient] = None, features: Optional
     addable = [f for f in SELECTABLE if f not in plan.required and available(f, ctx)]
     if agent is not None and (not addable or ctx.org.agentMaxAdditions == 0):
         plan.agentError = "skipped: nothing the agent could add"
+        agent = None
+    elif agent is not None and ctx.policy.lowTouch and (
+            plan.riskBand is Band.LOW or plan.capReason
+            or (features or {}).get("history_count", 99) < COLD_START_PAYMENTS):
+        # it can only add friction: not at a low level, not where a relief already judged the request ordinary,
+        # and not for a customer with no history (everything about them looks "unfamiliar")
+        plan.agentError = "skipped: low risk, judged ordinary or no history, and the helper can only add friction"
         agent = None
 
     if agent is not None:
