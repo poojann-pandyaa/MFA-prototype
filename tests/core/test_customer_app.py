@@ -145,8 +145,9 @@ def test_adding_a_payee_never_waits_for_a_person(stack, app):
     verify(stack, started["challengeUrl"])
     out = app.post(f"/api/actions/{started['action']['id']}/complete").json()["action"]
     assert out["status"] == "DONE"
+    list_payee_as_risky(stack, app)
     held = act(app, "transfer", payeeRef="BEN-42", amountRupees=LARGE).json()["action"]
-    assert held["reviewAfter"]                              # money still waits for a person at T4
+    assert held["reviewAfter"]                              # money to a risk-listed payee still waits for a person
 
 
 def _ref(ifsc, account):
@@ -202,9 +203,14 @@ def test_risky_payments_warn_about_scams(stack, app):
     assert not act(app, "contact", field="phone", value="+919800000000").json()["action"]["scamWarning"]
 
 
+def list_payee_as_risky(stack, app, ref="BEN-42"):
+    stack.bank.CUSTOMERS[app.user]["payees"][ref]["riskFlag"] = True
+
+
 def held_after_checks(stack, app):
-    """A T4 request: the customer still does the checks they can, then it waits for a person."""
+    """A payee on a risk list: the customer still does the checks they can, then it waits for a person."""
     LEVEL["now"] = "T4"
+    list_payee_as_risky(stack, app)
     started = act(app, "transfer", payeeRef="BEN-42", amountRupees=LARGE).json()
     assert started["action"]["status"] == "AWAITING_VERIFICATION" and started["challengeUrl"]
     assert started["action"]["reviewAfter"]
@@ -212,6 +218,28 @@ def held_after_checks(stack, app):
     out = app.post(f"/api/actions/{started['action']['id']}/complete").json()["action"]
     assert out["status"] == "UNDER_REVIEW"
     return started["action"]
+
+
+def test_the_highest_risk_level_alone_is_handled_without_a_person(stack, app):
+    """T4 used to mean a queue. Now it means every check the customer has, then the payment goes through."""
+    before = balance(app)
+    LEVEL["now"] = "T4"
+    started = act(app, "transfer", payeeRef="BEN-42", amountRupees=LARGE).json()
+    assert not started["action"]["reviewAfter"] and "face check" in started["action"]["checks"]
+    verify(stack, started["challengeUrl"])
+    done = app.post(f"/api/actions/{started['action']['id']}/complete").json()
+    assert done["action"]["status"] == "DONE" and done["balance"] == before - LARGE * 100
+
+
+def test_a_large_first_payment_carries_the_scam_warning_even_at_a_low_level(stack, app):
+    LEVEL["now"] = "T1"
+    first = act(app, "payee", name="Croma Electronics", account="123456780001", ifsc="HDFC0001234").json()
+    verify(stack, first["challengeUrl"])
+    app.post(f"/api/actions/{first['action']['id']}/complete").raise_for_status()
+    store = _ref("HDFC0001234", "123456780001")
+    tv = act(app, "transfer", payeeRef=store, amountRupees=150_000).json()["action"]   # a TV: large, first payment
+    assert tv["scamWarning"] and not tv["reviewAfter"]
+    assert not act(app, "transfer", payeeRef="BEN-42", amountRupees=10).json()["action"]["scamWarning"]
 
 
 def test_severe_risk_waits_for_a_person_after_the_checks_and_can_be_cancelled(stack, app):
@@ -227,7 +255,7 @@ def test_a_held_request_can_be_approved_by_two_reviewers(stack, app):
     with db.session() as s:
         txn = _txn(s, action["id"])
         case = s.execute(select(db.ReviewCase).where(db.ReviewCase.transaction_id == txn.id)).scalar_one()
-        assert "T4" in case.reason
+        assert "risk list" in case.reason
         first = orchestrator.review_decision(s, case, approve=True, operator=SimpleNamespace(id="op_a"), note="called her back")
         assert first["status"] == "AWAITING_SECOND_APPROVAL"
         assert orchestrator.review_decision(s, case, approve=True, operator=SimpleNamespace(id="op_b"),

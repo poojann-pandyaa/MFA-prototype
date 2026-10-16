@@ -107,15 +107,15 @@ The model alone isn't enough, because a model can be wrong or be fooled. Rules a
 
 **How we thought about it.** There are three honest answers: use an equivalent, ask for a different but similarly strong check, or involve a person. What is not honest is quietly skipping.
 
-**The flow we chose.**
-1. Use a **stand-in** where one exists: face and voice cover for each other, and typing can be covered by face or voice.
-2. If there is no stand-in and the risk is **high**, the request goes to **review** after the customer does the checks they can.
-3. If the risk is lower, the system proceeds with what is available, as long as the regulatory floor is still met.
-4. If even the floor can't be met, the request goes to review.
+**The flow we chose (revised; see 2.20 and D34).**
+1. Use a **stand-in** where one exists: face and voice cover for each other.
+2. A quiet, passive check (typing) that can't run at a low level is simply **dropped**, not swapped for a face scan; the legal minimum tops up anything that's still needed.
+3. If there is no stand-in, ask for **every check the customer does have**. The bank's own preference for more checks bends to what the customer has set up, as long as the **legal minimum** (two kinds of proof, one live) is still met.
+4. Only if even the legal minimum can't be met does the request go to a person.
 
-**Why.** Substituting keeps most customers moving; escalating only at high risk keeps the cost of a missing check proportionate. Never skipping keeps the system honest.
+**Why.** The first version sent high-risk requests with a missing check to review. Because new customers have only the email code and face set up, that sent far too many ordinary requests to staff, and it punished customers for something that isn't suspicious. Using everything they have is safer than skipping and kinder than queuing. Never silently skipping the legal minimum keeps the system honest.
 
-**What we gave up.** Thin accounts (only email and face) hit review more often at high risk. That is exactly why Security encourages adding more methods.
+**What we gave up.** A customer with only two methods set up gets fewer checks on a large payment than one with four. Security keeps encouraging more methods, and large first payments carry the scam warning to compensate.
 
 ---
 
@@ -200,7 +200,8 @@ The model alone isn't enough, because a model can be wrong or be fooled. Rules a
 
 **How we thought about it, and how it changed.**
 - *Version one:* a severe request went straight to the review queue. Problem: the customer had never been verified in that request, so reviewers had no proof the real customer was there, and the rules (rightly) forbid approving without a live check. Result: held requests could only ever be rejected, which was useless.
-- *Version two (chosen):* the customer **first does every check they can**, and only then does the request go to review. Reviewers now see a request where the customer has already proved presence, so approving it is possible and meaningful.
+- *Version two:* the customer **first does every check they can**, and only then does the request go to review. Reviewers now see a request where the customer has already proved presence, so approving it is possible and meaningful.
+- *Version three (current, see 2.20):* most of what used to be held is now settled **automatically** with the strongest checks the customer has. A person is called in only for the specific situations that automated checks can't settle. Everything below still applies to those cases.
 
 **Further safeguards.**
 - **Two different reviewers must approve.** One compromised or careless reviewer can't release a severe request alone.
@@ -307,6 +308,40 @@ The model alone isn't enough, because a model can be wrong or be fooled. Rules a
 
 ---
 
+## 2.20 Low-touch decisions: a person only when one is really needed
+
+**The goal we were given.** Least possible human involvement, with a smart system choosing which checks to apply and when, and a person only where necessary, while still stopping fraud and scams and adding as little friction as possible. Not too strict for small amounts, regular payees, or a new payee that is simply a shop.
+
+**What we measured first.** Before changing anything we scored realistic situations with the real risk model. Two things stood out:
+- The model was **not** the main cause of strictness. A legitimate big purchase at a new shop, on the customer's usual phone, already landed at a moderate level (code, typing, face).
+- Strictness came from the rules around the model: "highest level means a person", "a check not set up at high risk means a person", and a bank rule wanting three checks that a new customer, who only has two set up, could never meet. Those sent ordinary new customers to the dev team for things like changing a password.
+- Separately, the model was **too relaxed on scam and takeover shapes**: a SIM swap followed by a big payment to a new payee still scored as moderate.
+
+**How we thought about it.** Ask, for each reason a request used to go to a person, "can a stronger automated check settle this?"
+- *High level, risk-model outage, or a check not set up:* yes. Ask for everything the customer has. Biometrics and a code settle whether the person is the customer.
+- *A bank preference for more checks than the customer has:* the **legal minimum** is the fixed point; the preference bends.
+- *A payee already on a risk list, a takeover followed by a cash-out, a fake-face attempt with repeated failures, a watchlisted customer:* no. These are signs about the situation, not about who is at the camera, and a checked customer can still be the victim or the accomplice. A person looks.
+
+**Where the AI fits.** Three layers, each doing what it is good at:
+1. **A trained risk model** judges how unusual a request is for this customer and for fraud in general.
+2. **A small language model** can add further checks in grey areas (it can never remove one, and never sees customer-typed text).
+3. **A rules layer** decides what a person must see, keeps the legal minimum, and explains the decision. We deliberately did not let a language model *approve* or *waive* things: it is the layer most open to being talked into a mistake, and a wrong waiver is the costly kind of error.
+
+**The shaping of checks by situation.**
+- Usual, small, or regular → just a code, or a code plus the invisible typing check.
+- Unusual or first-time → add the face check.
+- Exceptionally large first payment (a big electronics purchase, say) → also voice, when the customer has voice set up. Biometrics prove who is there; they cannot prove the customer isn't being coached, so these payments also always show the scam warning.
+- A new customer with almost no history → ordinary payments get a moderate level, because with no routine, everything is "unfamiliar". Very large payments keep the model's full level.
+
+**The honest limit.** Face and voice stop *someone else* using the account. They don't stop a genuine customer from being tricked into paying. For that the system has the scam warning, the extra care on large first payments, and the review path for hard signs. Stronger protection against coached payments (a short cooling-off wait for large first payments, or confirming the payee's registered name) would be the next step and is not built.
+
+**What we gave up.**
+- Some customers with few methods set up get fewer checks on a large payment than a customer with all four. We accept this and keep nudging people to add methods.
+- Fewer people review fewer requests, so a request that really is fraud has to be caught by the model and the hold signs rather than by a human's second look. The hold list is deliberately short and specific; it can be widened if reviewers see misses.
+- The bank can switch the whole behaviour off in its policy to return to the older, stricter rules.
+
+---
+
 # Part 3. Decision log
 
 Every significant choice, in the order it was made. Each entry says **what** was decided, **why**, **what else was possible**, and **what it costs**. Part 2 gives the longer reasoning; this is the quick reference.
@@ -376,10 +411,10 @@ Every significant choice, in the order it was made. Each entry says **what** was
 - **Decision:** running out of tries ends *that request*. Locking is reserved for suspected fake faces or recordings.
 - **Why:** an honest customer who mistypes a code three times shouldn't be locked out of their money. Locks are for suspected attacks.
 
-### D12. A check that isn't set up is replaced or, at high risk, sent for review
-- **Decision:** if a required check can't run, a stand-in is used (face and voice cover for each other; typing can be covered by either). If there's no stand-in and the risk is high, the request goes to review.
+### D12. A check that isn't set up is replaced where possible *(partly superseded by D34)*
+- **Decision:** if a required check can't run, a stand-in is used (face and voice cover for each other). Originally, with no stand-in and a high risk, the request went to review; D34 replaced that with "use every check the customer has".
 - **Why:** quietly skipping a check at high risk would defeat the system. Substituting keeps most customers moving.
-- **Cost:** thin accounts hit review more. The answer is encouraging customers to add more methods.
+- **Cost:** a customer with fewer methods set up gets fewer checks. The answer is encouraging customers to add more methods.
 
 ---
 
@@ -513,10 +548,40 @@ Every significant choice, in the order it was made. Each entry says **what** was
 
 ---
 
+## Low-touch decisions
+
+### D34. A high risk level, a model outage, or a check not set up no longer sends a request to a person
+- **Decision:** these are answered with every automated check the customer has. Only the regulatory minimum is non-negotiable; the bank's own higher preference bends to what the customer has set up.
+- **Why:** these reasons said nothing about fraud; they said the customer was new or thinly set up. Queuing them created staff work and blocked honest customers. A code plus face (plus voice or typing where set up) settles whether it is the customer.
+- **Alternatives:** keep review at the highest level only; require the customer to set up more methods on the spot (better UX but a bigger change, not built).
+- **Cost:** fewer human second looks. Mitigated by D35.
+
+### D35. A short, specific list of situations still goes to a person
+- **Decision:** a payee on a risk list; a SIM, contact or password change very recently followed by a payment to a new payee; a recent fake-face attempt with repeated failed checks; a customer the bank has watchlisted; a request whose legal minimum can't be met; a trusted phone that fails to prove itself with nothing left to try; and a suspected fake face, which also locks the account.
+- **Why:** these are about the situation, not the person at the camera, so more automated checks don't resolve them.
+- **Cost:** the list is judgement; it is easy to widen or narrow it.
+
+### D36. Relief for ordinary traffic: regular payees, new customers, tiny payments
+- **Decision:** a regular payee at the usual amount stays light even at a medium amount; a new customer's ordinary payments get a moderate level instead of "stranger"; payments below a small ceiling to existing payees can need only the emailed code (the bank turned this on for demo); a quiet check that can't run at a low level is dropped, not swapped for a face scan.
+- **Why:** friction should follow danger. A new customer's "everything is unfamiliar" is not evidence. All reliefs switch off on any warning sign, and none applies to very large payments or to account changes.
+- **Cost:** a patient fraudster could try to look ordinary; the daily limit and warning signs bound that.
+
+### D37. Large first payments carry the scam warning and, where set up, a second biometric
+- **Decision:** a very large first payment to a new payee always shows the scam warning, and asks for voice as well as face when the customer has voice set up.
+- **Why:** biometrics prove who is at the camera, not that they're acting freely. The warning addresses coached payments; the second biometric strengthens the takeover case for the highest amounts.
+- **Cost:** a little extra friction on the rare, largest payments, which is what the goal asks for.
+
+### D38. A language model suggests extra checks but never waives or approves
+- **Decision:** the AI helper keeps its add-only role. Waiving checks and ending reviews is done by explainable rules.
+- **Why:** a language model can be talked into a mistake; a wrong waiver is the costly kind of error, while a wrong addition only costs a little friction.
+
+---
+
 ## Open items and things to know
 
 - **Existing phone-only accounts** can't receive codes until they add an email (Security → Mobile and email).
 - **The mail password** should be revoked once testing is done.
 - **Customers with only the basic set-up** face more extra checks on risky actions; adding voice and typing reduces this.
 - **The public link is temporary** and changes when restarted.
-- **Not yet done:** a production-grade SMS or email provider, and hardware-backed device proofs (which need a native app rather than a web app).
+- **Not yet done:** a production-grade SMS or email provider, hardware-backed device proofs (which need a native app rather than a web app), and extra protection against coached payments such as a cooling-off wait or confirming the payee's registered name.
+- **Watch the held list.** With fewer requests reaching people, the first things to check are the requests staff do see and any fraud that got through; adjust the hold list from that evidence.

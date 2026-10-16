@@ -86,7 +86,10 @@ def test_a_hard_signal_beats_a_small_amount_end_to_end(model_says):
 def test_model_failure_still_fails_closed_even_for_a_small_payment(monkeypatch):
     monkeypatch.setattr(scorer, "active", lambda: (_ for _ in ()).throw(scorer.RiskModelError("gone")))
     plan = decide(ctx(), features=USUAL)
-    assert plan.escalate == "MANUAL_REVIEW" and plan.threatLevel == "T4" and plan.capReason is None
+    assert plan.threatLevel == "T4" and plan.capReason is None and Factor.FACE in plan.required
+    assert plan.escalate is None                      # low-touch: every automated check, not a person
+    strict = decide(ctx().model_copy(update={"policy": Policy(smallPaymentCap=True, lowTouch=False)}), features=USUAL)
+    assert strict.escalate == "MANUAL_REVIEW"
 
 
 def test_levels_are_ordered():

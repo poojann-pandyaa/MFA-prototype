@@ -65,7 +65,16 @@ The bank sends AMFA the *facts* of the request (what kind, how much, to whom, fr
 
 The strictest of these wins.
 
-**Small payments stay light.** A small payment that looks normal for that customer is kept at a lighter level so everyday spending isn't annoying. This relief is switched off the moment there are real warning signs (recent security incidents, a risk-listed payee, recent changes to the account, and so on). Anything that isn't a payment, like adding a payee or changing a setting, never gets this relief.
+**Ordinary payments stay light.** Three kinds of relief keep everyday spending from being annoying, and all of them switch off the moment there are real warning signs (recent security incidents, a risk-listed payee, recent changes to the account, and so on):
+- **Small, usual payments** are held at a lighter level.
+- **Regular payees.** A payee the customer has paid many times over a good while, at about the usual amount, from a phone they use, stays light even at a medium amount.
+- **New customers.** With almost no payment history, every payee, phone and time of day looks "unfamiliar", which says nothing about fraud. A new customer's ordinary payments are kept at a moderate level instead of being treated as a stranger's. Very large payments never get this.
+
+Very small payments to payees the customer already has can need just the emailed code, where the bank has turned that exemption on.
+
+Anything that isn't a payment, like adding a payee or changing a setting, never gets these reliefs.
+
+**Large first payments get extra care of a different kind.** Face and voice prove the person at the camera is the customer; they can't tell that the customer is being talked into paying a scammer. So a large first payment to a new payee always shows the scam warning, and asks for a second biometric (voice) when the customer has one set up.
 
 ### Step 4. Checks are chosen
 Calmer levels mean fewer checks; severe levels mean all of them:
@@ -76,9 +85,11 @@ Calmer levels mean fewer checks; severe levels mean all of them:
 | T1 | Ordinary but worth a light check | Email code + typing behaviour |
 | T2 | Somewhat unusual | Adds a face check, plus a scam warning |
 | T3 | Unusual | Adds a voice check |
-| T4 | Severe | Everything, then a person must look at it |
+| T4 | Severe | Everything the customer has set up, all handled automatically |
 
-If a check the customer *hasn't set up* is needed, AMFA tries a stand-in (face and voice can cover for each other; typing can be covered by face or voice). If no stand-in exists, see "Held requests" below.
+A person is **not** called in just because the level is high. The system asks for the strongest checks it can, and only brings in a person for the specific situations listed in "Held requests" below.
+
+If a check the customer *hasn't set up* is needed, AMFA tries a stand-in (face and voice can cover for each other). If the quiet typing check isn't available at a low level, it is simply skipped rather than swapped for a face scan. If the bank would prefer more checks than the customer has set up, the customer is asked for every check they do have, as long as the legal minimum (two kinds of proof, one of them live) is met. The customer is never queued for a person just because they haven't set up voice or typing.
 
 ### Step 5. The customer does the checks
 The app opens AMFA's check screens **inside the bank app**, in the bank's colours, so it feels like one app. The customer sees what they are approving (amount and payee) at the top the whole time.
@@ -105,14 +116,17 @@ The activity list then shows the result along with what the customer confirmed i
 
 ## 5. Held requests: when a person must look
 
-Some requests are held for the dev team. They arise when:
-- the threat level is **T4** (severe);
-- the risk is high *and* a needed check can't run (and has no stand-in);
-- the risk model itself is unavailable (AMFA plays safe);
-- a check service is down with no replacement;
-- a "trusted" device fails to prove it really is that device.
+The goal is **as little human involvement as possible**. A high threat level, a risk model outage, or a check the customer hasn't set up are all answered with the strongest automated checks, not with a queue. A person is called in only for what automated checks cannot settle:
+- **a payee on a risk list**;
+- **a suspected account takeover followed by a cash-out**: the SIM, contact details or password changed very recently, and then money going to a new payee;
+- **a recent suspected fake-face attempt together with repeated failed checks**;
+- **a customer the bank has put on its watchlist**;
+- **a request that can't reach even the legal minimum** with the checks the customer has set up, or a trusted phone that fails to prove it really is that phone and has no other check to fall back on;
+- **a suspected fake face or recording**, which also locks the account (see section 6).
 
-**Exception:** adding a payee is never held for a person. It moves no money, and the first payment to that payee is risk-checked on its own.
+**Exception:** adding a payee is never held for a person for risk reasons alone. It moves no money, and the first payment to that payee is risk-checked on its own. (A payee that is itself on a risk list is still held.)
+
+The bank can turn this "low-touch" behaviour off in its policy, which brings back the older, stricter rule that a high level or a missing check goes to a person.
 
 **How a held request proceeds:**
 1. The customer first does every check they *can* do. This matters, because reviewers need proof the real customer is there.

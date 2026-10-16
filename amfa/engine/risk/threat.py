@@ -51,6 +51,37 @@ def hard_signals(f: dict) -> list[str]:
     return [name for name, hit in checks.items() if hit]
 
 
+REGULAR_MIN_PAYMENTS = 3       # a payee is "regular" after this many verified payments...
+REGULAR_MIN_AGE_DAYS = 30      # ...over at least this long
+REGULAR_USUAL_RATIO = 3.0      # and a payment is usual for it when under this multiple of what's normally paid
+
+
+def regular_payee_relief(level: str, f: dict) -> tuple[str, Optional[str]]:
+    """Mid-sized payments to a payee the customer has long paid, at about the usual amount, from a device
+    they use, with no warning sign: kept at the light level. Same shape as small_payment_cap."""
+    ratio = f.get("amount_vs_payee_avg")
+    regular = ((f.get("payee_seen") or 0) >= REGULAR_MIN_PAYMENTS and (f.get("payee_age_days") or 0) >= REGULAR_MIN_AGE_DAYS
+               and ratio is not None and ratio < REGULAR_USUAL_RATIO and (f.get("device_seen") or 0) > 0)
+    if not regular or LEVELS.index(level) <= LEVELS.index(CAP_LEVEL) or hard_signals(f):
+        return level, None
+    return CAP_LEVEL, f"regular payee at the usual amount, kept at {CAP_LEVEL}"
+
+
+COLD_START_PAYMENTS = 5        # fewer verified payments than this and the customer has no routine to deviate from
+COLD_START_LEVEL = "T2"        # code + typing + face
+
+
+def new_customer_relief(level: str, f: dict) -> tuple[str, Optional[str]]:
+    """With almost no history, every payee, device and hour is unfamiliar, which says nothing about fraud.
+    Payments (not account changes) from a clean record are held at COLD_START_LEVEL; the caller keeps very
+    large amounts out of this. Same shape as small_payment_cap."""
+    seen = f.get("history_count")     # unknown is not the same as none: no relief without knowing
+    if (f.get("amount_log") is None or seen is None or seen >= COLD_START_PAYMENTS
+            or LEVELS.index(level) <= LEVELS.index(COLD_START_LEVEL) or hard_signals(f)):
+        return level, None
+    return COLD_START_LEVEL, f"new customer with too little history to judge, kept at {COLD_START_LEVEL}"
+
+
 def small_payment_cap(level: str, f: dict) -> tuple[str, Optional[str]]:
     """The level to use for a payment already known to be small (the caller checks the amount line).
     Returns (level, why it was lowered or None). Never raises a level, and never lowers one when a

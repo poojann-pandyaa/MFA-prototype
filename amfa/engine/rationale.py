@@ -80,8 +80,8 @@ def customer_notice(plan: Plan, txn_type: TxnType) -> dict:
     why = list(dict.fromkeys(CUSTOMER_REASONS[k] for k, _ in plan.riskReasons if k in CUSTOMER_REASONS))
     reason = ("We need a quick extra check because " + " and ".join(why[:2]) + "." if why
               else "This is a routine check to keep your account safe.")
-    warn = (txn_type in MONEY_TYPES and plan.threatLevel is not None
-            and plan.threatLevel >= SCAM_WARNING_FROM)
+    warn = txn_type in MONEY_TYPES and (plan.scamRisk or (plan.threatLevel is not None
+                                                          and plan.threatLevel >= SCAM_WARNING_FROM))
     return {"reason": reason, "scamWarning": warn, "underReview": plan.escalate == "MANUAL_REVIEW"}
 
 
@@ -111,6 +111,10 @@ def reasoning(ctx: Context, plan: Plan) -> str:
         parts.append(f"raised to meet policy floor {plan.floor.value}")
     if plan.substituted:
         parts.append("substituted " + ", ".join(f"{k}->{v}" for k, v in plan.substituted.items()))
+    if plan.scamRisk:
+        parts.append("large first payment to a new payee: scam warning shown, second biometric asked where set up")
+    if plan.autoHandled:
+        parts.append(plan.autoHandled)
     if plan.escalate:
         parts.append(f"escalated to {plan.escalate.replace('_', ' ').lower()}")
     if not plan.threatLevel and not signals and not (plan.orgAdded or plan.agentAdded or plan.policyFloorApplied):

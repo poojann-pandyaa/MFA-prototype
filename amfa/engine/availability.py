@@ -42,6 +42,8 @@ def apply_availability(plan: Plan, ctx: Context) -> Plan:
             if f not in resolved:
                 resolved.append(f)
             continue
+        if f is Factor.UEBA and ctx.policy.lowTouch and plan.riskBand is Band.LOW:
+            continue   # the quiet typing check can't run: drop it, the floor adds whatever the regulation needs
         alt = next((a for a in SUBSTITUTES.get(f, []) if available(a, ctx)
                     and a not in resolved and a not in plan.required), None)
         if alt is not None:
@@ -53,7 +55,7 @@ def apply_availability(plan: Plan, ctx: Context) -> Plan:
     plan.required = resolved
     plan.unmet = unmet
     if unmet and (plan.riskBand is Band.HIGH or ctx.org.reviewOnAnyUnmet):
-        plan.escalate = "MANUAL_REVIEW"
+        plan.escalate, plan.escalateKind = "MANUAL_REVIEW", "UNMET"
         plan.escalateReason = "required factors cannot be assembled: " + \
             ", ".join(f.value for f in unmet)
     return plan
@@ -85,7 +87,7 @@ def enforce_floor(plan: Plan, ctx: Context) -> Plan:
     plan.policyFloorApplied = len(plan.required) > before
     plan.floorMet = len(plan.required) >= min(needed, 4) and any(f in plan.required for f in dynamic)
     if not plan.floorMet and plan.escalate is None:
-        plan.escalate = "MANUAL_REVIEW"
+        plan.escalate, plan.escalateKind = "MANUAL_REVIEW", "FLOOR"
         plan.escalateReason = (f"policy floor {floor.value} needs {needed} factors; only "
                                f"{len(plan.required)} can run on this device and enrolment")
 

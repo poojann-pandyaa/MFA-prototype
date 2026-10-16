@@ -181,7 +181,7 @@ def assemble(s, tenant: db.Tenant, customer: db.Customer, txn_id: str, t: TxnInp
         enrollment=enrollment_of(s, customer),
         capability=capability,
         policy=Policy(actionFloor=floor, guidance=policy.agent.guidance if policy.agent.enabled else None,
-                      smallPaymentCap=policy.smallPaymentCap),
+                      smallPaymentCap=policy.smallPaymentCap, lowTouch=policy.lowTouch),
         org=org,
     )
     facts["network"] = place.network

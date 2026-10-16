@@ -140,6 +140,8 @@ class Policy(BaseModel):
     maxFactors: int = 3
     guidance: Optional[str] = Field(default=None, max_length=1000)
     smallPaymentCap: bool = True
+    # the strongest automated checks replace a person unless a hard-hold sign is present (see adjudicate.py)
+    lowTouch: bool = True
 
 
 class Context(BaseModel):
@@ -167,6 +169,12 @@ class Plan(BaseModel):
     floorMet: bool = True
     escalate: Optional[str] = None
     escalateReason: Optional[str] = None
+    # why it escalated: LEVEL (highest threat level), MODEL (risk model down), UNMET (a check can't run),
+    # FLOOR (the regulatory minimum can't be met), HOLD (a hard-hold sign). Only the first three can be
+    # answered with stronger automated checks instead of a person.
+    escalateKind: Optional[str] = None
+    autoHandled: Optional[str] = None      # what would have gone to a person, and how it was handled instead
+    scamRisk: bool = False                 # a large first payment: the customer gets the scam warning
     unmet: list[Factor] = Field(default_factory=list)
     substituted: dict[str, str] = Field(default_factory=dict)
     rulesBaseline: list[Factor] = Field(default_factory=list)

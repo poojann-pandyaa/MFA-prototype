@@ -3,7 +3,7 @@ import shutil
 
 import pytest
 
-from amfa.engine.context import (Band, BehaviouralCtx, Context, DeviceCtx, Factor, FLOOR_MINIMUM,
+from amfa.engine.context import (Band, BehaviouralCtx, Context, DeviceCtx, Factor, FLOOR_MINIMUM, Policy,
                                  TransactionCtx)
 from amfa.engine.decide import decide
 from amfa.engine.risk import scorer, train
@@ -20,9 +20,9 @@ def model_dir():
     return out
 
 
-def ctx():
+def ctx(low_touch=True):
     return Context(userId="cu_1", transactionId="txn_1", transaction=TransactionCtx(amountBand=Band.LOW),
-                   device=DeviceCtx(), behavioural=BehaviouralCtx())
+                   device=DeviceCtx(), behavioural=BehaviouralCtx(), policy=Policy(lowTouch=low_touch))
 
 
 D = 24 * H
@@ -97,22 +97,27 @@ def test_decide_uses_the_model_and_keeps_the_regulatory_floor(model_dir):
 
 
 def test_no_features_fails_closed(model_dir):
-    plan = decide(ctx(), features=None)
+    plan = decide(ctx(low_touch=False), features=None)
     assert plan.escalate == "MANUAL_REVIEW" and plan.threatLevel == "T4" and plan.modelError
+    low = decide(ctx(), features=None)      # low-touch: the strongest checks instead of a person
+    assert low.escalate is None and low.threatLevel == "T4" and low.modelError and Factor.FACE in low.required
 
 
 def test_missing_model_fails_closed(model_dir, monkeypatch, tmp_path):
     monkeypatch.setattr(scorer, "root", lambda: tmp_path)
-    plan = decide(ctx(), features=routine())
+    plan = decide(ctx(low_touch=False), features=routine())
     assert plan.escalate == "MANUAL_REVIEW" and "no active risk model" in plan.modelError
+    assert decide(ctx(), features=routine()).escalate is None
 
 
-def test_t4_goes_to_manual_review(model_dir, monkeypatch):
+def test_t4_goes_to_manual_review_unless_low_touch(model_dir, monkeypatch):
     stub = scorer.Result(score=.97, raw=.9, level="T4", reasons=[("sim_changed_hours", 1.2)], version="stub")
     monkeypatch.setattr(scorer, "active", lambda: type("M", (), {"score": lambda self, f: stub})())
-    plan = decide(ctx(), features=routine())
+    plan = decide(ctx(low_touch=False), features=routine())
     assert plan.escalate == "MANUAL_REVIEW" and "T4" in plan.escalateReason
     assert {Factor.FACE, Factor.VOICE} <= set(plan.required)
+    low = decide(ctx(), features=routine())    # T4 on its own is answered with every automated check
+    assert low.escalate is None and {Factor.FACE, Factor.VOICE} <= set(low.required)
 
 
 def test_a_model_trained_on_a_different_history_window_is_refused(model_dir, tmp_path):
