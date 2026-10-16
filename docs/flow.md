@@ -1,6 +1,6 @@
 # How it all works: the flow
 
-This is the big picture of Demo Bank and AMFA working together, in plain language. There is no code here. For the *why* behind each choice, see [decision.md](decision.md).
+This is the big picture of Demo Bank and AMFA working together, in plain language. There is no code here. For the *why* behind each choice, see [decision.md](decision.md). Its Part 2 follows the same features as this page, one section each, so you can read a step here and then its reasoning there.
 
 ---
 
