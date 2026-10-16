@@ -71,6 +71,8 @@ class TxnRule(BaseModel):
     floor: Optional[ActionFloor] = None
     highValueFloor: Optional[ActionFloor] = None
     requireFactors: list[Factor] = Field(default_factory=list, max_length=3)
+    # never hold this type for a person: the customer does every check they can instead
+    neverReview: bool = False
 
 
 class SegmentRule(BaseModel):
@@ -138,7 +140,8 @@ class TenantPolicy(BaseModel):
     defaultFloor: ActionFloor = ActionFloor.L2
     transactionRules: list[TxnRule] = Field(default_factory=lambda: [
         TxnRule(type=TxnType.TRANSFER, highValueFloor=ActionFloor.L3),
-        TxnRule(type=TxnType.ADD_BENEFICIARY, floor=ActionFloor.L2, requireFactors=[Factor.FACE]),
+        # saving a payee moves no money; the first payment to it is risk-checked as a new payee
+        TxnRule(type=TxnType.ADD_BENEFICIARY, floor=ActionFloor.L2, requireFactors=[Factor.FACE], neverReview=True),
         TxnRule(type=TxnType.CHANGE_LIMIT, floor=ActionFloor.L3),
         TxnRule(type=TxnType.PROFILE_CHANGE, floor=ActionFloor.L3),
         TxnRule(type=TxnType.DEVICE_BINDING, floor=ActionFloor.L3, requireFactors=[Factor.FACE]),
@@ -258,8 +261,10 @@ class TenantPolicy(BaseModel):
 
         required: list[Factor] = []
         floors = [base]
+        never_review = False
         for r in self.transactionRules:
             if r.type is txn_type:
+                never_review = never_review or r.neverReview
                 floors.append(r.floor)
                 if band is Band.HIGH:
                     floors.append(r.highValueFloor)
@@ -275,5 +280,6 @@ class TenantPolicy(BaseModel):
                      segment=segment, permitted=permitted,
                      required=[f for f in dict.fromkeys(required) if f in permitted],
                      agentMaxAdditions=self.agent.maxAdditions if self.agent.enabled else 0,
-                     reviewOnAnyUnmet=self.reviewOnAnyUnmet, lowValueExempt=exempt and floor is ActionFloor.L1)
+                     reviewOnAnyUnmet=self.reviewOnAnyUnmet, lowValueExempt=exempt and floor is ActionFloor.L1,
+                     neverReview=never_review)
         return floor, org

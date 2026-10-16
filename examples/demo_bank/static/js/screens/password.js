@@ -1,16 +1,15 @@
 import { next, start } from "../actions.js";
-import { button, field, h, topbar } from "../ui.js";
+import { button, field, h, passwordInput, topbar } from "../ui.js";
 
 export function render(root) {
-  const current = h("input", { class: "input", type: "password", autocomplete: "current-password", maxlength: "128" });
-  const fresh = h("input", { class: "input", type: "password", autocomplete: "new-password", maxlength: "128" });
-  const again = h("input", { class: "input", type: "password", autocomplete: "new-password", maxlength: "128" });
+  const [cur, nw, ag] = [passwordInput("current-password"), passwordInput("new-password"), passwordInput("new-password")];
+  const [current, fresh, again] = [cur.input, nw.input, ag.input];
   const error = h("p", { class: "form-error", role: "alert" });
   const submit = button("Continue", { type: "submit" });
   const form = h("form", { class: "stack", novalidate: true },
-    field({ label: "Current password", id: "pw-current", input: current }),
-    field({ label: "New password", id: "pw-new", input: fresh }),
-    field({ label: "Type the new password again", id: "pw-again", input: again }),
+    field({ label: "Current password", id: "pw-current", control: current, input: cur.wrap }),
+    field({ label: "New password", id: "pw-new", control: fresh, input: nw.wrap }),
+    field({ label: "Type the new password again", id: "pw-again", control: again, input: ag.wrap }),
     error, submit);
   form.addEventListener("submit", async (e) => {
     e.preventDefault();

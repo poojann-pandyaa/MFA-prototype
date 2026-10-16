@@ -132,6 +132,7 @@ class OrgCtx(BaseModel):
     agentMaxAdditions: int = Field(default=3, ge=0, le=3)
     reviewOnAnyUnmet: bool = False
     lowValueExempt: bool = False
+    neverReview: bool = False
 
 
 class Policy(BaseModel):

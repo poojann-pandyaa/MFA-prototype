@@ -143,6 +143,19 @@ export function field({ label, id, input, control, err }) {
   return h("div", { class: "field" }, h("label", { for: id, text: label }), input, err || null);
 }
 
+// a password box with an eye button that shows or hides what's typed; pass `input` as field's control, `wrap` as its input
+export function passwordInput(autocomplete) {
+  const input = h("input", { type: "password", autocomplete, maxlength: "128", autocapitalize: "none", spellcheck: "false" });
+  const eye = h("button", { type: "button", class: "link", "aria-label": "Show password", "aria-pressed": "false", onclick: () => {
+    const show = input.type === "password";
+    input.type = show ? "text" : "password";
+    eye.setAttribute("aria-label", show ? "Hide password" : "Show password");
+    eye.setAttribute("aria-pressed", String(show));
+    eye.replaceChildren(icon(show ? "eyeOff" : "eye", 20));
+  } }, icon("eye", 20));
+  return { input, wrap: h("div", { class: "input-wrap" }, input, eye) };
+}
+
 export function sheet(build, onClose) {
   const scrim = h("div", { class: "scrim", role: "dialog", "aria-modal": "true" });
   const box = h("div", { class: "sheet" }, h("span", { class: "grip", "aria-hidden": "true" }));

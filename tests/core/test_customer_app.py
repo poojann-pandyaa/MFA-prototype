@@ -136,6 +136,19 @@ def test_a_new_payee_is_usable_only_after_approval(stack, app):
     assert "Ravi Kumar ••9012" in [p["display"] for p in payees]
 
 
+def test_adding_a_payee_never_waits_for_a_person(stack, app):
+    """Saving a payee moves no money (the first payment to it is checked on its own), so even at the
+    highest risk the customer does every check they can and it applies straight away."""
+    LEVEL["now"] = "T4"
+    started = act(app, "payee", name="Ravi Kumar", account="123456789099", ifsc="HDFC0001234").json()
+    assert not started["action"]["reviewAfter"] and started["challengeUrl"]
+    verify(stack, started["challengeUrl"])
+    out = app.post(f"/api/actions/{started['action']['id']}/complete").json()["action"]
+    assert out["status"] == "DONE"
+    held = act(app, "transfer", payeeRef="BEN-42", amountRupees=LARGE).json()["action"]
+    assert held["reviewAfter"]                              # money still waits for a person at T4
+
+
 def _ref(ifsc, account):
     import hashlib
     return "BEN-" + hashlib.sha256(f"{ifsc}:{account}".encode()).hexdigest()[:8].upper()

@@ -1,15 +1,16 @@
 import { api } from "../api.js";
 import { go, refresh } from "../app.js";
-import { button, field, h, topbar } from "../ui.js";
+import { button, field, h, passwordInput, topbar } from "../ui.js";
 
 export function render(root) {
   const username = h("input", { class: "input", autocomplete: "username", maxlength: "24", autocapitalize: "none", spellcheck: "false" });
-  const password = h("input", { class: "input", type: "password", autocomplete: "current-password", maxlength: "128" });
+  const pw = passwordInput("current-password");
+  const password = pw.input;
   const formError = h("p", { class: "form-error", role: "alert" });
   const submit = button("Sign in", { type: "submit" });
   const form = h("form", { class: "stack", novalidate: true },
     field({ label: "Username", id: "si-username", input: username }),
-    field({ label: "Password", id: "si-password", input: password }),
+    field({ label: "Password", id: "si-password", control: password, input: pw.wrap }),
     formError, submit);
   form.addEventListener("submit", async (e) => {
     e.preventDefault();

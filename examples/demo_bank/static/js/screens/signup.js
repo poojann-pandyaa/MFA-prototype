@@ -1,6 +1,6 @@
 import { api } from "../api.js";
 import { currentDevice, go, refresh } from "../app.js";
-import { button, field, h, icon, topbar } from "../ui.js";
+import { button, field, h, passwordInput, topbar } from "../ui.js";
 
 const RULES = {
   name: (v) => v.trim().length >= 2 || "Enter your full name.",
@@ -17,15 +17,11 @@ export function render(root) {
     email: h("input", { class: "input", type: "email", inputmode: "email", autocomplete: "email", maxlength: "254",
       autocapitalize: "none", spellcheck: "false", placeholder: "you@example.com" }),
     username: h("input", { class: "input", autocomplete: "username", maxlength: "24", autocapitalize: "none", spellcheck: "false" }),
-    password: h("input", { type: "password", autocomplete: "new-password", maxlength: "128" }),
   };
+  const pw = passwordInput("new-password");
+  inputs.password = pw.input;
   const errs = Object.fromEntries(Object.keys(inputs).map((k) => [k, h("span", { class: "err", id: `${k}-err`, "aria-live": "polite" })]));
   for (const [k, el] of Object.entries(inputs)) el.setAttribute("aria-describedby", `${k}-err`);
-  const show = h("button", { type: "button", class: "link", "aria-label": "Show password", onclick: () => {
-    const on = inputs.password.type === "password";
-    inputs.password.type = on ? "text" : "password";
-    show.replaceChildren(icon(on ? "eyeOff" : "eye", 20));
-  } }, icon("eye", 20));
   const formError = h("p", { class: "form-error", role: "alert" });
   const submit = button("Open account", { type: "submit" });
 
@@ -36,7 +32,7 @@ export function render(root) {
       input: h("div", { class: "input-wrap" }, h("span", { class: "prefix", text: "+91" }), inputs.phone), err: errs.phone }),
     field({ label: "Username", id: "su-username", input: inputs.username, err: errs.username }),
     field({ label: "Password", id: "su-password", control: inputs.password,
-      input: h("div", { class: "input-wrap" }, inputs.password, show), err: errs.password }),
+      input: pw.wrap, err: errs.password }),
     formError, submit);
 
   form.addEventListener("submit", async (e) => {
