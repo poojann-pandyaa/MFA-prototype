@@ -6,7 +6,7 @@ This document explains **why the system is built the way it is**. It has three p
 2. **Feature by feature**: for each feature, the problem, how we thought about it, the options we weighed, the flow we chose and *why the steps are in that order*, what we gave up, and how our thinking changed along the way.
 3. **Decision log**: the short, numbered record of every significant choice, in the order it was made.
 
-There is no code here. For *how things work* (the walkthrough), see [flow.md](flow.md). If a decision is reversed later, don't delete it; add a new entry that says so.
+There is no code here. For *how things work* (the walkthrough), see [flow.md](flow.md); for the AI itself and how to take it further, see [ai-approach.md](ai-approach.md). If a decision is reversed later, don't delete it; add a new entry that says so.
 
 ---
 
