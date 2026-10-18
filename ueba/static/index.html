@@ -546,21 +546,84 @@
 
     /* Capture ------------------------------------------------------------ */
 
+    // Keystroke timing. On a laptop each key event names its key. Phone
+    // keyboards (Android especially) send key "Unidentified" (keyCode 229)
+    // for every letter, so the key is recovered from what the press did to
+    // the text box: the input event that follows it. Timing still comes from
+    // the key events. Without this every phone sample matched 0 positions of
+    // the phrase and enrolment failed with "didn't match the phrase".
     function useKeystroke() {
-      const down = useRef({});
+      const down = useRef({});          // named keys: key -> press time
+      const pend = useRef([]);          // unnamed presses waiting for a key and/or release
       const events = useRef([]);
+      const val = useRef("");
+      const blindSeen = useRef(false);
+      const now = () => Math.round(performance.now() * 100) / 100;
+      const blind = (e) => e.key === "Unidentified" || e.key === "Process" || e.keyCode === 229;
+
+      const flush = () => {
+        const done = pend.current.filter(q => q.key !== null && q.up !== null);
+        pend.current = pend.current.filter(q => !(q.key !== null && q.up !== null));
+        done.forEach(q => events.current.push(q));
+      };
       const onKeyDown = (e) => {
-        if (e.key === "Enter" || down.current[e.key] !== undefined) return;
-        down.current[e.key] = performance.now();
+        if (e.key === "Enter" || e.repeat) return;
+        if (blind(e)) {
+          blindSeen.current = true;
+          pend.current.push({ key: null, down: now(), up: null });
+          return;
+        }
+        if (down.current[e.key] !== undefined) return;
+        down.current[e.key] = now();
       };
       const onKeyUp = (e) => {
+        if (blind(e)) {
+          const q = pend.current.find(q => q.up === null);
+          if (q) { q.up = now(); flush(); }
+          return;
+        }
         const t = down.current[e.key];
         if (t === undefined) return;
-        events.current.push({ key: e.key, down: t, up: performance.now() });
+        events.current.push({ key: e.key, down: t, up: now() });
         delete down.current[e.key];
       };
-      const reset = () => { events.current = []; down.current = {}; };
-      return { onKeyDown, onKeyUp, reset, get: () => events.current.slice() };
+      // What the last unnamed press typed: the difference between the text
+      // before and after it. Named keys were recorded already and are left alone.
+      // The text belongs to the most recent press: a key that typed nothing
+      // (Shift, the switch to the number keyboard) stays unnamed and is dropped,
+      // instead of taking the next letter and shifting every later timing.
+      const onInput = (e) => {
+        const v = e.target.value, old = val.current;
+        val.current = v;
+        const open = pend.current.filter(q => q.key === null);
+        const q = open[open.length - 1];
+        if (!q) return;
+        let a = 0;
+        while (a < old.length && a < v.length && old[a] === v[a]) a++;
+        let b = 0;
+        while (b < old.length - a && b < v.length - a &&
+               old[old.length - 1 - b] === v[v.length - 1 - b]) b++;
+        const removed = old.length - a - b, added = v.slice(a, v.length - b);
+        // A word swapped by autocorrect arrives as several characters from one
+        // press: they keep their place in the text, with that press's timing.
+        const extra = [];
+        for (let i = 0; i < removed; i++) extra.push("Backspace");
+        for (const ch of added) extra.push(ch);
+        if (!extra.length) return;
+        q.key = extra[0];
+        extra.slice(1).forEach(k => events.current.push({ key: k, down: q.down, up: q.down }));
+        flush();
+      };
+      const reset = () => {
+        events.current = []; down.current = {}; pend.current = []; val.current = "";
+        blindSeen.current = false;
+      };
+      const get = () => {
+        // A press whose release never arrived keeps zero hold time.
+        const late = pend.current.filter(q => q.key !== null).map(q => ({ ...q, up: q.up ?? q.down }));
+        return [...events.current, ...late].sort((x, y) => x.down - y.down);
+      };
+      return { onKeyDown, onKeyUp, onInput, reset, get, blindSeen };
     }
 
     // Mouse-only pointer capture for free-movement mouse dynamics. Touches are
@@ -614,6 +677,31 @@
       touch: (navigator.maxTouchPoints || 0) > 0,
     });
 
+    // Which template set to use on this device: "touch" for a phone or tablet,
+    // "keyboard" for a physical keyboard with a mouse or trackpad. Only a
+    // starting guess; the person can change it, and the service checks every
+    // sample against it.
+    const guessInput = () =>
+      window.matchMedia("(pointer: coarse)").matches && (navigator.maxTouchPoints || 0) > 0
+        ? "touch" : "keyboard";
+    const INPUT_LABEL = { keyboard: "Keyboard and mouse", touch: "Touchscreen" };
+    const POINTER_INPUT = { mouse: "keyboard", touch: "touch" };
+
+    function InputPicker({ value, onChange, disabled }) {
+      return (
+        <div className="filter" role="radiogroup" aria-label="Input">
+          {["keyboard", "touch"].map(k =>
+            <button key={k} className={value === k ? "go" : "ghost"} disabled={disabled}
+              aria-pressed={value === k} onClick={() => onChange(k)}>{INPUT_LABEL[k]}</button>)}
+        </div>
+      );
+    }
+
+    // Phone keyboards that predict or correct words break the timing; these
+    // attributes ask them not to, though some keyboards ignore them.
+    const plainText = { autoComplete: "off", autoCorrect: "off", autoCapitalize: "off",
+                        spellCheck: "false" };
+
     /* Pieces ------------------------------------------------------------- */
 
     function PhraseEcho({ phrase, typed }) {
@@ -634,9 +722,10 @@
     // works as a finger drag on phones. The pad is locked to the shape's aspect
     // ratio: a stretched pad would make enrollment and verification different
     // shapes, and the 60 degree slopes are only 60 degrees at 2:1.
-    function TracePad({ shape, aspect, onTrace, requireEnds }) {
+    function TracePad({ shape, aspect, onTrace, requireEnds, input }) {
       const ref = useRef(null);
       const pts = useRef([]);
+      const kind = useRef(null);
       const active = useRef(false);
       const [drawn, setDrawn] = useState([]);
       const [msg, setMsg] = useState("");
@@ -652,6 +741,13 @@
 
       const down = (e) => {
         e.preventDefault();
+        if (e.pointerType === "pen") { setMsg("A stylus isn't supported yet. Use your finger or a mouse."); return; }
+        if (input && POINTER_INPUT[e.pointerType] !== input) {
+          setMsg(input === "touch" ? "This is set up for a touchscreen: trace with your finger."
+            : "This is set up for keyboard and mouse: trace with the mouse or trackpad.");
+          return;
+        }
+        kind.current = e.pointerType;
         ref.current.setPointerCapture(e.pointerId);
         active.current = true;
         pts.current = [norm(e)];
@@ -675,7 +771,7 @@
             return;
           }
         }
-        onTrace(tr);
+        onTrace(tr, kind.current);
       };
 
       const W = 200, H = 200 / aspect;
@@ -747,10 +843,12 @@
 
     function Enroll({ meta, session, goTransact }) {
       const [userId, setUserId] = useState("");
+      const [input, setInput] = useState(guessInput());
       const [typed, setTyped] = useState("");
       const [samples, setSamples] = useState([]);
       const [segments, setSegments] = useState([]);
       const [traces, setTraces] = useState([]);
+      const [kinds, setKinds] = useState([]);
       const [target, setTarget] = useState({ top: 56, left: 50 });
       const [result, setResult] = useState(null);
       const [error, setError] = useState("");
@@ -784,10 +882,12 @@
 
       const finish = async () => {
         setBusy(true); setError("");
+        const desk = input === "keyboard";
         const r = await post("/enroll", {
-          userId: userId.trim(), keystrokeSamples: samples,
-          shapeTraces: traces, mouseSegments: segments.filter(s => s.length),
-          mouseClicks: ptr.clicks.current
+          userId: userId.trim(), input, keystrokeSamples: samples,
+          shapeTraces: traces, shapePointerTypes: kinds,
+          mouseSegments: desk ? segments.filter(s => s.length) : [],
+          mouseClicks: desk ? ptr.clicks.current : []
         });
         setBusy(false);
         if (!r.ok) { setError(errText(r.data)); return; }
@@ -795,7 +895,7 @@
       };
 
       const restart = () => {
-        setResult(null); setSamples([]); setSegments([]); setTraces([]);
+        setResult(null); setSamples([]); setSegments([]); setTraces([]); setKinds([]);
         setTyped(""); setUserId(""); setPt(0); setPs(0);
         kb.reset(); ptr.reset();
       };
@@ -804,22 +904,27 @@
         <div className="grid even">
           <section className="panel">
             <div className="step-head"><div className="step-num done">✓</div>
-              <h2>{result.userId} is enrolled</h2></div>
+              <h2>{result.userId} is enrolled for {INPUT_LABEL[result.input].toLowerCase()}</h2></div>
             <div className="check">
+              <div><span>Template sets</span><span>
+                {result.enrolledInputs.map(k => INPUT_LABEL[k]).join(" and ")}</span></div>
               <div><span>Typing template</span><span className="num">
                 {result.keystroke.samples} of {result.keystroke.recorded} recordings used</span></div>
+              <div><span>Typing compares</span><span>{result.keystroke.compares.includes("dwell")
+                ? "key hold times and gaps between keys" : "gaps between key presses"}</span></div>
               <div><span>Mean key hold</span><span className="num">{result.keystroke.meanDwellMs} ms</span></div>
               <div><span>Typing speed</span><span className="num">{result.keystroke.typingSpeedCps} chars/s</span></div>
               <div><span>Shape template</span><span className="num">
                 {result.shape.samples} traces, {result.shape.checkpoints} checkpoints</span></div>
-              <div><span>Mouse template</span><span className={result.mouse.status === "ENROLLED" ? "" : "warn"}>
-                {result.mouse.status === "ENROLLED" ? `${result.mouse.samples} segments, not scored`
-                  : "not enough movement, not scored"}</span></div>
+              {result.input === "keyboard" &&
+                <div><span>Mouse template</span><span className={result.mouse.status === "ENROLLED" ? "" : "warn"}>
+                  {result.mouse.status === "ENROLLED" ? `${result.mouse.samples} segments, not scored`
+                    : "not enough movement, not scored"}</span></div>}
               <div><span>Session profile</span><span>builds up with approved transactions</span></div>
             </div>
             <div className="actions">
               <button className="go" onClick={goTransact}>Run a transaction</button>
-              <button className="ghost" onClick={restart}>Enrol someone else</button>
+              <button className="ghost" onClick={restart}>Enrol someone else or another device type</button>
             </div>
           </section>
         </div>
@@ -831,7 +936,12 @@
             <Step n={1} title="Who is enrolling" done={!!userId.trim()}>
               <label htmlFor="uid">User ID</label>
               <input id="uid" value={userId} onChange={e => setUserId(e.target.value)}
-                placeholder="e.g. devdeep" autoComplete="off" />
+                placeholder="e.g. devdeep" {...plainText} />
+              <label style={{ marginTop: 12 }}>This device</label>
+              <InputPicker value={input} disabled={samples.length > 0 || traces.length > 0 || pt > 0 || ps > 0}
+                onChange={setInput} />
+              <p className="hint">Laptop and phone get separate templates: thumb typing and
+                finger tracing differ from a keyboard and mouse. Enrolling one keeps the other.</p>
             </Step>
 
             <Step n={2} title={`Type the phrase ${reps} times`} done={typingDone}>
@@ -839,9 +949,9 @@
               {!typingDone && <p className="hint" style={{ margin: "0 0 8px" }}>
                 {practising ? `Practice ${pt + 1} of ${PT}, not saved`
                   : `Recording ${samples.length + 1} of ${reps}`}</p>}
-              <input ref={inputRef} value={typed} autoComplete="off" spellCheck="false"
+              <input ref={inputRef} value={typed} {...plainText}
                 disabled={typingDone} aria-label="Type the phrase"
-                onChange={e => setTyped(e.target.value)}
+                onChange={e => setTyped(e.target.value)} onInput={kb.onInput}
                 onKeyDown={e => { kb.onKeyDown(e); if (e.key === "Enter") submitSample(); }}
                 onKeyUp={kb.onKeyUp}
                 placeholder={typingDone ? "All recordings captured" : "Type here"} />
@@ -858,15 +968,16 @@
                 recording is discarded too: on an unfamiliar phrase people type more slowly at
                 first. Mistakes you correct with backspace are fine. The button moves each time
                 so your pointer movement varies between recordings.
+                {input === "touch" && " On a phone, type each letter yourself: if your keyboard suggests or corrects words, turn that off for this test."}
               </p>
             </Step>
 
             <Step n={3} title={`Trace the shape ${needTraces} times`} done={shapeDone}>
               {meta.shape && !shapeDone && (
-                <TracePad shape={meta.shape} aspect={meta.aspectRatio} requireEnds
-                  onTrace={tr => {
+                <TracePad shape={meta.shape} aspect={meta.aspectRatio} requireEnds input={input}
+                  onTrace={(tr, k) => {
                     if (ps < PS) setPs(n => n + 1);
-                    else setTraces(t => [...t, tr]);
+                    else { setTraces(t => [...t, tr]); setKinds(x => [...x, k]); }
                     session.mark();
                   }} />
               )}
@@ -878,11 +989,12 @@
                 The first {PS} traces are practice. Hold down and drag from the green dot to
                 the red one, following the line. How
                 closely you track it, your pace, and how you take the two corners is what
-                identifies you. Works with a mouse, trackpad or finger.
+                identifies you. {input === "touch" ? "Use your finger." : "Use the mouse or trackpad."}
               </p>
               {traces.length > 0 && !shapeDone &&
                 <div className="actions"><button className="ghost"
-                  onClick={() => setTraces(t => t.slice(0, -1))}>Discard last trace</button></div>}
+                  onClick={() => { setTraces(t => t.slice(0, -1)); setKinds(x => x.slice(0, -1)); }}>
+                  Discard last trace</button></div>}
             </Step>
           </div>
 
@@ -890,6 +1002,7 @@
             <h2 style={{ marginBottom: 12 }}>Enrollment</h2>
             <div className="check">
               <div><span>User ID</span><span>{userId.trim() || "not set"}</span></div>
+              <div><span>Device type</span><span>{INPUT_LABEL[input]}</span></div>
               <div><span>Typing</span><span className={"num " + (typingDone ? "good" : "")}>
                 {samples.length} / {reps}</span></div>
               <div><span>Shape traces</span><span className={"num " + (shapeDone ? "good" : "")}>
@@ -917,10 +1030,13 @@
         deviceId: "d_1", ip: "103.21.45.67", channel: "WEB"
       });
       const [txn, setTxn] = useState(newTxn());
+      const [input, setInput] = useState(guessInput());
+      const [tester, setTester] = useState("");
       const [preview, setPreview] = useState(null);
       const [challenge, setChallenge] = useState(null);
       const [typed, setTyped] = useState("");
       const [trace, setTrace] = useState(null);
+      const [traceKind, setTraceKind] = useState(null);
       const [result, setResult] = useState(null);
       const [commit, setCommit] = useState(null);
       const [error, setError] = useState("");
@@ -939,7 +1055,8 @@
           timestamp: new Date().toISOString(), session: session.payload()
         });
         if (!r.ok) { setBusy(false); setError(errText(r.data)); return; }
-        const c = await get("/factor/challenge?userId=" + encodeURIComponent(form.userId.trim()));
+        const c = await get("/factor/challenge?userId=" + encodeURIComponent(form.userId.trim()) +
+          "&input=" + input);
         setBusy(false);
         if (!c.ok) { setError(errText(c.data)); return; }
         setPreview(r.data); setChallenge(c.data);
@@ -954,9 +1071,12 @@
         const r = await post("/factor/verify", {
           sessionId: "demo_" + txn, userId: form.userId.trim(),
           transactionId: txn, challengeId: challenge.challengeId,
+          testerId: tester.trim() || null,
           payload: {
             keystroke: kb.get(), shapeTrace: trace || [],
-            pointer: { points: ptr.points.current, clicks: ptr.clicks.current },
+            keystrokeInput: input, shapePointerType: traceKind,
+            pointer: input === "keyboard" ? { points: ptr.points.current, clicks: ptr.clicks.current }
+              : { points: [], clicks: [] },
             capability: capability()
           }
         });
@@ -975,7 +1095,7 @@
 
       const again = () => {
         setTxn(newTxn()); setPreview(null); setChallenge(null); setTyped("");
-        setTrace(null); setResult(null); setCommit(null); setError("");
+        setTrace(null); setTraceKind(null); setResult(null); setCommit(null); setError("");
       };
 
       const yn = (v) => v === null || v === undefined ? "unknown" : v ? "yes" : "no";
@@ -1004,6 +1124,13 @@
                 <div><label htmlFor="tc">Channel</label>
                   <select id="tc" value={form.channel} onChange={set("channel")} disabled={!!preview}>
                     <option>WEB</option><option>MOBILE</option></select></div>
+              </div>
+              <div className="row">
+                <div><label>This device</label>
+                  <InputPicker value={input} onChange={setInput} disabled={!!preview} /></div>
+                <div><label htmlFor="tt">Who is testing (team test)</label>
+                  <input id="tt" value={tester} onChange={e => setTester(e.target.value)}
+                    disabled={!!result} placeholder="your own user ID" {...plainText} /></div>
               </div>
               {!preview && <div className="actions">
                 <button className="go" onClick={assess} disabled={busy || !form.userId.trim()}>
@@ -1035,13 +1162,20 @@
 
             <Step n={2} title="Behavioural challenge" done={!!result} dim={!challenge}>
               {challenge && (<>
+                {!challenge.inputEnrolled && <p className="err" style={{ marginTop: 0 }}>
+                  {form.userId.trim()} has no {INPUT_LABEL[challenge.input].toLowerCase()} templates
+                  {challenge.enrolledInputs.length ? ` (enrolled: ${challenge.enrolledInputs.map(k => INPUT_LABEL[k].toLowerCase()).join(", ")})` : ""}.
+                  Verifying returns INSUFFICIENT_DATA, and the decision engine would use another
+                  factor. Enrol this device type first to use it.</p>}
                 <PhraseEcho phrase={challenge.phrase} typed={typed} />
-                <input value={typed} autoComplete="off" spellCheck="false" disabled={!!result}
+                <input value={typed} {...plainText} disabled={!!result}
                   aria-label="Type the phrase" onChange={e => setTyped(e.target.value)}
+                  onInput={kb.onInput}
                   onKeyDown={kb.onKeyDown} onKeyUp={kb.onKeyUp} placeholder="Type the phrase" />
                 <div style={{ marginTop: 14 }}>
                   {!result && <TracePad shape={challenge.shape} aspect={challenge.aspectRatio}
-                    onTrace={tr => setTrace(tr)} />}
+                    input={challenge.input}
+                    onTrace={(tr, k) => { setTrace(tr); setTraceKind(k); }} />}
                   <p className="hint">{trace ? "Trace captured. Draw again to replace it."
                     : "Trace the shape from the green dot to the red one."}</p>
                 </div>
@@ -1066,6 +1200,9 @@
                   <span className={"pill " + result.status}>{result.status}</span>
                 </div>
                 {result.failureReason && <p className="hint">Reason: {result.failureReason}</p>}
+                <p className="hint">Scored against the {INPUT_LABEL[result.detail.input || input].toLowerCase()} templates
+                  {result.detail.provisional ? ", with provisional calibration borrowed from keyboard and mouse until real touch measurements are fitted" : ""}
+                  {result.detail.shadow ? ". Shadow mode: recorded for measurement, not used for the decision" : ""}.</p>
                 <ScoreBar score={result.score} threshold={result.threshold} />
                 <table style={{ marginTop: 14 }}>
                   <thead><tr><th>Part</th><th>Status</th><th>Coverage</th><th>P(impostor)</th></tr></thead>
@@ -1138,14 +1275,16 @@
           </div>
           {shown.length === 0 ? <p className="hint">Nothing recorded yet. Enrol a user and run a transaction.</p> : (
             <table>
-              <thead><tr><th>When</th><th>User</th><th>Check</th><th>Result</th>
+              <thead><tr><th>When</th><th>User</th><th>Device</th><th>Check</th><th>Result</th>
                 <th>Score</th><th>Detail</th><th>ms</th></tr></thead>
               <tbody>{shown.map(r => {
                 const d = r.dimensions || {}, k = kindOf(r);
                 return (
                   <tr key={r.id}>
                     <td className="mono">{new Date(r.decided_at * 1000).toLocaleTimeString()}</td>
-                    <td>{r.user_id}</td>
+                    <td>{r.user_id}{d.testerId && d.testerId !== r.user_id &&
+                      <div className="hint" style={{ margin: 0 }}>tested by {d.testerId}</div>}</td>
+                    <td>{d.input ? INPUT_LABEL[d.input] : ""}</td>
                     <td>{k === "preview" ? "Risk preview" : k === "factor" ? "Factor check" : "Legacy"}</td>
                     <td><span className={"pill " + (k === "preview" ? r.band : r.decision)}>
                       {k === "preview" ? r.band : r.decision}</span></td>
@@ -1191,6 +1330,7 @@
                 {health.factor && <span className="chip">factor <b>{health.factor}</b></span>}
                 {health.threshold && <span className="chip">pass at <b>{health.threshold}</b></span>}
                 {health.modelVersion && <span className="chip"><b>{health.modelVersion}</b></span>}
+                {health.touchMode && <span className="chip">touch <b>{health.touchMode}</b></span>}
               </div>
             )}
           </header>

@@ -40,7 +40,7 @@ from api import dimensions as dm
 from api.contract import (FACTOR_NAME, MODEL_VERSION, THRESHOLD, ChallengeResponse,
                           CommitRequest, CommitResponse, FactorStatus,
                           FactorVerifyRequest, FactorVerifyResponse, FailureReason,
-                          KeyEvent, Outcome, PointerClick, PointerPoint,
+                          Input, KeyEvent, Outcome, PointerClick, PointerPoint,
                           PreviewFlags, PreviewRequest, PreviewResponse,
                           PreviewStatus, SessionPayload)
 from features import keystroke as ks
@@ -63,6 +63,13 @@ CHALLENGE_TTL_S = int(os.getenv("UEBA_CHALLENGE_TTL_S", "300"))
 # in live testing it flagged most genuine attempts as impostor.
 FACTOR_DIMENSIONS = set(os.getenv("UEBA_FACTOR_DIMENSIONS", "keystroke,shape").split(","))
 PREVIEW_DIMENSIONS = {"transaction", "session"}
+
+# Touch scoring: "live" counts it in the decision with whatever calibration
+# exists (provisional until real measurements are fitted); "shadow" computes
+# and records it but answers INSUFFICIENT_DATA, so the decision engine uses
+# another factor. Shadow is the safe setting for the integrated platform
+# until the team measurement is done.
+TOUCH_MODE = os.getenv("UEBA_TOUCH_MODE", "live")
 
 _state: dict[str, Any] = {}
 
@@ -123,6 +130,12 @@ class EnrollRequest(BaseModel):
     shapeTraces: list[list[PointerPoint]] = []
     mouseSegments: list[list[PointerPoint]] = []
     mouseClicks: list[PointerClick] = []
+    # Which template set this enrolment builds. Enrolling one input leaves
+    # the other's templates untouched.
+    input: Input = "keyboard"
+    # PointerEvent.pointerType of each trace, in order. Required for touch;
+    # older keyboard clients send none.
+    shapePointerTypes: list[str] = []
 
 
 @app.get("/enroll/phrase")
@@ -137,7 +150,13 @@ def enroll_phrase() -> dict:
         "aspectRatio": sh.ASPECT,
         "shapeTracesRequired": sh.MIN_SAMPLES,
         "mousePointsRequired": ms.MIN_POINTS * ms.MIN_SAMPLES,
+        "inputs": list(ks.INPUTS),
     }
+
+
+def _trace_input(pointer_type: str | None) -> str | None:
+    """Template set a trace belongs to; None for a stylus or anything unknown."""
+    return sh.POINTER_INPUT.get(pointer_type or "")
 
 
 def _mouse_template(segments: list[list[dict]], clicks: list[dict]):
@@ -153,8 +172,19 @@ def _mouse_template(segments: list[list[dict]], clicks: list[dict]):
 
 @app.post("/enroll")
 def enroll(req: EnrollRequest) -> dict:
+    kinds = req.shapePointerTypes
+    if req.input == "touch" and len(kinds) != len(req.shapeTraces):
+        raise HTTPException(400, "touch enrolment needs the pointer type of every trace")
+    if kinds and len(kinds) != len(req.shapeTraces):
+        raise HTTPException(400, "shapePointerTypes must have one entry per trace")
+    for i, k in enumerate(kinds):
+        if _trace_input(k) != req.input:
+            raise HTTPException(400, (
+                f"trace {i + 1} was drawn with {k or 'an unknown pointer'}; this enrolment is "
+                f"for {req.input} (mouse or trackpad for keyboard, a finger for touch)"))
+
     samples = [ks.extract(_dump(s)) for s in req.keystrokeSamples]
-    keystroke_tpl = ks.build_template(samples)
+    keystroke_tpl = ks.build_template(samples, input=req.input)
     if keystroke_tpl is None:
         complete = sum(s["coverage"] >= ks.MIN_ENROLL_COVERAGE for s in samples)
         raise HTTPException(400, (
@@ -162,24 +192,29 @@ def enroll(req: EnrollRequest) -> dict:
             f"got {complete} of {len(samples)}"))
 
     traces = [sh.extract(_dump(t)) for t in req.shapeTraces]
-    shape_tpl = sh.build_template(traces)
+    shape_tpl = sh.build_template(traces, input=req.input)
     if shape_tpl is None:
         complete = sum(t["coverage"] >= sh.MIN_ENROLL_COVERAGE for t in traces)
         raise HTTPException(400, (
             f"need {sh.MIN_SAMPLES} complete shape traces, green dot to red dot; "
             f"got {complete} of {len(traces)}"))
 
-    clicks = _dump(req.mouseClicks)
-    mouse_tpl = _mouse_template([_dump(s) for s in req.mouseSegments], clicks)
-    total_points = sum(len(s) for s in req.mouseSegments)
+    # Free mouse movement is a keyboard-and-mouse signal only.
+    clicks = _dump(req.mouseClicks) if req.input == "keyboard" else []
+    segments = [_dump(s) for s in req.mouseSegments] if req.input == "keyboard" else []
+    mouse_tpl = _mouse_template(segments, clicks)
+    total_points = sum(len(s) for s in segments)
 
-    db.save_user(req.userId, keystroke_tpl, mouse_tpl, DB_PATH, shape_tpl=shape_tpl)
+    db.save_templates(req.userId, req.input, keystroke_tpl, shape_tpl, mouse_tpl, DB_PATH)
 
     dwell = [v for v in keystroke_tpl["dwell_mean"] if v is not None]
     return {
         "userId": req.userId,
         "enrolled": True,
+        "input": req.input,
+        "enrolledInputs": db.enrolled_inputs(db.get_user(req.userId, DB_PATH)),
         "keystroke": {"status": "ENROLLED", "samples": keystroke_tpl["n_samples"],
+                      "compares": keystroke_tpl["fields"],
                       "recorded": len(samples), "discarded": ks.DISCARD_FIRST,
                       "positions": keystroke_tpl["n_dwell"],
                       "meanDwellMs": round(float(np.mean(dwell)), 1) if dwell else None,
@@ -203,7 +238,7 @@ def enroll(req: EnrollRequest) -> dict:
 
 
 @app.get("/factor/challenge", response_model=ChallengeResponse)
-def factor_challenge(userId: str) -> ChallengeResponse:
+def factor_challenge(userId: str, input: Input = "keyboard") -> ChallengeResponse:
     """
     Issue a single-use challenge.
 
@@ -211,14 +246,17 @@ def factor_challenge(userId: str) -> ChallengeResponse:
     position-by-position comparison. Replay protection comes from the
     challenge ID instead: a captured submission cannot be sent again.
     """
-    if db.get_user(userId, DB_PATH) is None:
+    user = db.get_user(userId, DB_PATH)
+    if user is None:
         raise HTTPException(404, f"user {userId} is not enrolled")
     cid = f"ch_{uuid.uuid4().hex[:16]}"
-    expires = db.issue_challenge(cid, userId, CHALLENGE_TTL_S, DB_PATH)
+    expires = db.issue_challenge(cid, userId, CHALLENGE_TTL_S, DB_PATH, input=input)
+    have = db.enrolled_inputs(user)
     return ChallengeResponse(
         challengeId=cid, factor=FACTOR_NAME, phrase=ks.ENROLL_PHRASE,
         shape=[list(p) for p in sh.SHAPE], aspectRatio=sh.ASPECT,
-        expiresAt=datetime.fromtimestamp(expires, timezone.utc), shapeRequired=True)
+        expiresAt=datetime.fromtimestamp(expires, timezone.utc), shapeRequired=True,
+        input=input, inputEnrolled=input in have, enrolledInputs=have)
 
 
 @app.post("/risk/preview", response_model=PreviewResponse)
@@ -282,6 +320,10 @@ def risk_preview(req: PreviewRequest) -> PreviewResponse:
 
 def _factor_verdict(dims: dict[str, dict], score: float | None):
     """Status and failure reason from the challenge dimensions and the score."""
+    if any(d.get("inputMismatch") for name, d in dims.items() if name in FACTOR_DIMENSIONS):
+        # Answering a touch challenge with a keyboard (or the reverse) is not
+        # a free pass to the other template set, nor to a skipped part.
+        return FactorStatus.FAILED, FailureReason.INPUT_MISMATCH
     statuses = [d["status"] for name, d in dims.items()
                 if name in FACTOR_DIMENSIONS and d["status"] not in
                 ("NOT_APPLICABLE", "INSUFFICIENT_DATA")]
@@ -316,36 +358,79 @@ def factor_verify(req: FactorVerifyRequest) -> FactorVerifyResponse:
     check = db.consume_challenge(req.challengeId, req.userId, DB_PATH)
     if check != "OK":
         raise HTTPException(409, f"challenge rejected: {check}")
+    input = db.challenge_input(req.challengeId, DB_PATH) or "keyboard"
 
     try:
         cs = _calset()
         p = req.payload
-        can_trace = p.capability.pointer or p.capability.touch
+        ks_tpl, sh_tpl = db.templates(user, input)
+        meta = {"kind": "factor", "transactionId": req.transactionId,
+                "sessionId": req.sessionId, "input": input, "testerId": req.testerId,
+                "enrolledInputs": db.enrolled_inputs(user)}
+
+        if ks_tpl is None:
+            # No templates for this kind of input: not a failure, nothing to
+            # compare against. The decision engine substitutes another factor.
+            latency = int((time.perf_counter() - started) * 1000)
+            db.add_verification(req.userId, None, "HIGH", FactorStatus.INSUFFICIENT_DATA.value,
+                                {**meta, "score": None,
+                                 "failureReason": FailureReason.NO_TEMPLATE.value},
+                                MODEL_VERSION, latency, DB_PATH)
+            return FactorVerifyResponse(
+                factor=FACTOR_NAME, status=FactorStatus.INSUFFICIENT_DATA, score=None,
+                threshold=THRESHOLD, failureReason=FailureReason.NO_TEMPLATE,
+                modelVersion=MODEL_VERSION, latencyMs=latency,
+                detail={"input": input, "enrolledInputs": meta["enrolledInputs"],
+                        "reason": f"no {input} templates enrolled for this user"})
+
+        can_trace = p.capability.pointer or p.capability.touch or input == "touch"
+        keys, trace = _dump(p.keystroke), _dump(p.shapeTrace)
+
+        # Each part must be answered with the input the challenge asked for.
+        # A mismatched part is scored as if it had not been answered.
+        typed_with = p.keystrokeInput or "keyboard"
+        drawn_with = _trace_input(p.shapePointerType) if p.shapePointerType else "keyboard"
+        key_bad = bool(keys) and typed_with != input
+        shape_bad = bool(trace) and drawn_with != input
 
         dims: dict[str, dict] = {}
         probs: dict[str, float | None] = {}
         dims["keystroke"], probs["keystroke"] = dm.score_keystroke(
-            user["keystroke_tpl"], _dump(p.keystroke), cs)
+            ks_tpl, [] if key_bad else keys, cs, input=input)
         dims["shape"], probs["shape"] = dm.score_shape(
-            user.get("shape_tpl"), _dump(p.shapeTrace), cs, applicable=can_trace)
-        dims["mouse"], probs["mouse"] = dm.score_mouse(
-            user["mouse_tpl"], _dump(p.pointer.points), _dump(p.pointer.clicks), cs)
-        dims["mouse"]["excludedFromScore"] = "mouse" not in FACTOR_DIMENSIONS
+            sh_tpl, [] if shape_bad else trace, cs, applicable=can_trace, input=input)
+        if key_bad:
+            dims["keystroke"].update(inputMismatch=True, answeredWith=typed_with)
+        if shape_bad:
+            dims["shape"].update(inputMismatch=True,
+                                 answeredWith=p.shapePointerType or "unknown")
+        if input == "keyboard":
+            dims["mouse"], probs["mouse"] = dm.score_mouse(
+                user["mouse_tpl"], _dump(p.pointer.points), _dump(p.pointer.clicks), cs)
+            dims["mouse"]["excludedFromScore"] = "mouse" not in FACTOR_DIMENSIONS
 
         fused = {d: probs[d] for d in FACTOR_DIMENSIONS if d in probs}
         p_imp, used = _fuse(fused)
         score = round(1.0 - p_imp, 4) if used else None
         status, reason = _factor_verdict(dims, score)
 
+        shadow = input == "touch" and TOUCH_MODE == "shadow"
+        if shadow:
+            # Computed and recorded for measurement, not trusted for a decision.
+            status, reason = FactorStatus.INSUFFICIENT_DATA, FailureReason.NOT_VALIDATED
+
         latency = int((time.perf_counter() - started) * 1000)
-        detail = {**dims, "dimensionsUsed": used,
+        detail = {**dims, "dimensionsUsed": used, "input": input,
+                  "provisional": any(dims[d].get("provisional") for d in used),
+                  "shadow": shadow,
                   "impostorProbability": round(p_imp, 4) if used else None}
         db.add_verification(req.userId, detail["impostorProbability"],
                             band(p_imp) if used else "HIGH", status.value,
-                            {"kind": "factor", "transactionId": req.transactionId,
-                             "sessionId": req.sessionId, "score": score,
+                            {**meta, "score": score, "shadowScore": score if shadow else None,
                              "failureReason": reason.value if reason else None, **detail},
                             MODEL_VERSION, latency, DB_PATH)
+        if shadow:
+            score = None
         return FactorVerifyResponse(
             factor=FACTOR_NAME, status=status, score=score, threshold=THRESHOLD,
             failureReason=reason, modelVersion=MODEL_VERSION, latencyMs=latency,
@@ -480,6 +565,8 @@ def health() -> dict:
         "modelVersion": MODEL_VERSION,
         "calibratedDimensions": sorted(_calset().calibrators.keys()),
         "factorDimensions": sorted(FACTOR_DIMENSIONS),
+        "inputs": list(ks.INPUTS),
+        "touchMode": TOUCH_MODE,
     }
 
 
@@ -494,8 +581,15 @@ def user_detail(user_id: str) -> dict:
     if u is None:
         raise HTTPException(404, "not enrolled")
     shape_tpl = u.get("shape_tpl")
+    per_input = {}
+    for i in ks.INPUTS:
+        k_tpl, s_tpl = db.templates(u, i)
+        per_input[i] = {"keystroke": k_tpl is not None,
+                        "shape": bool(s_tpl) and "split_mean" in s_tpl}
     return {
         "userId": u["user_id"], "enrolledAt": u["enrolled_at"],
+        "enrolledInputs": db.enrolled_inputs(u),
+        "inputs": per_input,
         "keystrokeEnrolled": u["keystroke_tpl"] is not None,
         "shapeEnrolled": bool(shape_tpl) and "split_mean" in shape_tpl,
         "mouseEnrolled": u["mouse_tpl"] is not None,

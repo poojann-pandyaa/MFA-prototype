@@ -7,3 +7,10 @@ __pycache__/
 artifacts/
 data/*.csv
 .pytest_cache/
+
+# local only: never commit
+.DS_Store
+ueba.db
+scratch/
+_to_delete/
+backup_*.zip

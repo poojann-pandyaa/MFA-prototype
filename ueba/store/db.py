@@ -28,7 +28,9 @@ CREATE TABLE IF NOT EXISTS user (
     keystroke_tpl TEXT,
     mouse_tpl     TEXT,
     shape_tpl     TEXT,
-    session_prof  TEXT
+    session_prof  TEXT,
+    keystroke_touch_tpl TEXT,
+    shape_touch_tpl     TEXT
 );
 
 CREATE TABLE IF NOT EXISTS security_event (
@@ -58,7 +60,8 @@ CREATE TABLE IF NOT EXISTS challenge (
     user_id      TEXT NOT NULL,
     issued_at    REAL NOT NULL,
     expires_at   REAL NOT NULL,
-    used_at      REAL
+    used_at      REAL,
+    input        TEXT NOT NULL DEFAULT 'keyboard'
 );
 
 -- Context captured by /risk/preview, held until the orchestrator reports
@@ -100,9 +103,30 @@ def conn(path: Path | str = DB_PATH):
         c.close()
 
 
+# Columns added after the first release. CREATE TABLE IF NOT EXISTS leaves an
+# existing table alone, so a database made by an older version gets them here.
+MIGRATIONS = {
+    "user": [("keystroke_touch_tpl", "TEXT"), ("shape_touch_tpl", "TEXT")],
+    "challenge": [("input", "TEXT NOT NULL DEFAULT 'keyboard'")],
+}
+
+# One profile per user, one template set per kind of input. The original
+# columns hold the keyboard set (physical keyboard + mouse or trackpad), so
+# profiles enrolled before touch support keep working unchanged.
+TEMPLATE_COLUMNS = {
+    "keyboard": ("keystroke_tpl", "shape_tpl"),
+    "touch": ("keystroke_touch_tpl", "shape_touch_tpl"),
+}
+
+
 def init(path: Path | str = DB_PATH) -> None:
     with conn(path) as c:
         c.executescript(SCHEMA)
+        for table, cols in MIGRATIONS.items():
+            have = {r["name"] for r in c.execute(f"PRAGMA table_info({table})")}
+            for name, decl in cols:
+                if name not in have:
+                    c.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
 
 
 # ------------------------------------------------------------------ users
@@ -120,19 +144,50 @@ def save_user(user_id, keystroke_tpl, mouse_tpl, path=DB_PATH, shape_tpl=None):
         )
 
 
+def save_templates(user_id, input, keystroke_tpl, shape_tpl, mouse_tpl=None, path=DB_PATH):
+    """
+    Store one input's template set without touching the other: adding a phone
+    must not erase the laptop templates. Mouse movement is keyboard-only.
+    """
+    ks_col, sh_col = TEMPLATE_COLUMNS[input]
+    dump = lambda t: json.dumps(t) if t else None
+    with conn(path) as c:
+        c.execute("INSERT OR IGNORE INTO user (user_id, enrolled_at) VALUES (?,?)",
+                  (user_id, time.time()))
+        c.execute(f"UPDATE user SET {ks_col}=?, {sh_col}=? WHERE user_id=?",
+                  (dump(keystroke_tpl), dump(shape_tpl), user_id))
+        if input == "keyboard":
+            c.execute("UPDATE user SET mouse_tpl=? WHERE user_id=?", (dump(mouse_tpl), user_id))
+
+
 def get_user(user_id, path=DB_PATH):
     with conn(path) as c:
         row = c.execute("SELECT * FROM user WHERE user_id=?", (user_id,)).fetchone()
     if not row:
         return None
+    load = lambda k: json.loads(row[k]) if k in row.keys() and row[k] else None
     return {
         "user_id": row["user_id"],
         "enrolled_at": row["enrolled_at"],
-        "keystroke_tpl": json.loads(row["keystroke_tpl"]) if row["keystroke_tpl"] else None,
-        "mouse_tpl": json.loads(row["mouse_tpl"]) if row["mouse_tpl"] else None,
-        "shape_tpl": json.loads(row["shape_tpl"]) if row["shape_tpl"] else None,
-        "session_prof": json.loads(row["session_prof"]) if row["session_prof"] else None,
+        "keystroke_tpl": load("keystroke_tpl"),
+        "mouse_tpl": load("mouse_tpl"),
+        "shape_tpl": load("shape_tpl"),
+        "session_prof": load("session_prof"),
+        "keystroke_touch_tpl": load("keystroke_touch_tpl"),
+        "shape_touch_tpl": load("shape_touch_tpl"),
     }
+
+
+def templates(user: dict | None, input: str) -> tuple[dict | None, dict | None]:
+    """(keystroke, shape) templates for one input, or (None, None)."""
+    if user is None:
+        return None, None
+    ks_col, sh_col = TEMPLATE_COLUMNS[input]
+    return user.get(ks_col), user.get(sh_col)
+
+
+def enrolled_inputs(user: dict | None) -> list[str]:
+    return [i for i in TEMPLATE_COLUMNS if templates(user, i)[0] is not None]
 
 
 def list_users(path=DB_PATH):
@@ -217,12 +272,19 @@ def get_verifications(user_id=None, limit=50, path=DB_PATH):
 
 # ------------------------------------------------------------ challenges
 
-def issue_challenge(challenge_id, user_id, ttl_s, path=DB_PATH):
+def issue_challenge(challenge_id, user_id, ttl_s, path=DB_PATH, input="keyboard"):
     now = time.time()
     with conn(path) as c:
-        c.execute("INSERT INTO challenge (challenge_id,user_id,issued_at,expires_at) "
-                  "VALUES (?,?,?,?)", (challenge_id, user_id, now, now + ttl_s))
+        c.execute("INSERT INTO challenge (challenge_id,user_id,issued_at,expires_at,input) "
+                  "VALUES (?,?,?,?,?)", (challenge_id, user_id, now, now + ttl_s, input))
     return now + ttl_s
+
+
+def challenge_input(challenge_id, path=DB_PATH) -> str | None:
+    with conn(path) as c:
+        row = c.execute("SELECT input FROM challenge WHERE challenge_id=?",
+                        (challenge_id,)).fetchone()
+    return row["input"] if row else None
 
 
 def consume_challenge(challenge_id, user_id, path=DB_PATH) -> str:

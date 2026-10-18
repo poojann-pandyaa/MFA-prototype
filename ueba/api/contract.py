@@ -16,7 +16,7 @@ from __future__ import annotations
 import os
 from datetime import datetime
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -34,6 +34,11 @@ THRESHOLD = float(os.getenv("UEBA_FACTOR_THRESHOLD", "0.70"))
 MODEL_VERSION = "ueba-behavioural-2.0"
 
 
+# Kinds of input, each with its own template set: "keyboard" is a physical
+# keyboard with a mouse or trackpad, "touch" is a touchscreen.
+Input = Literal["keyboard", "touch"]
+
+
 class FactorStatus(str, Enum):
     PASSED = "PASSED"
     FAILED = "FAILED"
@@ -47,6 +52,8 @@ class FailureReason(str, Enum):
     CHALLENGE_INCOMPLETE = "CHALLENGE_INCOMPLETE"
     CHALLENGE_MISSING = "CHALLENGE_MISSING"
     NO_TEMPLATE = "NO_TEMPLATE"
+    INPUT_MISMATCH = "INPUT_MISMATCH"      # answered with a different input than the challenge asked for
+    NOT_VALIDATED = "NOT_VALIDATED"        # touch scoring in shadow mode: computed, not trusted yet
     SERVICE_ERROR = "SERVICE_ERROR"
 
 
@@ -110,6 +117,13 @@ class ChallengeResponse(BaseModel):
     aspectRatio: float
     expiresAt: datetime
     shapeRequired: bool
+    # Which template set this challenge is answered against, and whether the
+    # user has one. A challenge for an input with no templates still verifies
+    # to INSUFFICIENT_DATA (the decision engine substitutes another factor);
+    # the page can offer to set that input up instead.
+    input: Input = "keyboard"
+    inputEnrolled: bool = True
+    enrolledInputs: list[str] = []
 
 
 # --------------------------------------------------------------- preview
@@ -166,6 +180,10 @@ class FactorPayload(BaseModel):
     shapeTrace: list[PointerPoint] = []
     pointer: PointerCapture = PointerCapture()
     capability: Capability = Capability()
+    # How each part was actually entered. Missing means keyboard and mouse,
+    # which is what clients written before touch support send.
+    keystrokeInput: Input | None = None
+    shapePointerType: str | None = Field(default=None, max_length=16)
 
 
 class FactorVerifyRequest(BaseModel):
@@ -174,6 +192,10 @@ class FactorVerifyRequest(BaseModel):
     transactionId: str
     challengeId: str
     payload: FactorPayload = FactorPayload()
+    # Measurement only: who is actually at the device in a team test, so
+    # scripts/measure.py can tell genuine from impostor attempts. Stored with
+    # the result; never read by scoring.
+    testerId: str | None = Field(default=None, max_length=64)
 
 
 class FactorVerifyResponse(BaseModel):

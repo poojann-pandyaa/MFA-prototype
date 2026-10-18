@@ -18,6 +18,55 @@ The full request and response formats are in **[CONTRACT.md](CONTRACT.md)**.
 | **Session** | Session length and pacing | Builds up from approved transactions |
 | **Transaction** | Amount, device, location, payee, hour, velocity | Builds up from approved transactions |
 
+### Laptop and phone
+
+Each user has **one profile with two template sets**, because thumb typing
+on glass and finger tracing are different motor skills from a keyboard and
+mouse, and one cannot verify the other:
+
+| Set | Used on | Typing compares | Shape |
+|---|---|---|---|
+| `keyboard` | Laptop or desktop: physical keyboard, mouse or trackpad | Key hold times and gaps between keys | Mouse or trackpad trace |
+| `touch` | Phone or tablet | Gaps between key presses only (hold time is unreliable on phone keyboards) | Finger trace |
+
+- Enrol on whichever device you start with; enrolling the other later adds
+  its set and keeps the first. Profiles enrolled before this change are the
+  keyboard set and need no re-enrolment.
+- Verifying on a device type with no set returns `INSUFFICIENT_DATA` (the
+  decision engine substitutes another factor), never a pass.
+- Typing or tracing with a different input than the challenge asked for
+  fails with `INPUT_MISMATCH`. A stylus is refused for now.
+- A touch template never records a press-to-press spread below 15% of that
+  interval: five samples taken minutes apart underestimate it, and a too-tight
+  template rejects its own owner. **Re-enrol touch** for anyone enrolled before
+  this rule (their keyboard set is unaffected).
+- Touch is scored with the keyboard calibration, marked *provisional*, until
+  real touch measurements are fitted with `scripts/measure.py --fit`. Set
+  `UEBA_TOUCH_MODE=shadow` to record touch scores without using them.
+
+**Phone keyboards** (Android especially) report every letter as
+`"Unidentified"`. The page recovers each character from the change it made
+to the text box, so phone typing now lines up with the phrase; before this,
+every phone sample matched nothing and enrolment failed.
+
+**Testing on your phone.** Start the service on all interfaces, then open
+your Mac's address from the phone on the same Wi-Fi:
+
+```bash
+uvicorn api.service:app --host 0.0.0.0 --port 8000
+ipconfig getifaddr en0          # the Mac's address, e.g. 192.168.1.23
+# on the phone: http://192.168.1.23:8000
+```
+
+**Team measurement.** Each person enrols on a laptop and/or a phone. Then,
+on at least two different days, everyone verifies on their own account and
+on others' accounts, entering their own user ID in *Who is testing*. Then:
+
+```bash
+python -m scripts.measure                 # rejection and acceptance rates per input
+python -m scripts.measure --fit           # fit touch calibrators from the results
+```
+
 ---
 
 ## Quick start
@@ -27,7 +76,7 @@ uv venv && source .venv/bin/activate        # or: python3 -m venv .venv
 uv pip install -r requirements.txt          # or: pip install -r requirements.txt
 
 python -m scripts.train      # calibrate every dimension (~60s)
-python -m pytest tests/ -q   # 66 tests
+python -m pytest tests/ -q   # 85 tests
 
 uvicorn api.service:app --reload
 ```
@@ -200,7 +249,8 @@ store/
   schema.sql         PostgreSQL equivalent for deployment
 static/index.html    React frontend, native event capture
 scripts/train.py     calibrate all four dimensions
-tests/               25 tests
+scripts/measure.py   per-device FRR/FAR from team tests; --fit writes touch calibration
+tests/               85 tests (test_touch.py: laptop and phone templates)
 ```
 
 ---

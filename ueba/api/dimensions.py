@@ -50,21 +50,42 @@ def _penalty(calset: CalibrationSet, dim: str, fallback: float) -> float:
     return cal.impostor_mean if cal else fallback
 
 
+def calibration_key(calset: CalibrationSet, dim: str, input: str) -> tuple[str, bool]:
+    """
+    Which calibrator scores this dimension for this input, and whether it is
+    a stand-in. Keyboard uses the dimension's own ("keystroke", "shape").
+    Touch uses "keystroke_touch" / "shape_touch" once real measurements have
+    been fitted (scripts/measure.py --fit); until then it borrows the
+    keyboard calibrator and is reported as provisional.
+    """
+    if input == "keyboard":
+        return dim, False
+    key = f"{dim}_{input}"
+    if key in calset.calibrators:
+        return key, False
+    return dim, True
+
+
 # ------------------------------------------------------- challenge dims
 
 
 def score_keystroke(tpl: dict | None, events: list[dict],
-                    calset: CalibrationSet) -> tuple[dict, float | None]:
+                    calset: CalibrationSet, input: str = "keyboard") -> tuple[dict, float | None]:
     if tpl is None:
-        return {"status": "INSUFFICIENT_DATA", "reason": "no keystroke template"}, None
+        return {"status": "INSUFFICIENT_DATA", "input": input,
+                "reason": f"no keystroke template for {input}"}, None
 
+    key, provisional = calibration_key(calset, "keystroke", input)
     sample = ks.extract(events)
     cov = sample["coverage"]
     observed = ks.distance(tpl, sample)
-    d = blend(observed, _penalty(calset, "keystroke", 3.0), cov)
-    p = calset.probability("keystroke", d)
+    d = blend(observed, _penalty(calset, key, 3.0), cov)
+    p = calset.probability(key, d)
     return {
         "status": coverage_status(cov),
+        "input": input,
+        "calibration": key,
+        "provisional": provisional,
         "coverage": _r(cov, 3),
         "observedDistance": _r(observed),
         "distance": _r(d),
@@ -74,22 +95,26 @@ def score_keystroke(tpl: dict | None, events: list[dict],
 
 
 def score_shape(tpl: dict | None, points: list[dict], calset: CalibrationSet,
-                applicable: bool = True) -> tuple[dict, float | None]:
+                applicable: bool = True, input: str = "keyboard") -> tuple[dict, float | None]:
     if not applicable:
         # The device cannot trace at all -- a capability limit, not a
         # skipped answer. Excluded rather than penalised.
         return {"status": "NOT_APPLICABLE", "reason": "no pointer or touch input"}, None
     if tpl is None or "split_mean" not in tpl:
-        return {"status": "INSUFFICIENT_DATA",
-                "reason": "no shape template for the current shape -- re-enrol"}, None
+        return {"status": "INSUFFICIENT_DATA", "input": input,
+                "reason": f"no shape template for {input} -- enrol this input"}, None
 
+    key, provisional = calibration_key(calset, "shape", input)
     sample = sh.extract(points)
     cov = sample["coverage"]
     observed = sh.distance(tpl, sample)
-    d = blend(observed, _penalty(calset, "shape", 3.0), cov)
-    p = calset.probability("shape", d)
+    d = blend(observed, _penalty(calset, key, 3.0), cov)
+    p = calset.probability(key, d)
     return {
         "status": coverage_status(cov),
+        "input": input,
+        "calibration": key,
+        "provisional": provisional,
         "coverage": _r(cov, 3),
         "observedDistance": _r(observed),
         "distance": _r(d),

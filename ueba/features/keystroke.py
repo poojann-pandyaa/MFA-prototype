@@ -42,6 +42,25 @@ MIN_ENROLL_COVERAGE = 0.95
 MAX_DEVIATION = 10.0     # cap on any single position's contribution
 STD_FLOOR_MS = 5.0       # below human timing resolution
 
+# Two kinds of input, each with its own template. Thumb typing on glass and
+# ten-finger typing on a keyboard are different motor skills, so one cannot
+# verify the other.
+#
+# On a phone's on-screen keyboard the key-up often arrives at almost the same
+# moment as the key-down, whatever the finger did, so hold time (dwell) and
+# release-to-press (flight) carry little. Touch templates compare only the
+# press-to-press interval between consecutive characters.
+INPUTS = ("keyboard", "touch")
+FIELDS = {"keyboard": ("dwell", "flight"), "touch": ("interval",)}
+
+# Lowest spread a touch template may record for a press-to-press interval,
+# as a share of that interval. Timing variation grows with the length of
+# the interval, and five samples taken minutes apart easily underestimate
+# it: a live touch template recorded 115 +/- 5 ms, so an ordinary 30 ms
+# wobble counted as six standard deviations and genuine attempts failed.
+# 0.15 is a judgement; re-check it with scripts/measure.py on real people.
+TOUCH_STD_FRACTION = 0.15
+
 
 def align(events: list[dict], phrase: str = ENROLL_PHRASE):
     """
@@ -94,6 +113,7 @@ def extract(events: list[dict] | None, phrase: str = ENROLL_PHRASE) -> dict:
 
     dwell = np.full(n, np.nan)
     flight = np.full(n - 1, np.nan)
+    interval = np.full(n - 1, np.nan)
     for i, e in enumerate(slots):
         if e is not None:
             dwell[i] = e["up"] - e["down"]
@@ -102,6 +122,7 @@ def extract(events: list[dict] | None, phrase: str = ENROLL_PHRASE) -> dict:
         if a is not None and b is not None:
             # Negative flight is normal: fast typists overlap keys.
             flight[i] = b["down"] - a["up"]
+            interval[i] = b["down"] - a["down"]
 
     matched = [e for e in slots if e is not None]
     coverage = len(matched) / n
@@ -118,8 +139,8 @@ def extract(events: list[dict] | None, phrase: str = ENROLL_PHRASE) -> dict:
             error_rate=float(backspaces / max(typed, 1)),
         )
 
-    return {"dwell": dwell, "flight": flight, "coverage": coverage,
-            "summary": summary}
+    return {"dwell": dwell, "flight": flight, "interval": interval,
+            "coverage": coverage, "summary": summary}
 
 
 def _stats(mat: np.ndarray, floor: float) -> tuple[list, list]:
@@ -132,7 +153,8 @@ def _stats(mat: np.ndarray, floor: float) -> tuple[list, list]:
     return to_list(mean), to_list(std)
 
 
-def build_template(samples: list[dict], discard_first: int = DISCARD_FIRST) -> dict | None:
+def build_template(samples: list[dict], discard_first: int = DISCARD_FIRST,
+                   input: str = "keyboard") -> dict | None:
     """
     Mean and standard deviation per position, from the enrollment samples.
 
@@ -145,17 +167,26 @@ def build_template(samples: list[dict], discard_first: int = DISCARD_FIRST) -> d
     if len(usable) < MIN_SAMPLES:
         return None
 
+    if input not in INPUTS:
+        raise ValueError(f"unknown input {input!r}")
     dwell_mean, dwell_std = _stats(np.vstack([s["dwell"] for s in usable]), STD_FLOOR_MS)
     flight_mean, flight_std = _stats(np.vstack([s["flight"] for s in usable]), STD_FLOOR_MS)
+    gap_mean, gap_std = _stats(np.vstack([s["interval"] for s in usable]), STD_FLOOR_MS)
+    if input == "touch":
+        gap_std = [None if sd is None else max(sd, TOUCH_STD_FRACTION * abs(m or 0.0))
+                   for m, sd in zip(gap_mean, gap_std)]
     speeds = [s["summary"].get("typing_speed_cps", 0.0) for s in usable]
 
     return {
         "n_samples": len(usable),
         "phrase": ENROLL_PHRASE,
+        "input": input,
+        "fields": list(FIELDS[input]),
         "n_dwell": len(dwell_mean),
         "n_flight": len(flight_mean),
         "dwell_mean": dwell_mean, "dwell_std": dwell_std,
         "flight_mean": flight_mean, "flight_std": flight_std,
+        "interval_mean": gap_mean, "interval_std": gap_std,
         "speed_mean": float(np.mean(speeds)),
     }
 
@@ -175,11 +206,17 @@ def distance(template: dict | None, sample: dict | None) -> float | None:
 
     Digraph latency is not compared: it equals dwell + flight, so including
     it double-counted the same evidence (EER 0.102 with it, 0.075 without).
+
+    Which timings are compared is the template's choice (`fields`): dwell and
+    flight for a keyboard, the press-to-press interval for a touchscreen.
+    Templates made before touch support have no `fields` and are keyboard.
     """
     if template is None or sample is None:
         return None
     parts = []
-    for key in ("dwell", "flight"):
+    for key in template.get("fields", FIELDS["keyboard"]):
+        if f"{key}_mean" not in template:
+            continue
         obs = np.asarray(sample[key], dtype=float)
         mean = _arr(template[f"{key}_mean"])
         std = _arr(template[f"{key}_std"])

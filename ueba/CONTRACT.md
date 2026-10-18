@@ -78,7 +78,12 @@ ignored if sent.
 `hourUnusual` and `dormant` are `null` until enough history exists to judge.
 The preview **writes nothing** to the user's history.
 
-## 2. `GET /factor/challenge?userId=u_1042`
+## 2. `GET /factor/challenge?userId=u_1042&input=touch`
+
+`input` is the kind of input the person is on: `keyboard` (physical
+keyboard with a mouse or trackpad, the default) or `touch` (phone or
+tablet). Each user has a separate template set per input; the challenge
+binds the attempt to one of them.
 
 ```json
 {
@@ -88,9 +93,16 @@ The preview **writes nothing** to the user's history.
   "shape": [[0.15, 0.8], [0.323, 0.2], [0.677, 0.2], [0.85, 0.8]],
   "aspectRatio": 2.0,
   "expiresAt": "2026-10-04T10:15:00Z",
-  "shapeRequired": true
+  "shapeRequired": true,
+  "input": "touch",
+  "inputEnrolled": false,
+  "enrolledInputs": ["keyboard"]
 }
 ```
+
+`inputEnrolled: false` means verifying will return `INSUFFICIENT_DATA`, so
+the decision engine should substitute another factor, and the app can offer
+to enrol this input (best right after the new device is verified).
 
 The phrase and shape are fixed by design. The challenge ID is single-use and
 expires after five minutes.
@@ -98,6 +110,12 @@ expires after five minutes.
 **Client requirements:** draw the shape on a pad locked to `aspectRatio`
 (2:1), and capture the trace with Pointer Events so it works with mouse,
 trackpad and finger. Report `x` and `y` normalised 0–1 to the pad.
+
+**Phone keyboards:** most Android keyboards report every letter as key
+`"Unidentified"` (keyCode 229). Recover the character from the `input`
+event that follows the key-down (the change in the text box) and keep the
+key-down and key-up times. Sending `"Unidentified"` keys scores as an
+empty answer. `static/index.html` (`useKeystroke`) does this.
 
 ## 3. `POST /factor/verify`
 
@@ -111,10 +129,20 @@ trackpad and finger. Report `x` and `y` normalised 0–1 to the pad.
     "keystroke":  [{ "key": "t", "down": 1000.0, "up": 1098.4 }],
     "shapeTrace": [{ "x": 0.15, "y": 0.80, "t": 2000.0 }],
     "pointer":    { "points": [], "clicks": [] },
-    "capability": { "pointer": true, "touch": false }
-  }
+    "capability": { "pointer": true, "touch": false },
+    "keystrokeInput": "keyboard",
+    "shapePointerType": "mouse"
+  },
+  "testerId": null
 }
 ```
+
+`keystrokeInput` (`keyboard` | `touch`) and `shapePointerType` (the
+trace's `PointerEvent.pointerType`) say how each part was entered; both
+must match the challenge's `input` (mouse for keyboard, a finger for
+touch). Omitted means keyboard and mouse. A stylus (`pen`) is not supported
+yet. `testerId` is for team measurements only: who is actually at the
+device. It is stored with the result and never affects the score.
 
 Send keystroke events including `Backspace`, exactly as captured. Do not
 filter or correct them client-side.
@@ -155,7 +183,9 @@ shaped the plan through the preview.
 | part of the challenge partial, score below threshold | `FAILED` | `CHALLENGE_INCOMPLETE` |
 | typing or trace skipped entirely | `FAILED` | `CHALLENGE_INCOMPLETE` |
 | nothing submitted | `FAILED` | `CHALLENGE_MISSING` |
-| user not enrolled | `INSUFFICIENT_DATA` | `NO_TEMPLATE` |
+| user not enrolled, or no templates for the challenge's input | `INSUFFICIENT_DATA` | `NO_TEMPLATE` |
+| a part entered with a different input than the challenge's | `FAILED` | `INPUT_MISMATCH` |
+| touch input while the service runs `UEBA_TOUCH_MODE=shadow` | `INSUFFICIENT_DATA` | `NOT_VALIDATED` |
 | service error | `UNAVAILABLE` | `SERVICE_ERROR` |
 
 UEBA **never returns `SPOOF_DETECTED`** and never reports liveness: it has no
@@ -164,6 +194,12 @@ presentation-attack detector.
 Per-part status in `detail`: `OK` (coverage ≥ 0.9), `PARTIAL`, `MISSING`, or
 `NOT_APPLICABLE` when the device has neither pointer nor touch, in which case
 typing alone decides.
+
+`detail.input` names the template set used. `detail.provisional` is `true`
+when a touch part was scored with the keyboard calibration because no real
+touch measurements have been fitted yet (`python -m scripts.measure --fit`).
+A missing template set is never a pass: it routes to another factor, and an
+input that differs from the challenge's fails.
 
 **Protocol errors** are HTTP errors, not factor results:
 `409 challenge rejected: USED | EXPIRED | WRONG_USER | UNKNOWN`.
