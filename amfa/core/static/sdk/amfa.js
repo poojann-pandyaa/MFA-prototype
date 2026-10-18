@@ -198,7 +198,8 @@
     var base = {
       camera: false,
       microphone: false,
-      pointer: pointer
+      pointer: pointer,
+      touch: behaviourInput() === "touch"
     };
     if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return Promise.resolve(base);
     return navigator.mediaDevices.enumerateDevices().then(function(list) {
@@ -232,30 +233,97 @@
     document.removeEventListener("click", this._mark, true);
     document.removeEventListener("keydown", this._mark, true);
   };
+  // Which behavioural template set this device uses: "touch" on a phone or tablet, "keyboard" with a
+  // physical keyboard and a mouse or trackpad.
+  function behaviourInput() {
+    var coarse = !!(global.matchMedia && global.matchMedia("(pointer: coarse)").matches);
+    return coarse && (navigator.maxTouchPoints || 0) > 0 ? "touch" : "keyboard";
+  }
+  function stamp() {
+    return Math.round(performance.now() * 100) / 100;
+  }
+  // Keystroke timing. A laptop's key events name the key. Phone keyboards (Android especially) send
+  // key "Unidentified" (keyCode 229) for every letter, so the letter is recovered from what that press
+  // did to the text box (the input event that follows it); the timing still comes from the key events.
+  // Without this every phone sample matched none of the phrase and enrolment failed.
   function KeystrokeRecorder(input) {
     this.input = input;
     this.events = [];
     this.down = {};
+    this.pend = [];
+    this.val = input.value || "";
+    this.blindSeen = false;
     var self = this;
+    function blind(e) {
+      return e.key === "Unidentified" || e.key === "Process" || e.keyCode === 229;
+    }
+    function push(ev) {
+      if (self.events.length < 400) self.events.push(ev);
+    }
+    function flush() {
+      self.pend = self.pend.filter(function(q) {
+        if (q.key !== null && q.up !== null) {
+          push(q);
+          return false;
+        }
+        return true;
+      });
+    }
     this._kd = function(e) {
       if (e.repeat) return;
+      if (blind(e)) {
+        self.blindSeen = true;
+        // what the box holds before this press: the page may have cleared it since the last input event
+        self.val = self.input.value;
+        self.pend.push({ key: null, down: stamp(), up: null });
+        return;
+      }
       self.down[e.key] = performance.now();
     };
     this._ku = function(e) {
+      if (blind(e)) {
+        var q = self.pend.filter(function(x) { return x.up === null; })[0];
+        if (q) {
+          q.up = stamp();
+          flush();
+        }
+        return;
+      }
       var t0 = self.down[e.key];
       if (t0 === undefined) return;
       delete self.down[e.key];
-      if (self.events.length < 400) self.events.push({
+      push({
         key: e.key,
         down: Math.round(t0 * 100) / 100,
-        up: Math.round(performance.now() * 100) / 100
+        up: stamp()
       });
+    };
+    // The text belongs to the most recent unnamed press: one that typed nothing (Shift, the switch to
+    // the number keyboard) stays unnamed and is dropped instead of taking the next letter.
+    this._in = function() {
+      var v = self.input.value, old = self.val;
+      self.val = v;
+      var open = self.pend.filter(function(x) { return x.key === null; });
+      var q = open[open.length - 1];
+      if (!q) return;
+      var a = 0, b = 0;
+      while (a < old.length && a < v.length && old[a] === v[a]) a++;
+      while (b < old.length - a && b < v.length - a && old[old.length - 1 - b] === v[v.length - 1 - b]) b++;
+      var keys = [], i, added = v.slice(a, v.length - b);
+      for (i = 0; i < old.length - a - b; i++) keys.push("Backspace");
+      for (i = 0; i < added.length; i++) keys.push(added[i]);
+      if (!keys.length) return;
+      q.key = keys[0];
+      // a word swapped by autocorrect: several characters from one press keep their places
+      for (i = 1; i < keys.length; i++) push({ key: keys[i], down: q.down, up: q.down });
+      flush();
     };
     this._paste = function(e) {
       e.preventDefault();
     };
     input.addEventListener("keydown", this._kd);
     input.addEventListener("keyup", this._ku);
+    input.addEventListener("input", this._in);
     input.addEventListener("paste", this._paste);
     input.addEventListener("drop", this._paste);
     input.setAttribute("autocomplete", "off");
@@ -264,27 +332,46 @@
     input.setAttribute("spellcheck", "false");
   }
   KeystrokeRecorder.prototype.take = function() {
-    var out = this.events.slice();
+    // a press whose release never arrived keeps zero hold time
+    var late = this.pend.filter(function(q) { return q.key !== null; }).map(function(q) {
+      return { key: q.key, down: q.down, up: q.up === null ? q.down : q.up };
+    });
+    var out = this.events.concat(late).sort(function(x, y) { return x.down - y.down; });
     this.events = [];
     this.down = {};
+    this.pend = [];
+    this.val = this.input.value || "";
     return out;
   };
   KeystrokeRecorder.prototype.detach = function() {
     this.input.removeEventListener("keydown", this._kd);
     this.input.removeEventListener("keyup", this._ku);
+    this.input.removeEventListener("input", this._in);
     this.input.removeEventListener("paste", this._paste);
     this.input.removeEventListener("drop", this._paste);
   };
-  function ShapeTracer(canvas, shape, onDone) {
+  // opts.input ("keyboard" | "touch"), when given, refuses a trace drawn with the other kind of pointer
+  // and calls opts.onRefused(message). A stylus is not supported yet. onDone(points, pointerType).
+  function ShapeTracer(canvas, shape, onDone, opts) {
     this.canvas = canvas;
     this.shape = shape;
     this.onDone = onDone;
+    this.opts = opts || {};
     this.points = [];
+    this.pointerType = null;
     this.active = false;
     var self = this;
     this._resize();
     this._down = function(e) {
+      var want = self.opts.input, kind = { mouse: "keyboard", touch: "touch" }[e.pointerType];
+      if (e.pointerType === "pen" || (want && kind !== want)) {
+        if (self.opts.onRefused) self.opts.onRefused(e.pointerType === "pen" ? "A stylus isn't supported yet. Use your finger or a mouse."
+          : want === "touch" ? "Trace the line with your finger." : "Trace the line with the mouse or trackpad.");
+        e.preventDefault();
+        return;
+      }
       if (!self._nearStart(e)) return;
+      self.pointerType = e.pointerType;
       self.active = true;
       self.points = [];
       canvas.setPointerCapture(e.pointerId);
@@ -302,7 +389,7 @@
       self.active = false;
       var pts = self.points.slice();
       self.draw();
-      if (self.onDone) self.onDone(pts);
+      if (self.onDone) self.onDone(pts, self.pointerType);
     };
     canvas.addEventListener("pointerdown", this._down);
     canvas.addEventListener("pointermove", this._move);
@@ -681,6 +768,7 @@
     hasDeviceKey: hasDeviceKey,
     signWithDevice: signWithDevice,
     capabilities: capabilities,
+    behaviourInput: behaviourInput,
     Telemetry: Telemetry,
     KeystrokeRecorder: KeystrokeRecorder,
     ShapeTracer: ShapeTracer,

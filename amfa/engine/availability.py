@@ -20,7 +20,9 @@ def available(f: Factor, ctx: Context) -> bool:
     if f is Factor.VOICE:
         return e.voice and c.microphone
     if f is Factor.UEBA:
-        return e.keystroke
+        # Typing on glass cannot be checked against a keyboard template or the reverse, so UEBA is
+        # available only when this kind of device has its own templates.
+        return e.keystrokeTouch if c.touch else e.keystroke
     return False
 
 

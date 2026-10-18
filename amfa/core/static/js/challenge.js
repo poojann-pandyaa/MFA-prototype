@@ -56,9 +56,27 @@
     });
     document.getElementById("approving").classList.remove("hidden");
   }
+  // After an approval that passed a face or voice check, this device keeps its own key, so later
+  // approvals from it prove it is this device and not a copied ID. Silent: a refusal changes nothing.
+  function keepDeviceKey(st) {
+    var live = st.steps.some(function(s) {
+      return (s.factor === "FACE" || s.factor === "VOICE") && s.status === "PASSED";
+    });
+    if (st.status !== "VERIFIED" || st.deviceBound || !live) return Promise.resolve();
+    var add = AMFA.deviceKey().then(function(k) {
+      return api.post("/c/v1/session/device-key", {
+        deviceId: k.deviceId,
+        publicJwk: k.publicJwk
+      });
+    }).catch(function() {});
+    // the bank closes this page when told the outcome: let the key arrive first, but never wait long
+    return Promise.race([ add, new Promise(function(r) { setTimeout(r, 4000); }) ]);
+  }
   function final(st) {
     teardown();
-    notifyParent(st.status);
+    keepDeviceKey(st).then(function() {
+      notifyParent(st.status);
+    });
     var map = {
       VERIFIED: [ "ok", "✓", "Approved", "You can return to your bank app. The transaction will now be processed." ],
       BLOCKED: [ "bad", "!", "Not approved", "We could not verify it was you. Your bank has been notified. If you did not start this transaction, contact your bank now." ],
@@ -358,9 +376,18 @@
         text: "Then trace the line from the green dot to the red dot."
       }));
       canvasWrap.appendChild(canvas);
+      var traceKind = null, note = null;
       requestAnimationFrame(function() {
-        tracer = new AMFA.ShapeTracer(canvas, ch.params.shape, function(pts) {
+        tracer = new AMFA.ShapeTracer(canvas, ch.params.shape, function(pts, pointerType) {
           trace = pts;
+          traceKind = pointerType;
+        }, {
+          input: ch.params.input || "keyboard",
+          onRefused: function(msg) {
+            if (note) note.remove();
+            note = UI.notice("warn", msg);
+            canvasWrap.insertBefore(note, canvas);
+          }
         });
       });
     }
@@ -378,10 +405,15 @@
         panel.insertBefore(UI.notice("warn", "Please trace the line as well."), form);
         return;
       }
+      // how each part was entered; the service checks it against the challenge's template set
       var payload = {
-        keystrokeSample: keys.take()
+        keystrokeSample: keys.take(),
+        keystrokeInput: ch.params.input || "keyboard"
       };
-      if (trace) payload.shapeTrace = trace;
+      if (trace) {
+        payload.shapeTrace = trace;
+        payload.shapePointerType = traceKind;
+      }
       submit(ch, payload, btn);
     });
   }

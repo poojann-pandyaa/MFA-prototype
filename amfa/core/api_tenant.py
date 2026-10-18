@@ -62,13 +62,20 @@ class BankDevice(Strict):
     firstSeenAt: float = Field(gt=946684800)
 
 
+def _ueba_inputs(rows) -> list[str]:
+    """Kinds of device with behavioural templates: "keyboard", "touch". Older enrolments are keyboard."""
+    u = next((e for e in rows if e.factor == "UEBA" and e.status == "ENROLLED"), None)
+    return list((u.detail or {}).get("inputs", ["keyboard"])) if u else []
+
+
 def _user_view(s, c: db.Customer) -> dict:
     rows = s.execute(select(db.Enrollment).where(db.Enrollment.customer_id == c.id)).scalars().all()
     totp = s.get(db.TotpCredential, c.id)
     return {"id": c.id, "externalRef": c.external_ref, "status": c.status, "segment": c.segment,
             "lockedReason": c.locked_reason, "createdAt": int(c.created_at),
             "enrollment": {e.factor: e.status for e in rows}
-                          | {"OTP_DELIVERY": bool(c.contact_sealed), "OTP_TOTP": bool(totp and totp.confirmed)},
+                          | {"OTP_DELIVERY": bool(c.contact_sealed), "OTP_TOTP": bool(totp and totp.confirmed),
+                             "UEBA_INPUTS": _ueba_inputs(rows)},
             "verifiedTransactions": c.verified_count}
 
 
@@ -211,6 +218,7 @@ class CapabilityInfo(Strict):
     camera: bool = True
     microphone: bool = True
     pointer: Optional[bool] = None
+    touch: Optional[bool] = None    # on a touchscreen: the behavioural check uses the touch templates
 
 
 class SessionInfo(Strict):

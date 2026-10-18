@@ -48,6 +48,41 @@ Tests: `test_gallery.py` and `test_metrics.py` ported unchanged apart from impor
 Not verified: a run against the real ECAPA and RawNet2 weights, and identification accuracy on real
 voices (the thresholds 0.30 / 0.05 are the branch's, measured on its own data).
 
+## Behaviour on phones (touchscreens)
+
+Typing and tracing on a phone could not enrol: Android keyboards report every letter as key
+`"Unidentified"` (keyCode 229), so no sample matched the phrase (`NOT_ENOUGH_USABLE_SAMPLES`). Fixed
+and extended, after the same change was tested on real phones in the standalone `ueba` service:
+
+| Part | Change |
+|---|---|
+| `sdk/amfa.js` `KeystrokeRecorder` | an unnamed key takes its character from the change it made to the text box; the most recent press gets it, so Shift or the number-keyboard switch cannot take the next letter. `behaviourInput()` says `keyboard` or `touch`; `ShapeTracer` reports the pointer type and refuses the other kind (and a stylus) when told which to expect |
+| UEBA templates | one record per user, two sets: the keyboard set where it always was, the touch set under `touch`. Enrolling one keeps the other; older records are the keyboard set |
+| Touch typing | compares only press-to-press intervals (hold times are ~3 ms on every phone keyboard), with a spread floor of 15 % of each interval; the bot check and replay guard use the intervals too, otherwise every phone sample is "automation" |
+| `/factor/verify` | the challenge's `input` picks the set; no set for it is `INSUFFICIENT_DATA` (`NO_ENROLLED_TEMPLATE`), never a pass; typing or a trace entered with the other kind of input is `FAILED` `INPUT_MISMATCH` |
+| Calibration | touch borrows the keyboard calibrators until `keystroke_touch` / `shape_touch` are fitted from real attempts, and says so (`detail.provisional`). `AMFA_UEBA_TOUCH_MODE=shadow` scores phones without deciding (`TOUCH_NOT_VALIDATED`); the default is `live` |
+| Engine | `Capability.touch`; `Enrollment.keystrokeTouch/shapeTouch`; UEBA is available only for a kind of device with templates, so a phone without them gets a substitute at planning time |
+| Core | transactions accept `capability.touch`; the UEBA challenge carries `input` and asks for the shape whenever that set has one (phones included); behaviour enrolment takes `input` and the traces' pointer types; adding the other kind of device does not need a replacement link (re-enrolling one that exists still does); `/v1/users/{id}` reports `enrollment.UEBA_INPUTS` |
+| Demo bank | sends `touch`; Security shows typing per device and offers "Add this phone" / "Add this computer" |
+
+Not verified here: thresholds for touch on real people. Measure with the standalone service's
+`scripts/measure.py` (team test, genuine and impostor attempts, two days), then fit the touch calibrators.
+
+## Device keys on more than one device
+
+Before: one keyed device per customer; any other device stayed on its ID alone, and a customer whose
+first device was lost could never key another without a bank-issued replacement link (which the demo
+bank never requests). Setting up typing on a second device also ended in a `DEVICE_BINDING_REQUIRES_REPLACE`
+error, though the typing had been saved.
+
+Now `POST /c/v1/session/device-key` lets a device add its own key at the end of an approval, only when the
+approval is `VERIFIED`, it passed a face or voice check, it finished in the last 10 minutes, the request
+comes from the device the transaction named, that device has no other key, and the customer has fewer
+than 5 keyed devices. Every addition is audited and raises a `DEVICE_KEY_ADDED` security event. Enrolment
+links still cannot add a second key; the hosted set-up page now finishes quietly when that is refused, and
+re-presenting the key a device already holds is accepted. `challenge.js` adds the key after a passed
+approval, before telling the bank the outcome (at most 4 s).
+
 ## ueba-service @ 23910e1
 
 Ported (`amfa/factors/ueba/{features,scoring,data,training}`, new `dimensions.py`, `service.py`,

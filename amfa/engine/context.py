@@ -113,14 +113,22 @@ class Enrollment(BaseModel):
     otp: bool = True
     face: bool = True
     voice: bool = True
-    keystroke: bool = True
+    keystroke: bool = True          # behavioural templates for a keyboard and mouse
     shape: bool = True
+    keystrokeTouch: bool = False    # and for a touchscreen; a separate set, enrolled on a phone
+    shapeTouch: bool = False
 
 
 class Capability(BaseModel):
     camera: bool = True
     microphone: bool = True
     pointer: bool = True
+    touch: bool = False             # the customer is on a touchscreen (phone or tablet)
+
+
+def behaviour_input(c: Capability) -> str:
+    """Which behavioural template set this device is checked against."""
+    return "touch" if c.touch else "keyboard"
 
 
 class OrgCtx(BaseModel):
