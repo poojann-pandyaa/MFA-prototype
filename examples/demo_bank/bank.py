@@ -279,6 +279,7 @@ class Device(BaseModel):
     camera: bool = True
     microphone: bool = True
     pointer: bool = False
+    touch: bool = False
 
 
 def _paise(v: float) -> float:
@@ -502,7 +503,8 @@ def _start(k: Kind, kind: str, username: str, body: Device, request: Request) ->
             currency="INR", payee_ref=a["payeeRef"], payee_display=a["payeeDisplay"],
             payee_created_at=a.get("payeeCreatedAt"), device_id=body.deviceId,
             ip=_client_ip(request),
-            capability={"camera": body.camera, "microphone": body.microphone, "pointer": body.pointer},
+            capability={"camera": body.camera, "microphone": body.microphone, "pointer": body.pointer,
+                        "touch": body.touch},
             account_events=_account_events(c, a) or None, idempotency_key=f"bank-{a['id']}")
     except AmfaError as e:
         if e.code == "USER_NOT_ACTIVE":

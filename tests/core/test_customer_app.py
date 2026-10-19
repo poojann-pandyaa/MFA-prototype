@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from amfa import config
+from amfa.common import crypto
 from amfa.common.contract import FactorResult
 from amfa.core import api_admin, db, factors, orchestrator, otp
 from amfa.core.app import create_app
@@ -535,3 +536,97 @@ def test_codes_stop_after_the_send_limit(stack, app, monkeypatch):
     over = stack.core.post("/c/v1/session/otp/resend", headers=auth)
     assert over.status_code == 429 and over.json()["error"]["code"] == "OTP_SEND_LIMIT"
     assert verify(stack, started["challengeUrl"])["status"] == "VERIFIED"   # the last code still works
+
+
+def _session_steps(stack, challenge_url):
+    token = challenge_url.split("#token=", 1)[1]
+    auth = {"authorization": f"Bearer {token}"}
+    return auth, stack.core.get("/c/v1/session", headers=auth).json()
+
+
+def test_typing_on_a_phone_needs_phone_templates(stack, app, monkeypatch):
+    """Computer templates cannot check thumb typing: on a phone without phone templates the typing
+    check is replaced; once the phone is enrolled it is used, against the phone set."""
+    LEVEL["now"] = "T1"
+    monkeypatch.setattr(factors, "ueba_phrase", lambda: {"phrase": "the quick brown fox 2026",
+                                                         "shape": [[0.15, 0.8], [0.85, 0.8]]})
+    r = act(app, "transfer", payeeRef="BEN-42", amountRupees=2500, touch=True)
+    assert r.status_code == 201, r.text
+    assert "typing check" not in r.json()["action"]["checks"]
+
+    amfa_user = stack.bank.CUSTOMERS[app.user]["amfaUser"]
+    with db.session() as s:
+        row = s.execute(select(db.Enrollment).where(db.Enrollment.customer_id == amfa_user,
+                                                    db.Enrollment.factor == "UEBA")).scalars().one()
+        row.detail = {"inputs": ["keyboard", "touch"], "shapeInputs": ["keyboard", "touch"], "shape": True}
+    r = act(app, "transfer", payeeRef="BEN-42", amountRupees=2500, touch=True)
+    started = r.json()
+    assert "typing check" in started["action"]["checks"]
+    auth, st = _session_steps(stack, started["challengeUrl"])
+    for _ in range(4):
+        ch = st["challenge"]
+        if ch["factor"] == "UEBA":
+            break
+        payload = {"code": re.match(r"(\d+)", SENT[-1]).group(1)} if ch["factor"] == "OTP" else {}
+        st = stack.core.post(f"/c/v1/session/factors/{ch['factor']}", headers=auth,
+                             json={"challengeId": ch["challengeId"], "payload": payload}).json()["state"]
+    assert ch["factor"] == "UEBA"
+    assert ch["params"]["input"] == "touch" and ch["params"]["shape"]
+
+
+def test_a_computer_still_gets_the_computer_challenge(stack, app):
+    LEVEL["now"] = "T1"
+    started = act(app, "transfer", payeeRef="BEN-42", amountRupees=2500).json()
+    assert "typing check" in started["action"]["checks"]
+
+
+def _jwk():
+    from cryptography.hazmat.primitives.asymmetric import ec
+    n = ec.generate_private_key(ec.SECP256R1()).public_key().public_numbers()
+    b = lambda v: crypto.b64e(v.to_bytes(32, "big"))
+    return {"kty": "EC", "crv": "P-256", "x": b(n.x), "y": b(n.y)}
+
+
+def _passed_session(stack, app, level):
+    LEVEL["now"] = level
+    # above the small-payment line, so the model's level (and its face check) stands
+    started = act(app, "transfer", payeeRef="BEN-42", amountRupees=LARGE).json()
+    state = verify(stack, started["challengeUrl"])
+    token = started["challengeUrl"].split("#token=", 1)[1]
+    return {"authorization": f"Bearer {token}"}, state
+
+
+def _add_key(stack, auth, device=PHONE_DEVICE, jwk=None):
+    return stack.core.post("/c/v1/session/device-key", headers=auth,
+                           json={"deviceId": device, "publicJwk": jwk or _jwk()})
+
+
+def test_a_device_adds_its_own_key_after_an_approval_with_a_face_check(stack, app):
+    auth, state = _passed_session(stack, app, "T2")          # code, typing and face
+    assert state["status"] == "VERIFIED"
+    jwk = _jwk()
+    r = _add_key(stack, auth, jwk=jwk)
+    assert r.status_code == 200 and r.json() == {"bound": True, "added": True}
+    assert _add_key(stack, auth, jwk=jwk).json() == {"bound": True, "added": False}   # the same key again
+    assert _add_key(stack, auth).status_code == 409          # never swapped for a different key
+
+
+def test_no_key_without_a_face_or_voice_check(stack, app):
+    auth, state = _passed_session(stack, app, "T1")          # code and typing only
+    assert state["status"] == "VERIFIED"
+    r = _add_key(stack, auth)
+    assert r.status_code == 403 and r.json()["error"]["code"] == "LIVE_CHECK_REQUIRED"
+
+
+def test_only_the_device_that_was_approved_can_add_a_key(stack, app):
+    auth, _ = _passed_session(stack, app, "T2")
+    r = _add_key(stack, auth, device="another-device-00099")
+    assert r.status_code == 403 and r.json()["error"]["code"] == "WRONG_DEVICE"
+
+
+def test_no_key_before_the_approval_has_passed(stack, app):
+    LEVEL["now"] = "T2"
+    started = act(app, "transfer", payeeRef="BEN-42", amountRupees=2500).json()
+    auth = {"authorization": "Bearer " + started["challengeUrl"].split("#token=", 1)[1]}
+    r = _add_key(stack, auth)
+    assert r.status_code == 409 and r.json()["error"]["code"] == "SESSION_NOT_VERIFIED"

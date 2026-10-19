@@ -3,9 +3,13 @@
 import { api } from "./api.js";
 import { currentDevice, go, refresh } from "./app.js";
 
+// On a touchscreen AMFA checks typing and tracing against the customer's phone templates.
+export const onTouchscreen = () => matchMedia("(pointer: coarse)").matches && (navigator.maxTouchPoints || 0) > 0;
+
 function capabilities() {
   const media = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
-  return { camera: media, microphone: media, pointer: matchMedia("(pointer: fine)").matches };
+  return { camera: media, microphone: media, pointer: matchMedia("(pointer: fine)").matches,
+           touch: onTouchscreen() };
 }
 
 export async function start(kind, body = {}) {

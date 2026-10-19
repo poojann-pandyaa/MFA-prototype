@@ -162,8 +162,12 @@ def issue_challenge(s, sess: db.AuthSession, customer: db.Customer, txn: db.Tran
     elif factor == "UEBA":
         phrase = factors.ueba_phrase() or {}
         ctx = _ctx(sess)
-        params = {"phrase": phrase.get("phrase"),
-                  "shape": phrase.get("shape") if (ctx.capability.pointer and ctx.enrollment.shape) else None}
+        touch = ctx.capability.touch
+        # The challenge names the template set it is answered against; the shape is asked for when
+        # that set has one (a finger on a phone, a mouse or trackpad on a computer).
+        shape_ok = ctx.enrollment.shapeTouch if touch else (ctx.capability.pointer and ctx.enrollment.shape)
+        params = {"phrase": phrase.get("phrase"), "input": "touch" if touch else "keyboard",
+                  "shape": phrase.get("shape") if shape_ok else None}
     ttl = otp.DELIVERED_TTL_S if params.get("mode") == "delivered" else CHALLENGE_TTL_S   # the code's own life
     ch = db.Challenge(id=f"ch_{uuid.uuid4().hex[:20]}", session_id=sess.id, factor=factor,
                       params=params, expires_at=now + ttl)

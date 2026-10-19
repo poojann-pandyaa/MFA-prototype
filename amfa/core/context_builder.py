@@ -76,12 +76,18 @@ def enrollment_of(s, customer: db.Customer) -> Enrollment:
     rows = {e.factor: e for e in s.execute(select(db.Enrollment).where(
         db.Enrollment.customer_id == customer.id, db.Enrollment.status == "ENROLLED")).scalars()}
     ueba = rows.get("UEBA")
+    d = (ueba.detail or {}) if ueba else {}
+    # Enrolments from before touch support have no "inputs" and are the keyboard set.
+    inputs = d.get("inputs", ["keyboard"]) if ueba else []
+    shapes = d.get("shapeInputs", ["keyboard"] if d.get("shape") else [])
     return Enrollment(
         otp="OTP" in rows or bool(customer.contact_sealed),
         face="FACE" in rows,
         voice="VOICE" in rows,
-        keystroke=ueba is not None,
-        shape=bool(ueba and (ueba.detail or {}).get("shape")),
+        keystroke="keyboard" in inputs,
+        shape="keyboard" in shapes,
+        keystrokeTouch="touch" in inputs,
+        shapeTouch="touch" in shapes,
     )
 
 
@@ -166,7 +172,8 @@ def assemble(s, tenant: db.Tenant, customer: db.Customer, txn_id: str, t: TxnInp
     cap = t.capability or {}
     capability = Capability(camera=bool(cap.get("camera", True)),
                             microphone=bool(cap.get("microphone", True)),
-                            pointer=bool(cap.get("pointer", t.channel != "MOBILE")))
+                            pointer=bool(cap.get("pointer", t.channel != "MOBILE")),
+                            touch=bool(cap.get("touch", False)))
 
     segment = Segment(customer.segment)
     floor, org = policy.derive(t.type, band, t.amount_minor, t.currency, segment, new_payee)

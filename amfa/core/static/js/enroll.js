@@ -38,7 +38,9 @@
       TOO_NOISY: "Find a quieter place and try again.",
       AUDIO_CLIPPED: "Hold the device a little further away.",
       INCONSISTENT_SPEAKER: "All three recordings need to be in your own voice.",
-      NOT_ENOUGH_USABLE_SAMPLES: "Some typing samples didn't match the phrase exactly. Let's do a few more."
+      NOT_ENOUGH_USABLE_SAMPLES: "Some typing samples didn't match the phrase exactly. Let's do a few more.",
+      SHAPE_POINTER_MISMATCH: "Trace the line with the same kind of input you typed with: your finger on a phone, the mouse or trackpad on a computer.",
+      SHAPE_POINTER_TYPES_INVALID: "Something went wrong with the tracing. Please try again."
     };
     return reasons[res.reason] || "That didn't work (" + (res.reason || "error") + "). Please try again.";
   }
@@ -294,9 +296,10 @@
     });
   }
   function typingStep() {
-    var info = state.behaviour, target = info.repetitions || 10, samples = [], traces = [];
-    var wantShape = false;
-    heading("Typing rhythm", "Type the phrase below " + target + " times, pressing Enter after each. " + "The first one is practice — just type naturally.");
+    var info = state.behaviour, target = info.repetitions || 10, samples = [], traces = [], kinds = [];
+    var kind = AMFA.behaviourInput(), wantShape = false;
+    heading("Typing rhythm", "Type the phrase below " + target + " times, pressing Enter after each. " + "The first one is practice — just type naturally." +
+      (kind === "touch" ? " Type each letter yourself; if your keyboard suggests or corrects words, turn that off for now." : ""));
     var bar = el("span"), count = el("p", {
       class: "muted"
     });
@@ -330,7 +333,8 @@
     update();
     input.focus();
     AMFA.capabilities().then(function(c) {
-      wantShape = c.pointer && info.shape;
+      // a finger on a phone, a mouse or trackpad on a computer; each has its own template
+      wantShape = !!info.shape && (kind === "touch" || c.pointer);
     });
     form.addEventListener("submit", function(e) {
       e.preventDefault();
@@ -357,13 +361,22 @@
       panel.appendChild(canvas);
       panel.appendChild(c2);
       requestAnimationFrame(function() {
-        var tr = new AMFA.ShapeTracer(canvas, info.shape, function(pts) {
+        var note = null;
+        var tr = new AMFA.ShapeTracer(canvas, info.shape, function(pts, pointerType) {
           if (pts.length < 10) return;
           traces.push(pts);
+          kinds.push(pointerType);
           c2.textContent = traces.length + " of " + need;
           if (traces.length >= need) {
             tr.detach();
             send();
+          }
+        }, {
+          input: kind,
+          onRefused: function(msg) {
+            if (note) note.remove();
+            note = UI.notice("warn", msg);
+            panel.insertBefore(note, canvas);
           }
         });
         cleanup.push(function() {
@@ -375,7 +388,9 @@
       heading("Typing rhythm", "Checking…");
       api.post("/c/v1/enrollment/behaviour", {
         keystrokeSamples: samples,
-        shapeTraces: traces
+        shapeTraces: traces,
+        input: kind,
+        shapePointerTypes: kinds
       }).then(function(res) {
         if (res.enrolled) return next();
         panel.appendChild(UI.notice("bad", rejected(res)));
@@ -397,6 +412,9 @@
       });
     }).then(next, function(e) {
       if (!(e instanceof AMFA.ApiError)) return next();
+      // another device already holds this customer's key: this one adds its own after its next approval
+      // with a face or voice check, so the set-up itself is complete
+      if (e.code === "DEVICE_BINDING_REQUIRES_REPLACE") return next();
       fail(e);
     });
   }
@@ -445,7 +463,10 @@
     names = st.consent.required ? [ "CONSENT" ] : [];
     [ "OTP", "FACE", "VOICE", "UEBA" ].forEach(function(f) {
       var doneHere = (st.completedWithThisLink || []).indexOf(f) >= 0;
-      if (st.requested.indexOf(f) >= 0 && !doneHere && (!st.enrolled[f] || st.replace)) {
+      // behaviour has one template set per kind of device: a phone can be added after a laptop
+      var newDevice = f === "UEBA" && st.behaviour &&
+        (st.behaviour.enrolledInputs || []).indexOf(AMFA.behaviourInput()) < 0;
+      if (st.requested.indexOf(f) >= 0 && !doneHere && (!st.enrolled[f] || st.replace || newDevice)) {
         steps.push(order[f]);
         names.push(f);
       }

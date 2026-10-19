@@ -54,6 +54,29 @@ BANK_STATE_FILE=data/demo-bank-state.json .venv/bin/uvicorn examples.demo_bank.b
 
 and open http://127.0.0.1:8050 on a laptop or phone. Development OTP codes are printed in the core's log.
 
+**macOS notes.** Use Python 3.12 (`brew install python@3.12`, then `python3.12 -m venv .venv`). If pip
+rejects the `+cpu` torch pins, install plain `torch` and an unpinned `torchaudio` from PyPI; if
+`vosk==0.3.45` has no wheel, use `vosk==0.3.44`; `llama_cpp` is only needed for `AMFA_AGENT_BACKEND=local`.
+The risk model needs `brew install libomp`.
+
+**Testing on a phone over the internet.** Open two tunnels, one for AMFA and one for the bank
+(`--protocol http2` avoids QUIC, which some networks block):
+
+```bash
+cloudflared tunnel --protocol http2 --url http://127.0.0.1:8040   # -> https://<amfa>.trycloudflare.com
+cloudflared tunnel --protocol http2 --url http://127.0.0.1:8050   # -> https://<bank>.trycloudflare.com
+```
+
+Then use the public addresses everywhere instead of `127.0.0.1`:
+
+- start the core with `AMFA_PUBLIC_URL=https://<amfa>.trycloudflare.com`;
+- start the bank with `AMFA_BASE_URL=https://<amfa>.trycloudflare.com`. The bank's `frame-src` comes from
+  this value, so with `127.0.0.1` the phone shows "This content is blocked";
+- add `https://<bank>.trycloudflare.com` to the tenant's `allowedEmbedOrigins` (the core caches this list
+  for up to 60 seconds).
+
+Quick-tunnel addresses change every time cloudflared restarts, so repeat these three steps after a restart.
+
 ## Customer app
 
 `examples/demo_bank` is a phone-first banking app in which every action that moves money or changes the
@@ -94,6 +117,18 @@ label for retraining and raises a security event; review verdicts become labels 
 **Demo mode** (`BANK_DEMO_TOOLS=1`, the default; set `0` for a real deployment). A "Behind the scenes" button
 opens AMFA's decision on the last action (threat level, fraud probability, the model's reasons, the checks
 asked against the old rule table) and stages a SIM swap, a payee on a mule list, a new phone, or an unfreeze.
+
+**Laptop and phone.** Typing and the shape trace are enrolled once per kind of device: keyboard and
+mouse on a computer, touch on a phone. A phone is scored only against touch templates and a computer only
+against keyboard ones; if the device in hand has none yet, behaviour is not offered and Security shows
+"Add this phone" or "Add this computer". Touch scores use provisional calibration borrowed from the
+keyboard until a team test is fitted (see `INTEGRATION.md`, "Behaviour on phones").
+
+**More than one device.** A customer's first device gets its signing key at enrolment. A second trusted
+device (for example a phone after a laptop) gets its own key automatically once it passes a verification
+that included face or voice (claimed within 10 minutes of it, at most 5 devices); each addition raises a
+`DEVICE_KEY_ADDED` security event. Enrolment links still can't replace an existing key without a
+replacement link (`INTEGRATION.md`, "Device keys on more than one device").
 
 Layout: `static/js/app.js` (router, guards), `ui.js` (components), `amfa-frame.js` (the full-screen host for
 AMFA's pages), `actions.js`, and one module per screen in `static/js/screens/`. No build step.
@@ -139,6 +174,7 @@ dataset for coverage and fairness checks; the model is never given age. Add a sc
 | `AMFA_AGENT_BACKEND` | `local` (Qwen2.5-3B on the server, can only add checks), `off` (risk model only) |
 | `AMFA_ADMIN_TOTP` | `required` (password + authenticator), `off` (password only) |
 | `AMFA_VOICE_PROMPT_CHECK` | `advisory`, `enforce`, `off` |
+| `AMFA_UEBA_TOUCH_MODE` | `live` (phone typing and shape count toward the decision; default), `shadow` (scored and logged only, never counted) |
 
 Per-bank policy (permitted factors, risk appetite, minimum checks, how many checks the AI may
 add) is edited in the admin console. Leaving `OTP` out of the permitted factors removes the

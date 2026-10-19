@@ -6,7 +6,7 @@ from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from amfa.common import crypto
 from amfa.common.web import ApiError, rate_limit
@@ -46,12 +46,17 @@ def _require_consent(customer: db.Customer) -> None:
         raise ApiError(403, "CONSENT_REQUIRED", "consent must be given before biometric capture")
 
 
-def _guard_overwrite(s, caller: ClientCaller, customer: db.Customer, factor: str) -> bool:
+def _guard_overwrite(s, caller: ClientCaller, customer: db.Customer, factor: str,
+                     input: Optional[str] = None) -> bool:
     if f"DONE:{factor}" in caller.scope:
         raise ApiError(409, "ALREADY_ENROLLED_WITH_THIS_LINK", f"{factor} was already enrolled with this link")
     existing = s.execute(select(db.Enrollment).where(db.Enrollment.customer_id == customer.id,
                                                      db.Enrollment.factor == factor,
                                                      db.Enrollment.status == "ENROLLED")).scalars().first()
+    if existing is not None and factor == "UEBA" and input and \
+            input not in (existing.detail or {}).get("inputs", ["keyboard"]):
+        # Adding the templates for another kind of device (a phone after a laptop) replaces nothing.
+        return False
     if existing is not None and not caller.may_replace:
         raise ApiError(409, "ALREADY_ENROLLED", f"{factor} is already enrolled; the bank must issue a "
                        "replacement link to change it")
@@ -85,6 +90,13 @@ def enrollment_state(caller: ClientCaller = Depends(enroll_caller)):
         done = _enrolled(s, customer.id)
         requested = [f for f in caller.scope if f in ("OTP", "FACE", "VOICE", "UEBA")]
         phrase = factors.ueba_phrase() if "UEBA" in requested else None
+        ueba = s.execute(select(db.Enrollment).where(db.Enrollment.customer_id == customer.id,
+                                                     db.Enrollment.factor == "UEBA",
+                                                     db.Enrollment.status == "ENROLLED")).scalars().first()
+        if phrase is not None:
+            # Which kinds of device already have behavioural templates, so the page can offer to
+            # add this one (a phone after a laptop) instead of skipping behaviour as "done".
+            phrase = {**phrase, "enrolledInputs": (ueba.detail or {}).get("inputs", ["keyboard"]) if ueba else []}
         return {"bank": tenant.name, "theme": _theme(s, tenant), "requested": requested, "replace": caller.may_replace,
                 "completedWithThisLink": [x[5:] for x in caller.scope if x.startswith("DONE:")],
                 "enrolled": {f: done.get(f, False) for f in requested},
@@ -173,6 +185,8 @@ class VoiceEnroll(Strict):
 class BehaviourEnroll(Strict):
     keystrokeSamples: list[list[dict]] = Field(min_length=1, max_length=20)
     shapeTraces: list[list[dict]] = Field(default_factory=list, max_length=10)
+    input: Literal["keyboard", "touch"] = "keyboard"
+    shapePointerTypes: list[str] = Field(default_factory=list, max_length=10)
     mouseSegments: list[list[dict]] = Field(default_factory=list, max_length=20)
     mouseClicks: list[dict] = Field(default_factory=list, max_length=500)
 
@@ -184,14 +198,18 @@ def _biometric_enroll(caller: ClientCaller, factor: str, payload: dict, rate_key
     with db.session() as s:
         _, customer = _load(s, caller)
         _require_consent(customer)
-        replaced = _guard_overwrite(s, caller, customer, factor)
+        replaced = _guard_overwrite(s, caller, customer, factor, payload.get("input"))
     res = factors.enroll(factor, tenant=caller.tenant_id, user=caller.customer_id, payload=payload)
     if not res.enrolled:
         log.info("enrolment rejected", extra={"factor": factor, "reason": res.reason, "quality": res.quality})
         return {"enrolled": False, "factor": factor, "reason": res.reason, "quality": res.quality}
     detail = {"model": res.modelVersion}
     if factor == "UEBA":
-        detail["shape"] = (res.quality.get("shape") or {}).get("status") == "ENROLLED"
+        per = res.quality.get("inputs") or {}
+        detail["inputs"] = res.quality.get("enrolledInputs") or ["keyboard"]
+        detail["shapeInputs"] = [i for i, v in per.items() if v.get("shape")] if per else (
+            ["keyboard"] if (res.quality.get("shape") or {}).get("status") == "ENROLLED" else [])
+        detail["shape"] = "keyboard" in detail["shapeInputs"]
     with db.session() as s:
         _, customer = _load(s, caller)
         _record_enrollment(s, customer, factor, detail)
@@ -291,6 +309,10 @@ def enroll_device(body: DeviceKey, caller: ClientCaller = Depends(enroll_caller)
         others = s.execute(select(db.Device).where(db.Device.customer_id == customer.id,
                                                    db.Device.device_key != key,
                                                    db.Device.public_jwk.is_not(None))).scalars().first()
+        if dev is not None and dev.public_jwk == jwk:
+            # this device already holds this key (added after a verified approval): nothing to bind
+            _mark_done(s, caller, "DEVICE", False)
+            return {"bound": True}
         if others is not None and not caller.may_replace:
             raise ApiError(409, "DEVICE_BINDING_REQUIRES_REPLACE",
                            "this customer already has a bound device; the bank must issue a replacement link")
@@ -389,6 +411,69 @@ def session_device(body: DeviceProof, caller: ClientCaller = Depends(session_cal
                                      assertion=body.assertion, integrity_token=body.integrityToken,
                                      policy=_policy(s, tenant.id))
     return {"bound": ok}
+
+
+MAX_KEYED_DEVICES = 5
+DEVICE_KEY_WINDOW_S = 600
+LIVE_PROOF = ("FACE", "VOICE")
+
+
+class SessionDeviceKey(Strict):
+    deviceId: str = Field(min_length=16, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$")
+    publicJwk: Optional[dict] = None
+    attestation: Optional[Attestation] = None
+
+
+@router.post("/session/device-key")
+def session_device_key(body: SessionDeviceKey, caller: ClientCaller = Depends(session_caller)):
+    """A device adds its own key at the end of an approval it has just passed.
+
+    One keyed device per customer, unless the bank issues a replacement link, left every other device
+    on its ID alone, and a lost or replaced first device left the customer with no way to key another.
+    Here a device may add its key only when: the approval it started is VERIFIED; that approval passed a
+    face or voice check (the same bar as verifying a new phone); it finished in the last few minutes; the
+    request comes from the device the transaction named; the device holds no other key; and the customer
+    has fewer than MAX_KEYED_DEVICES keyed devices. Enrolment links still cannot add a second key."""
+    rate_limit(f"sess:{caller.session_id}:device-key", 3, 600)
+    from amfa.core.attestation import challenge_for
+    with db.session() as s:
+        sess, txn, tenant, customer = _session(s, caller)
+        if sess.status != orchestrator.VERIFIED:
+            raise ApiError(409, "SESSION_NOT_VERIFIED", "a key can be added only after a passed approval")
+        if not any(i["factor"] in LIVE_PROOF and i["status"] == "PASSED" for i in sess.checklist):
+            raise ApiError(403, "LIVE_CHECK_REQUIRED", "a key can be added only after a face or voice check")
+        if time.time() - (sess.resolved_at or 0) > DEVICE_KEY_WINDOW_S:
+            raise ApiError(409, "TOO_LATE", "add the key straight after the approval")
+        key = device_key(tenant.id, body.deviceId)
+        if key != (txn.facts or {}).get("deviceKey"):
+            raise ApiError(403, "WRONG_DEVICE", "only the device that made the request can add its key")
+        pol = _policy(s, tenant.id)
+    platform, jwk, counter = _check_attestation(body.attestation, challenge_for("session-key", caller.session_id),
+                                                pol, jwk=body.publicJwk)
+    with db.session() as s:
+        sess, txn, tenant, customer = _session(s, caller)
+        dev = s.execute(select(db.Device).where(db.Device.customer_id == customer.id,
+                                                db.Device.device_key == key)).scalars().first()
+        if dev is not None and dev.public_jwk:
+            if dev.public_jwk == jwk:
+                return {"bound": True, "added": False}
+            raise ApiError(409, "DEVICE_ALREADY_BOUND", "this device is bound to a different key")
+        keyed = s.execute(select(func.count()).select_from(db.Device).where(
+            db.Device.customer_id == customer.id, db.Device.public_jwk.is_not(None))).scalar_one()
+        if keyed >= MAX_KEYED_DEVICES:
+            raise ApiError(409, "TOO_MANY_DEVICES", "this customer has the most keyed devices allowed")
+        if dev is None:
+            s.add(db.Device(customer_id=customer.id, device_key=key, public_jwk=jwk, verified_count=1,
+                            platform=platform, sign_count=counter))
+        else:
+            dev.public_jwk, dev.platform, dev.sign_count = jwk, platform, counter
+            dev.verified_count = max(dev.verified_count, 1)
+        s.add(db.SecurityEvent(tenant_id=tenant.id, customer_id=customer.id, severity="LOW",
+                               kind="DEVICE_KEY_ADDED",
+                               message=f"a device added its key after a verified approval ({txn.type})"))
+        audit.record(f"customer:{customer.id}", "device.bind", customer.id,
+                     {"additional": keyed > 0, "via": "verified-session", "session": sess.id}, tenant.id, s=s)
+    return {"bound": True, "added": True}
 
 
 class FactorSubmission(Strict):

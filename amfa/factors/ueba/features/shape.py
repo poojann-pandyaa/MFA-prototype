@@ -27,6 +27,13 @@ import numpy as np
 # are only 60 degrees on screen at this ratio -- dx = dy / (tan60 * ASPECT).
 ASPECT = 2.0
 
+# Which template a trace belongs to, from the browser's PointerEvent.pointerType.
+# A finger covers part of the line and moves differently from a mouse, so the
+# two get separate templates. A stylus is neither and has not been tested:
+# it maps to nothing and is refused.
+POINTER_INPUT = {"mouse": "keyboard", "touch": "touch"}
+INPUTS = ("keyboard", "touch")
+
 SHAPE = [
     (0.150, 0.80),
     (0.323, 0.20),
@@ -164,8 +171,10 @@ def _stats(mat: np.ndarray, floor: float) -> tuple[list, list]:
     return to_list(mean), to_list(std)
 
 
-def build_template(samples: list[dict]) -> dict | None:
+def build_template(samples: list[dict], input: str = "keyboard") -> dict | None:
     """Mean and standard deviation at every checkpoint, from complete traces."""
+    if input not in INPUTS:
+        raise ValueError(f"unknown input {input!r}")
     usable = [s for s in samples if s and s["coverage"] >= MIN_ENROLL_COVERAGE]
     if len(usable) < MIN_SAMPLES:
         return None
@@ -174,6 +183,7 @@ def build_template(samples: list[dict]) -> dict | None:
     return {
         "n_samples": len(usable),
         "n_checkpoints": N_CHECKPOINTS,
+        "input": input,
         "shape": SHAPE,
         "deviation_mean": dev_mean, "deviation_std": dev_std,
         "split_mean": split_mean, "split_std": split_std,

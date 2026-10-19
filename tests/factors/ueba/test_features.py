@@ -258,3 +258,26 @@ def test_circular_hour_wraparound():
     night = np.array([23, 0, 1, 23, 0])
     assert tx._circular_hour_deviation(0, night) < 1.0
     assert tx._circular_hour_deviation(12, night) > 4.0
+
+
+def test_touch_templates_compare_press_to_press_and_keep_a_relative_floor():
+    rng = np.random.default_rng(3)
+    p = typing_profile(rng)
+    same = [{**e, "up": e["down"] + 3.0} for e in typing_sample(p, rng)]
+    tpl = ks.build_template([ks.extract([dict(e) for e in same]) for _ in range(6)], input="touch")
+    assert tpl["fields"] == ["interval"]
+    for m, sd in zip(tpl["interval_mean"], tpl["interval_std"]):
+        if m is not None:
+            assert sd >= ks.TOUCH_STD_FRACTION * abs(m) - 1e-9
+    s = ks.extract(same)
+    held = {**s, "dwell": s["dwell"] + 200.0, "flight": s["flight"] - 200.0}
+    assert ks.distance(tpl, held) == ks.distance(tpl, s)
+
+
+def test_templates_from_before_touch_support_are_keyboard():
+    rng = np.random.default_rng(4)
+    p = typing_profile(rng)
+    tpl = ks.build_template([ks.extract(typing_sample(p, rng)) for _ in range(6)])
+    old = {k: v for k, v in tpl.items() if k not in ("fields", "input", "interval_mean", "interval_std")}
+    s = ks.extract(typing_sample(p, rng))
+    assert ks.distance(old, s) == ks.distance(tpl, s)

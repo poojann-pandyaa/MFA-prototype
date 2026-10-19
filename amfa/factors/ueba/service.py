@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -36,6 +37,11 @@ MIN_SCOREABLE_EVENTS = 3
 MIN_SCOREABLE_SESSIONS = 3
 CHALLENGE_DIMENSIONS = ("keystroke", "shape")
 PREVIEW_DIMENSIONS = ("session", "transaction")
+
+# Touch scoring: "live" decides with whatever calibration exists (provisional until real touch
+# measurements are fitted); "shadow" scores and logs but answers INSUFFICIENT_DATA so the
+# engine substitutes another factor.
+TOUCH_MODE = os.getenv("AMFA_UEBA_TOUCH_MODE", "live")
 
 MIN_DWELL_STD_MS = 2.0
 MIN_AUTOMATION_CHECK_KEYS = 5
@@ -137,9 +143,13 @@ def _clean_key_events(raw: Any, *, min_events: int = 0) -> list[dict]:
     return out
 
 
-def _automated(sample: dict) -> bool:
-    dwell = sample["dwell"][~np.isnan(sample["dwell"])]
-    return len(dwell) >= MIN_AUTOMATION_CHECK_KEYS and float(np.std(dwell)) < MIN_DWELL_STD_MS
+def _automated(sample: dict, input: str = "keyboard") -> bool:
+    """Timing too regular for a person. On a keyboard that is the hold times. A phone keyboard
+    reports every hold as about 3 ms whoever is typing, so there the gaps between presses are
+    checked instead; otherwise every phone sample would be flagged."""
+    field = "dwell" if input == "keyboard" else "interval"
+    x = sample[field][~np.isnan(sample[field])]
+    return len(x) >= MIN_AUTOMATION_CHECK_KEYS and float(np.std(x)) < MIN_DWELL_STD_MS
 
 
 def _points(raw: Any, limit: int = 5000) -> list[dict]:
@@ -158,13 +168,35 @@ def _points(raw: Any, limit: int = 5000) -> list[dict]:
     return out
 
 
-def _timing_vector(sample: dict) -> np.ndarray:
+def _templates(tpl: Optional[dict], input: str) -> tuple[Optional[dict], Optional[dict]]:
+    """(keystroke, shape) templates for one kind of input. The keyboard set sits at the top level,
+    where templates made before touch support already are; the touch set under "touch"."""
+    if not tpl:
+        return None, None
+    if input == "touch":
+        t = tpl.get("touch") or {}
+        return t.get("keystroke"), t.get("shape")
+    return tpl.get("keystroke"), tpl.get("shape")
+
+
+def _inputs(tpl: Optional[dict]) -> dict[str, dict[str, bool]]:
+    return {i: {"keystroke": k is not None, "shape": bool(sp) and "split_mean" in sp}
+            for i in ks.INPUTS for k, sp in [_templates(tpl, i)]}
+
+
+def _enrolled(tpl: Optional[dict]) -> list[str]:
+    return [i for i, v in _inputs(tpl).items() if v["keystroke"]]
+
+
+def _timing_vector(sample: dict, input: str = "keyboard") -> np.ndarray:
+    if input == "touch":
+        return np.nan_to_num(sample["interval"]).astype(np.float32)
     return np.nan_to_num(np.concatenate([sample["dwell"], sample["flight"]])).astype(np.float32)
 
 
-def _digest(sample: dict) -> str:
+def _digest(sample: dict, input: str = "keyboard") -> str:
     from hashlib import sha256
-    return sha256(np.round(_timing_vector(sample), 1).tobytes()).hexdigest()
+    return sha256(np.round(_timing_vector(sample, input), 1).tobytes()).hexdigest()
 
 
 @app.get("/enroll/phrase", dependencies=[Depends(internal_auth)])
@@ -172,7 +204,7 @@ def enroll_phrase() -> dict:
     return {"phrase": ks.ENROLL_PHRASE, "repetitions": ks.TARGET_SAMPLES,
             "minimum": ks.MIN_SAMPLES + ks.DISCARD_FIRST, "discarded": ks.DISCARD_FIRST,
             "shape": [list(p) for p in sh.SHAPE], "aspectRatio": sh.ASPECT,
-            "shapeTracesRequired": sh.MIN_SAMPLES}
+            "shapeTracesRequired": sh.MIN_SAMPLES, "inputs": list(ks.INPUTS)}
 
 
 class EnrollPayload(BaseModel):
@@ -190,6 +222,17 @@ def enroll(req: EnrollPayload) -> EnrollResult:
     raw_samples = p.get("keystrokeSamples")
     if not isinstance(raw_samples, list) or len(raw_samples) > 20:
         return EnrollResult(factor=FACTOR, enrolled=False, reason="KEYSTROKE_SAMPLES_MISSING", latencyMs=ms_())
+    # One template set per kind of input; enrolling one keeps the other.
+    input = p.get("input") or "keyboard"
+    if input not in ks.INPUTS:
+        return EnrollResult(factor=FACTOR, enrolled=False, reason="INPUT_INVALID", latencyMs=ms_())
+    raw_traces = p.get("shapeTraces") or []
+    kinds = p.get("shapePointerTypes") or []
+    if not isinstance(kinds, list) or (kinds and len(kinds) != len(raw_traces)) or \
+            (input == "touch" and raw_traces and len(kinds) != len(raw_traces)):
+        return EnrollResult(factor=FACTOR, enrolled=False, reason="SHAPE_POINTER_TYPES_INVALID", latencyMs=ms_())
+    if any(sh.POINTER_INPUT.get(k if isinstance(k, str) else "") != input for k in kinds):
+        return EnrollResult(factor=FACTOR, enrolled=False, reason="SHAPE_POINTER_MISMATCH", latencyMs=ms_())
 
     usable, rejected = [], {}
 
@@ -204,16 +247,16 @@ def enroll(req: EnrollPayload) -> EnrollResult:
             continue
         if sample["coverage"] < ks.MIN_ENROLL_COVERAGE:
             reject("PHRASE_INCOMPLETE")
-        elif _automated(sample):
+        elif _automated(sample, input):
             reject("KEYSTROKE_AUTOMATION_SUSPECTED")
         else:
             usable.append(sample)
 
-    digests = [_digest(s) for s in usable]
+    digests = [_digest(s, input) for s in usable]
     if len(set(digests)) != len(digests):
         return EnrollResult(factor=FACTOR, enrolled=False, reason="DUPLICATE_SAMPLES", latencyMs=ms_())
 
-    tpl = ks.build_template(usable)
+    tpl = ks.build_template(usable, input=input)
     if tpl is None:
         return EnrollResult(factor=FACTOR, enrolled=False, reason="NOT_ENOUGH_USABLE_SAMPLES",
                             quality={"usable": len(usable), "rejected": rejected,
@@ -223,8 +266,8 @@ def enroll(req: EnrollPayload) -> EnrollResult:
     shape_tpl = None
     shape_info: dict = {"status": "NOT_ENROLLED"}
     try:
-        traces = [sh.extract(_points(t)) for t in (p.get("shapeTraces") or [])[:10]]
-        shape_tpl = sh.build_template(traces)
+        traces = [sh.extract(_points(t)) for t in raw_traces[:10]]
+        shape_tpl = sh.build_template(traces, input=input)
         shape_info = ({"status": "ENROLLED", "samples": shape_tpl["n_samples"]} if shape_tpl
                       else {"status": "NOT_ENROLLED", "reason": f"need {sh.MIN_SAMPLES} complete traces"})
     except Reject as r:
@@ -232,6 +275,8 @@ def enroll(req: EnrollPayload) -> EnrollResult:
 
     mouse_tpl = None
     try:
+        if input != "keyboard":       # free mouse movement is a keyboard-and-mouse signal only
+            raise Reject("NOT_KEYBOARD")
         segs = [_points(s) for s in (p.get("mouseSegments") or [])[:20]]
         clicks = [c for c in (p.get("mouseClicks") or [])[:500] if isinstance(c, dict)]
         samples = []
@@ -245,17 +290,30 @@ def enroll(req: EnrollPayload) -> EnrollResult:
     except Reject:
         mouse_tpl = None
 
-    store.put(req.tenantId, req.userId,
-              {"keystroke": tpl, "shape": shape_tpl, "mouse": mouse_tpl},
-              meta={"keystrokeSamples": tpl["n_samples"], "shape": shape_tpl is not None})
+    record = dict(store.get(req.tenantId, req.userId) or {})
+    if input == "keyboard":
+        record.update(keystroke=tpl, shape=shape_tpl, mouse=mouse_tpl)
+    else:
+        record[input] = {"keystroke": tpl, "shape": shape_tpl}
+    store.put(req.tenantId, req.userId, record,
+              meta={"keystrokeSamples": tpl["n_samples"], "shape": shape_tpl is not None,
+                    "inputs": _enrolled(record)})
     for s, d in zip(usable, digests):
-        guard.remember(req.tenantId, req.userId, d, _timing_vector(s)[: tpl["n_dwell"] + tpl["n_flight"]])
+        guard.remember(req.tenantId, req.userId, d, _timing_vector(s, input)[: _vec_len(tpl, input)])
     return EnrollResult(factor=FACTOR, enrolled=True, modelVersion="ueba-keystroke+shape",
-                        quality={"keystroke": {"samples": tpl["n_samples"], "rejected": rejected,
-                                               "meanDwellMs": round(float(np.mean(tpl["dwell_mean"])), 1)},
+                        quality={"input": input, "enrolledInputs": _enrolled(record),
+                                 "inputs": _inputs(record),
+                                 "keystroke": {"samples": tpl["n_samples"], "rejected": rejected,
+                                               "compares": tpl["fields"],
+                                               "meanDwellMs": round(float(np.nanmean(
+                                                   [v for v in tpl["dwell_mean"] if v is not None])), 1)},
                                  "shape": shape_info,
                                  "mouse": "ENROLLED" if mouse_tpl else "NOT_ENROLLED"},
                         latencyMs=ms_())
+
+
+def _vec_len(ktpl: dict, input: str) -> int:
+    return ktpl["n_flight"] if input == "touch" else ktpl["n_dwell"] + ktpl["n_flight"]
 
 
 @app.post("/factor/verify", response_model=FactorResult, dependencies=[Depends(internal_auth)])
@@ -269,8 +327,15 @@ def verify(req: VerifyRequest) -> FactorResult:
                             latencyMs=int((time.perf_counter() - t0) * 1000), **kw)
 
     tpl = store.get(req.tenantId, req.userId)
-    if tpl is None or tpl.get("keystroke") is None:
-        return result(INSUFFICIENT_DATA, "NO_ENROLLED_TEMPLATE")
+    # The challenge says which template set this attempt is answered against.
+    input = str(req.challenge.get("input") or "keyboard")
+    if input not in ks.INPUTS:
+        return result(FAILED, "CHALLENGE_INPUT_INVALID")
+    ktpl, stpl = _templates(tpl, input)
+    if ktpl is None:
+        # Nothing to compare for this kind of input: never a pass; the engine substitutes.
+        return result(INSUFFICIENT_DATA, "NO_ENROLLED_TEMPLATE",
+                      detail={"input": input, "enrolledInputs": _enrolled(tpl)})
 
     try:
         key_events = _clean_key_events(req.payload.get("keystrokeSample"))
@@ -279,13 +344,22 @@ def verify(req: VerifyRequest) -> FactorResult:
     except Reject as r:
         return result(FAILED, r.code)
 
-    ktpl = tpl["keystroke"]
+    # Each part must be entered with the challenge's input: typing on a keyboard against the touch
+    # set (or a finger trace against the mouse set) fails rather than borrowing the other set.
+    typed_with = req.payload.get("keystrokeInput") or "keyboard"
+    pointer = req.payload.get("shapePointerType")
+    drawn_with = sh.POINTER_INPUT.get(pointer) if isinstance(pointer, str) else "keyboard"
+    if (key_events and typed_with != input) or (trace and drawn_with != input):
+        return result(FAILED, "INPUT_MISMATCH",
+                      detail={"input": input, "keystrokeInput": typed_with,
+                              "shapePointerType": pointer if isinstance(pointer, str) else None})
+
     sample = ks.extract(key_events)
-    if _automated(sample):
+    if _automated(sample, input):
         return result(FAILED, "KEYSTROKE_AUTOMATION_SUSPECTED")
     if sample["coverage"] >= COMPLETE_COVERAGE:
-        vec = _timing_vector(sample)[: ktpl["n_dwell"] + ktpl["n_flight"]]
-        digest = _digest(sample)
+        vec = _timing_vector(sample, input)[: _vec_len(ktpl, input)]
+        digest = _digest(sample, input)
         hit = guard.check(req.tenantId, req.userId, digest, vec)
         if hit:
             from amfa.common.contract import SPOOF_DETECTED
@@ -294,12 +368,12 @@ def verify(req: VerifyRequest) -> FactorResult:
 
     dims: dict[str, dict] = {}
     probs: dict[str, Optional[float]] = {}
-    dims["keystroke"], probs["keystroke"] = dm.score_keystroke(ktpl, key_events, calset)
-    dims["shape"], probs["shape"] = dm.score_shape(tpl.get("shape"), trace, calset,
+    dims["keystroke"], probs["keystroke"] = dm.score_keystroke(ktpl, key_events, calset, input=input)
+    dims["shape"], probs["shape"] = dm.score_shape(stpl, trace, calset, input=input,
                                                    applicable=shape_asked)
 
     pts = req.payload.get("mousePoints") or []
-    if tpl.get("mouse") and isinstance(pts, list) and len(pts) >= ms.MIN_POINTS:
+    if input == "keyboard" and tpl.get("mouse") and isinstance(pts, list) and len(pts) >= ms.MIN_POINTS:
         try:
             clicks = [c for c in (req.payload.get("mouseClicks") or []) if isinstance(c, dict)][:500]
             dims["mouse"], _ = dm.score_mouse(tpl["mouse"], _points(pts), clicks, calset)
@@ -308,13 +382,19 @@ def verify(req: VerifyRequest) -> FactorResult:
             dims["mouse"] = {"status": "UNSCORABLE", "excludedFromDecision": True}
 
     scoring = {k: v for k, v in probs.items() if k in CHALLENGE_DIMENSIONS and v is not None}
-    risk, used = combine(scoring, reliability={k: calset.reliability(k) for k in scoring})
+    # Weight each part by the reliability of the calibrator that actually scored it.
+    risk, used = combine(scoring, reliability={k: calset.reliability(dims[k].get("calibration", k))
+                                               for k in scoring})
     if not used:
-        return result(INSUFFICIENT_DATA, "NOTHING_ASSESSABLE", detail={"dimensions": dims})
+        return result(INSUFFICIENT_DATA, "NOTHING_ASSESSABLE", detail={"dimensions": dims, "input": input})
     score = round(1.0 - risk, 4)
     status, reason = _verdict(dims, score)
-    return result(status, reason, score=score,
-                  detail={"dimensions": dims, "dimensionsUsed": used, "band": band(risk)})
+    detail = {"dimensions": dims, "dimensionsUsed": used, "band": band(risk), "input": input,
+              "provisional": any(dims[k].get("provisional") for k in used)}
+    if input == "touch" and TOUCH_MODE == "shadow":
+        # Scored and logged for measurement, not trusted for the decision.
+        return result(INSUFFICIENT_DATA, "TOUCH_NOT_VALIDATED", detail={**detail, "shadowScore": score})
+    return result(status, reason, score=score, detail=detail)
 
 
 def _verdict(dims: dict[str, dict], score: float) -> tuple[str, Optional[str]]:

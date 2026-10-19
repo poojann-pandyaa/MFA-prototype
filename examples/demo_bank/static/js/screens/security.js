@@ -1,6 +1,7 @@
 import { api } from "../api.js";
 import { go, refresh, signedOut, state } from "../app.js";
 import { openAmfa } from "../amfa-frame.js";
+import { onTouchscreen } from "../actions.js";
 import { add, button, chip, h, icon, item, list, rupees, sheet, tile, toast, topbar } from "../ui.js";
 
 const WAYS = [
@@ -35,6 +36,16 @@ export function render(root) {
     const on = p.have.includes(name);
     const can = p.canAdd.includes(name);
     if (!on && !can) return null;
+    if (factor === "UEBA" && on) {
+      // Typing has separate templates for a computer and a phone; offer the one this device lacks.
+      const have = (me.enrolled && me.enrolled.UEBA_INPUTS) || ["keyboard"];
+      const here = onTouchscreen() ? "touch" : "keyboard";
+      const label = { keyboard: "computer", touch: "phone" };
+      const where = have.map((k) => label[k]).join(" and ");
+      if (!have.includes(here)) return item({ lead: tile(ic, ""), title: name, sub: `Set up on your ${where}`,
+        trail: button(`Add this ${label[here]}`, { kind: "soft", onClick: () => addWay(factor, name) }) });
+      return item({ lead: tile(ic, ""), title: name, sub: `On your ${where}`, trail: chip("On", "ok") });
+    }
     return item({ lead: tile(ic, on ? "" : "grey"), title: name, sub: on && !factor ? sub : on ? null : sub,
       trail: on ? chip("On", "ok") : button("Add", { kind: "soft", cls: name === p.canAdd[0] ? "solid" : "",
         onClick: () => addWay(factor, name) }) });

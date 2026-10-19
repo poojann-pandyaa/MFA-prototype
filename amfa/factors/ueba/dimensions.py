@@ -24,30 +24,46 @@ def _penalty(calset: CalibrationSet, dim: str) -> float:
     return cal.impostor_mean if cal else IMPOSTOR_FALLBACK
 
 
-def _challenge(dim: str, module, tpl: dict, sample: dict, calset: CalibrationSet):
+def calibration_key(calset: CalibrationSet, dim: str, input: str) -> tuple[str, bool]:
+    """Which calibrator scores this dimension for this input, and whether it is a stand-in.
+    Keyboard uses the dimension's own ("keystroke", "shape"). Touch uses "keystroke_touch" /
+    "shape_touch" once real measurements are fitted; until then it borrows the keyboard
+    calibrator and is reported as provisional."""
+    if input == "keyboard":
+        return dim, False
+    key = f"{dim}_{input}"
+    if key in calset.calibrators:
+        return key, False
+    return dim, True
+
+
+def _challenge(dim: str, module, tpl: dict, sample: dict, calset: CalibrationSet, input: str):
+    key, provisional = calibration_key(calset, dim, input)
     cov = sample["coverage"]
     observed = module.distance(tpl, sample)
-    d = blend(observed, _penalty(calset, dim), cov)
-    p = calset.probability(dim, d)
-    return {"status": coverage_status(cov), "coverage": _r(cov, 3), "observedDistance": _r(observed),
+    d = blend(observed, _penalty(calset, key), cov)
+    p = calset.probability(key, d)
+    return {"status": coverage_status(cov), "input": input, "calibration": key,
+            "provisional": provisional, "coverage": _r(cov, 3), "observedDistance": _r(observed),
             "distance": _r(d), "probability": _r(p), "summary": sample["summary"]}, p
 
 
-def score_keystroke(tpl: Optional[dict], events: list[dict],
-                    calset: CalibrationSet) -> tuple[dict, Optional[float]]:
+def score_keystroke(tpl: Optional[dict], events: list[dict], calset: CalibrationSet,
+                    input: str = "keyboard") -> tuple[dict, Optional[float]]:
     if tpl is None:
-        return {"status": "INSUFFICIENT_DATA", "reason": "no keystroke template"}, None
-    return _challenge("keystroke", ks, tpl, ks.extract(events), calset)
+        return {"status": "INSUFFICIENT_DATA", "input": input,
+                "reason": f"no keystroke template for {input}"}, None
+    return _challenge("keystroke", ks, tpl, ks.extract(events), calset, input)
 
 
 def score_shape(tpl: Optional[dict], points: list[dict], calset: CalibrationSet,
-                applicable: bool = True) -> tuple[dict, Optional[float]]:
+                applicable: bool = True, input: str = "keyboard") -> tuple[dict, Optional[float]]:
     if not applicable:
         return {"status": "NOT_APPLICABLE", "reason": "no pointer or touch input"}, None
     if tpl is None or "split_mean" not in tpl:
-        return {"status": "INSUFFICIENT_DATA",
-                "reason": "no shape template for the current shape; re-enrol"}, None
-    return _challenge("shape", sh, tpl, sh.extract(points), calset)
+        return {"status": "INSUFFICIENT_DATA", "input": input,
+                "reason": f"no shape template for {input}; enrol this input"}, None
+    return _challenge("shape", sh, tpl, sh.extract(points), calset, input)
 
 
 def score_mouse(tpl: Optional[dict], points: list[dict], clicks: list[dict],

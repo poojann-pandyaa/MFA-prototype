@@ -123,3 +123,116 @@ def test_incomplete_typings_do_not_enrol(client, person):
 def test_malformed_events_are_a_protocol_failure(client, person, enrolled):
     res = verify(client, [{"key": "t", "down": 0, "up": 99999}], None, shape_asked=False)
     assert res["status"] == "FAILED" and res["failureReason"] == "KEYSTROKE_TIMING_IMPLAUSIBLE"
+
+
+# ------------------------------------------------------------- touchscreens
+
+def thumbs(profile, rng):
+    """A phone keyboard: the key-up arrives about 3 ms after the key-down whatever the finger did."""
+    return [{**e, "up": e["down"] + float(rng.uniform(1.5, 4.5))} for e in typing_sample(profile, rng)]
+
+
+def enroll_input(client, person, user, input, n=6, kinds=None):
+    rng = person["rng"]
+    typ = thumbs if input == "touch" else typing_sample
+    payload = {"input": input,
+               "keystrokeSamples": [typ(person["typing"], rng) for _ in range(n)],
+               "shapeTraces": [shape_sample(person["shape"], rng) for _ in range(4)]}
+    payload["shapePointerTypes"] = kinds if kinds is not None else (["touch"] * 4 if input == "touch" else ["mouse"] * 4)
+    return client.post("/factor/enroll", json={"tenantId": TENANT, "userId": user, "payload": payload}).json()
+
+
+def verify_input(client, user, input, keys, trace, typed_with=None, drawn_with=None):
+    payload = {"keystrokeSample": keys, "shapeTrace": trace}
+    if typed_with:
+        payload["keystrokeInput"] = typed_with
+    if drawn_with:
+        payload["shapePointerType"] = drawn_with
+    req = VerifyRequest(tenantId=TENANT, userId=user, sessionId="s", transactionId="t",
+                        challenge={"shape": [[0.1, 0.8]], "input": input}, payload=payload)
+    return client.post("/factor/verify", json=req.model_dump(mode="json")).json()
+
+
+@pytest.fixture(scope="module")
+def thumb():
+    rng = np.random.default_rng(23)
+    return {"rng": rng, "typing": typing_profile(rng), "shape": shape_profile(rng)}
+
+
+def test_a_phone_enrolment_is_not_mistaken_for_automation(client, thumb):
+    """Hold times are ~3 ms on every phone; the bot check looks at the gaps there instead."""
+    res = enroll_input(client, thumb, "cu_phone1", "touch")
+    assert res["enrolled"], res
+    assert res["quality"]["keystroke"]["compares"] == ["interval"]
+    assert res["quality"]["enrolledInputs"] == ["touch"]
+
+
+def test_adding_a_phone_keeps_the_computer_templates(client, thumb):
+    assert enroll_input(client, thumb, "cu_both", "keyboard")["enrolled"]
+    res = enroll_input(client, thumb, "cu_both", "touch")
+    assert set(res["quality"]["enrolledInputs"]) == {"keyboard", "touch"}
+    assert res["quality"]["inputs"]["keyboard"] == {"keystroke": True, "shape": True}
+    rng = thumb["rng"]
+    kb = verify_input(client, "cu_both", "keyboard", typing_sample(thumb["typing"], rng),
+                      shape_sample(thumb["shape"], rng), "keyboard", "mouse")
+    assert kb["status"] == "PASSED" and kb["detail"]["input"] == "keyboard"
+
+
+def test_the_genuine_thumb_typist_passes_on_provisional_calibration(client, thumb):
+    enroll_input(client, thumb, "cu_phone2", "touch")
+    rng = thumb["rng"]
+    j = verify_input(client, "cu_phone2", "touch", thumbs(thumb["typing"], rng),
+                     shape_sample(thumb["shape"], rng), "touch", "touch")
+    assert j["status"] == "PASSED", j
+    assert j["detail"]["provisional"] is True
+    assert j["detail"]["dimensions"]["keystroke"]["calibration"] == "keystroke"
+
+
+def test_no_phone_templates_is_insufficient_data_never_a_pass(client, person, enrolled):
+    rng = person["rng"]
+    j = verify_input(client, USER, "touch", thumbs(person["typing"], rng),
+                     shape_sample(person["shape"], rng), "touch", "touch")
+    assert j["status"] == "INSUFFICIENT_DATA" and j["failureReason"] == "NO_ENROLLED_TEMPLATE"
+    assert j["score"] is None and j["detail"]["enrolledInputs"] == ["keyboard"]
+
+
+@pytest.mark.parametrize("typed_with,drawn_with", [("keyboard", "touch"), ("touch", "mouse"), ("touch", "pen")])
+def test_answering_with_the_other_input_fails(client, thumb, typed_with, drawn_with):
+    enroll_input(client, thumb, "cu_phone3", "touch")
+    rng = thumb["rng"]
+    j = verify_input(client, "cu_phone3", "touch", thumbs(thumb["typing"], rng),
+                     shape_sample(thumb["shape"], rng), typed_with, drawn_with)
+    assert j["status"] == "FAILED" and j["failureReason"] == "INPUT_MISMATCH"
+
+
+def test_a_finger_trace_cannot_answer_a_computer_challenge(client, person, enrolled):
+    rng = person["rng"]
+    k, t = genuine(person)
+    j = verify_input(client, USER, "keyboard", k, t, drawn_with="touch")
+    assert j["status"] == "FAILED" and j["failureReason"] == "INPUT_MISMATCH"
+
+
+def test_a_metronome_on_a_phone_is_still_caught(client, thumb):
+    enroll_input(client, thumb, "cu_phone4", "touch")
+    bot = [{"key": ch, "down": 1000.0 + 150 * i, "up": 1003.0 + 150 * i} for i, ch in enumerate(ks.ENROLL_PHRASE)]
+    rng = thumb["rng"]
+    j = verify_input(client, "cu_phone4", "touch", bot, shape_sample(thumb["shape"], rng), "touch", "touch")
+    assert j["status"] == "FAILED" and j["failureReason"] == "KEYSTROKE_AUTOMATION_SUSPECTED"
+
+
+def test_a_phone_enrolment_refuses_mouse_traces(client, thumb):
+    res = enroll_input(client, thumb, "cu_phone5", "touch", kinds=["touch", "touch", "mouse", "touch"])
+    assert not res["enrolled"] and res["reason"] == "SHAPE_POINTER_MISMATCH"
+    res = enroll_input(client, thumb, "cu_phone5", "touch", kinds=[])
+    assert not res["enrolled"] and res["reason"] == "SHAPE_POINTER_TYPES_INVALID"
+
+
+def test_shadow_mode_scores_phones_without_deciding(client, thumb, monkeypatch):
+    from amfa.factors.ueba import service
+    monkeypatch.setattr(service, "TOUCH_MODE", "shadow")
+    enroll_input(client, thumb, "cu_phone6", "touch")
+    rng = thumb["rng"]
+    j = verify_input(client, "cu_phone6", "touch", thumbs(thumb["typing"], rng),
+                     shape_sample(thumb["shape"], rng), "touch", "touch")
+    assert j["status"] == "INSUFFICIENT_DATA" and j["failureReason"] == "TOUCH_NOT_VALIDATED"
+    assert j["score"] is None and j["detail"]["shadowScore"] is not None
