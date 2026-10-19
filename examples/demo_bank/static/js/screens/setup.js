@@ -41,7 +41,7 @@ export function render(root) {
       item({ lead: tile("face"), title: "Your face", sub: "Five quick pictures, about 30 seconds",
         trail: chip(hasFace ? "Ready" : "Next", hasFace ? "ok" : "") }),
     ]),
-    note("brand", "lock", "Your photos never reach the bank. Only an encrypted template is kept, and you can remove it any time."),
+    note("brand", "lock", "Your photos never reach the bank. Only an encrypted template is kept, and Demo Bank will delete it if you ask."),
     h("div", { class: "spacer" }),
     error,
     go_,
