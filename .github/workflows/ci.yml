@@ -14,6 +14,5 @@ jobs:
           python-version: "3.13"
           cache: pip
       # No voice requirements: its tests use scripted models, so torch is not installed.
-      # lightgbm: the risk-model tests train a small model.
-      - run: pip install -r requirements/base.txt -r requirements/face.txt -r requirements/ueba.txt lightgbm==4.7.0 pytest
+      - run: pip install -r requirements/base.txt -r requirements/face.txt -r requirements/ueba.txt pytest
       - run: python -m pytest

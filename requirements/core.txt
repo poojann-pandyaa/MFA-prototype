@@ -5,4 +5,3 @@ python-multipart==0.0.32
 llama_cpp_python==0.3.35
 anthropic==1.8.0
 cbor2==6.1.4
-lightgbm==4.7.0

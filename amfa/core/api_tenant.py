@@ -22,7 +22,7 @@ from amfa.engine.agent import build_agent
 from amfa.engine.context import Segment, TxnType
 from amfa.engine.decide import MonotonicityViolation, decide
 from amfa.engine.policy import TenantPolicy
-from amfa.engine.rationale import REASON_TEXT, customer_notice
+from amfa.engine.rationale import customer_notice
 
 router = APIRouter(prefix="/v1", tags=["tenant"])
 
@@ -348,15 +348,11 @@ def initiate(body: InitiateTxn, request: Request,
             txn.status = "REVIEW"
         view = _txn_view(s, txn, include_proof=False)
         view["plan"] = {"required": [f.value for f in plan.sequence()], "riskBand": plan.riskBand.value,
-                        "threatLevel": plan.threatLevel, "riskScore": plan.riskScore,
-                        "modelLevel": plan.modelLevel, "capReason": plan.capReason,
-                        "riskReasons": plan.riskReasons, "modelVersion": plan.modelVersion,
-                        "riskReasonText": [REASON_TEXT.get(k, k) for k, _ in plan.riskReasons],
                         "floor": plan.floor.value, "source": plan.source, "reasoning": plan.reasoning,
                         "escalate": plan.escalate, "rulesBaseline": [f.value for f in plan.rulesBaseline],
                         "agentAdded": [f.value for f in plan.agentAdded],
                         "orgAdded": [f.value for f in plan.orgAdded],
-                        "customerNotice": customer_notice(plan, body.type)}
+                        "customerNotice": customer_notice(plan, body.type, assembled.ctx)}
         if sess.status == orchestrator.PENDING:
             view["challengeUrl"] = f"{config.get().public_url}/hosted/challenge?t={tenant.slug}#token={client_token}"
             view["clientToken"] = client_token

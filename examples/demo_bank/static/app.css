@@ -237,7 +237,7 @@ select.input { appearance: none; }
   display: inline-flex; gap: 6px; align-items: center; }
 .demo-fab.top { bottom: auto; top: 18px; width: 44px; height: 44px; padding: 0; justify-content: center; }
 @media (prefers-color-scheme: dark) { .demo-fab { color: #1a1033; } }
-.levels { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
+.levels { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
 .levels span { height: 34px; border-radius: 10px; background: var(--line-soft); color: var(--muted); font-size: 13px; font-weight: 700;
   display: flex; align-items: center; justify-content: center; }
 .levels span.on { background: var(--warn); color: var(--card); font-weight: 800; }

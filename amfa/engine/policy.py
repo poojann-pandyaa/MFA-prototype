@@ -158,9 +158,6 @@ class TenantPolicy(BaseModel):
     sessionTtlSeconds: int = Field(default=300, ge=60, le=900)
     proofTtlSeconds: int = Field(default=120, ge=30, le=600)
     newPayeeDays: int = Field(default=30, ge=0, le=365)
-    # small payments within a customer's usual never go above the lightest extra check, unless a hard
-    # warning sign is present; "small" is the LOW amount band above
-    smallPaymentCap: bool = True
     # strongest automated checks instead of a person, except for hard-hold signs; False restores "high risk -> review"
     lowTouch: bool = True
     deviceTrustDays: int = Field(default=0, ge=0, le=90)

@@ -35,7 +35,6 @@ agent-hosted = ["anthropic>=0.40"]
 face = ["opencv-python-headless==4.11.0.86", "onnxruntime>=1.18", "pillow>=10.4"]
 voice = ["torch>=2.2", "torchaudio>=2.2", "speechbrain>=1.0", "soundfile>=0.12", "scipy>=1.11", "vosk>=0.3.45"]
 ueba = ["scikit-learn>=1.5", "pandas>=2.2", "joblib>=1.4", "scipy>=1.11"]
-risk = ["lightgbm>=4.5"]                       # scoring; training also needs scikit-learn (the ueba extra)
 dev = ["pytest>=8.3"]
 
 [project.scripts]

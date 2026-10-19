@@ -449,12 +449,10 @@ AMR_NAMES = {"otp": "SMS code", "face": "Face", "voice": "Voice", "ueba": "Typin
 
 def _decision(plan: dict) -> dict:
     """What AMFA decided, kept for the presenter's "Behind the scenes" drawer only."""
-    reasons = [{"feature": k, "text": text, "weight": w}
-               for (k, w), text in zip(plan.get("riskReasons") or [], plan.get("riskReasonText") or [])]
-    return {"threatLevel": plan.get("threatLevel"), "modelLevel": plan.get("modelLevel"),
-            "score": plan.get("riskScore"), "capReason": plan.get("capReason"), "reasons": reasons,
+    return {"riskBand": plan.get("riskBand"), "source": plan.get("source"), "reasoning": plan.get("reasoning"),
             "checks": plan.get("required") or [], "rulesBaseline": plan.get("rulesBaseline") or [],
-            "escalate": plan.get("escalate"), "modelVersion": plan.get("modelVersion")}
+            "agentAdded": plan.get("agentAdded") or [], "orgAdded": plan.get("orgAdded") or [],
+            "escalate": plan.get("escalate")}
 
 
 def _client_ip(request: Request) -> str:
