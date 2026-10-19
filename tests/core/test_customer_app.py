@@ -19,17 +19,11 @@ from amfa.common.contract import FactorResult
 from amfa.core import api_admin, db, factors, orchestrator, otp
 from amfa.core.app import create_app
 from amfa.core.auth import DEFAULT_SCOPES
-from amfa.engine import decide as engine_decide
-from amfa.engine.context import Band, Factor, Plan
+from amfa.engine.risk import scorer
 
 PHONE_DEVICE = "device-phone-0001"
-LARGE = 20_000   # rupees: above the bank's LOW amount band
-# The rule table's answer is scripted per test, by level: what each level asks for and its risk band.
+LARGE = 20_000   # rupees: above the bank's LOW band, so the small-payment cap keeps the model's level
 LEVEL = {"now": "T1"}
-RESPONSE = {"T0": [Factor.OTP], "T1": [Factor.OTP, Factor.UEBA], "T2": [Factor.OTP, Factor.UEBA, Factor.FACE],
-            "T3": [Factor.OTP, Factor.UEBA, Factor.FACE, Factor.VOICE],
-            "T4": [Factor.OTP, Factor.UEBA, Factor.FACE, Factor.VOICE]}
-BAND = {"T0": Band.LOW, "T1": Band.LOW, "T2": Band.MEDIUM, "T3": Band.HIGH, "T4": Band.HIGH}
 SENT: list[str] = []
 SENT_TO: list[dict] = []
 EMAIL = "asha.rao@example.com"
@@ -52,8 +46,8 @@ def stack():
 @pytest.fixture(autouse=True)
 def scripted(monkeypatch):
     LEVEL["now"] = "T1"
-    monkeypatch.setattr(engine_decide, "select_by_rules", lambda ctx: Plan(
-        required=list(RESPONSE[LEVEL["now"]]), riskBand=BAND[LEVEL["now"]], source="rules"))
+    monkeypatch.setattr(scorer, "active", lambda: SimpleNamespace(score=lambda f: scorer.Result(
+        score=0.5, raw=0.5, level=LEVEL["now"], reasons=[("payee_seen", 0.2), ("spoof_7d", 0.1)], version="stub")))
     monkeypatch.setattr(factors, "ueba", lambda path, body: {"riskScore": 0.2, "band": "LOW", "status": "OK",
                                                               "dimensionsUsed": [], "latencyMs": 1})
     monkeypatch.setattr(factors, "verify", lambda factor, **kw: FactorResult(
@@ -108,7 +102,7 @@ def test_transfer_runs_only_after_the_checks_and_once(stack, app):
     started = r.json()
     action = started["action"]
     assert action["checks"] == ["one-time code", "typing check"]
-    assert action["reason"].startswith("We need a quick extra check because ")   # the rule table's signals, in plain words
+    assert action["reason"] == "We need a quick extra check because this payee has not been paid before."
     assert not {"riskScore", "threatLevel", "amfaTxn"} & set(action)   # nothing for a fraudster to learn
 
     early = app.post(f"/api/actions/{action['id']}/complete").json()
@@ -187,7 +181,7 @@ def test_every_action_kind_is_approved_before_it_applies(stack, app):
     assert c["events"]["contactChangedAt"] and c["events"]["passwordResetAt"]
 
 
-def test_account_changes_reach_the_decision_engine(stack, app):
+def test_account_changes_reach_the_risk_model(stack, app):
     app.post("/api/demo/sim-swap").raise_for_status()
     app.post("/api/demo/payee-risk", json={"payeeRef": "BEN-42", "flagged": True}).raise_for_status()
     started = act(app, "transfer", payeeRef="BEN-42", amountRupees=10).json()
@@ -438,8 +432,8 @@ def test_the_decision_is_for_the_presenter_only(stack, app, monkeypatch):
     for a in app.get("/api/activity").json()["activity"]:
         assert "decision" not in a and "challengeUrl" not in a
     d = app.get("/api/demo/last-decision").json()["decision"]
-    assert d["riskBand"] == "MEDIUM" and d["checks"] and d["rulesBaseline"] == ["OTP", "UEBA", "FACE"]
-    assert d["source"].startswith("rules") and d["reasoning"]
+    assert d["threatLevel"] == "T2" and d["checks"] and d["reasons"][0] == {
+        "feature": "payee_seen", "text": "payee not paid before", "weight": 0.2}
     monkeypatch.setattr(stack.bank, "DEMO_TOOLS", False)
     assert app.get("/api/demo/last-decision").status_code == 404
 
@@ -595,6 +589,7 @@ def _jwk():
 
 def _passed_session(stack, app, level):
     LEVEL["now"] = level
+    # above the small-payment line, so the model's level (and its face check) stands
     started = act(app, "transfer", payeeRef="BEN-42", amountRupees=LARGE).json()
     state = verify(stack, started["challengeUrl"])
     token = started["challengeUrl"].split("#token=", 1)[1]

@@ -89,7 +89,7 @@ def test_exposure_band_counts_the_last_24_hours(tenant, customer):
         big = context_builder.assemble(s, tenant, customer, "txn_c", txn(50_000, "newshop"))
     assert small.ctx.transaction.exposureBand is Band.LOW                 # Rs 4,000 on its own
     assert stacked.ctx.transaction.exposureBand is Band.MEDIUM            # Rs 4,000 + Rs 8,000 attempted today
-    assert big.ctx.transaction.exposureBand is Band.MEDIUM
+    assert big.ctx.transaction.exposureBand is Band.MEDIUM and big.ctx.policy.smallPaymentCap is True
 
 
 def test_behaviour_service_down_means_missing_not_safe(tenant, customer, monkeypatch):

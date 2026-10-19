@@ -4,7 +4,7 @@ import { api } from "../api.js";
 import { go, randomId, refresh, render as rerender, state } from "../app.js";
 import { add, button, chip, h, icon, sheet, toast } from "../ui.js";
 
-const LEVELS = ["LOW", "MEDIUM", "HIGH"];
+const LEVELS = ["T0", "T1", "T2", "T3", "T4"];
 
 export async function open() {
   const { decision: d } = await api("GET", "/api/demo/last-decision");
@@ -20,19 +20,21 @@ export async function open() {
 }
 
 function decision(d) {
+  const max = Math.max(...d.reasons.map((r) => r.weight), 0.0001);
   return h("div", { class: "card stack", style: { background: "var(--bg)" } },
     h("div", { class: "row-between" }, h("span", { class: "muted", text: "Last decision" }), h("strong", { class: "small", text: d.title })),
-    h("div", {}, h("div", { class: "muted small", style: { marginBottom: "6px" }, text: "Risk band (rule table)" }),
-      h("div", { class: "levels" }, LEVELS.map((l) => h("span", { class: l === d.riskBand ? "on" : "", text: l })))),
-    d.reasoning ? h("div", {}, h("div", { class: "muted small", style: { marginBottom: "4px" }, text: "Why" }),
-      h("div", { class: "small", text: d.reasoning })) : null,
+    h("div", {}, h("div", { class: "muted small", style: { marginBottom: "6px" }, text: "Threat level" }),
+      h("div", { class: "levels" }, LEVELS.map((l) => h("span", { class: l === d.threatLevel ? "on" : "", text: l }))),
+      h("div", { class: "muted small", style: { marginTop: "6px" },
+        text: `Fraud probability ${d.score === null || d.score === undefined ? "n/a" : d.score.toFixed(2)} · model ${d.modelVersion || "none"}` }),
+      d.modelLevel && d.modelLevel !== d.threatLevel ? h("div", { class: "muted small", text: `Model said ${d.modelLevel}; ${d.capReason || "adjusted"}` }) : null),
+    d.reasons.length ? h("div", {}, h("div", { class: "muted small", style: { marginBottom: "8px" }, text: "Why" }),
+      h("div", { class: "why" }, d.reasons.flatMap((r) => [h("span", { text: r.text.charAt(0).toUpperCase() + r.text.slice(1) }),
+        h("span", { class: "bar" }, h("span", { style: { width: Math.round(100 * r.weight / max) + "%" } })),
+        h("b", { text: "+" + r.weight.toFixed(2) })]))) : null,
     h("div", { class: "row-between small" }, h("span", { class: "muted", text: "Checks asked" }), h("span", { class: "chips" }, d.checks.map((c) => chip(c)))),
-    h("div", { class: "row-between small" }, h("span", { class: "muted", text: "Rule table asked" }),
+    h("div", { class: "row-between small" }, h("span", { class: "muted", text: "Old rule table would ask" }),
       h("strong", { text: d.rulesBaseline.length ? d.rulesBaseline.join(" + ") : "nothing extra" })),
-    d.agentAdded.length ? h("div", { class: "row-between small" }, h("span", { class: "muted", text: "AI agent added" }),
-      h("strong", { text: d.agentAdded.join(" + ") })) : null,
-    d.orgAdded.length ? h("div", { class: "row-between small" }, h("span", { class: "muted", text: "Bank policy added" }),
-      h("strong", { text: d.orgAdded.join(" + ") })) : null,
     d.escalate ? h("div", { class: "row-between small" }, h("span", { class: "muted", text: "Sent to" }), h("strong", { text: "Manual review" })) : null);
 }
 

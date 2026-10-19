@@ -4,7 +4,7 @@
   var token = AMFA.takeTokenFromFragment();
   var api = token ? new AMFA.Client("", token) : null;
   var panel = document.getElementById("panel");
-  var camera = null, mic = null, keys = null, tracer = null, talk = null, current = null;
+  var camera = null, mic = null, keys = null, tracer = null;
   function notifyParent(status) {
     UI.postToParent({
       type: "amfa:status",
@@ -30,19 +30,6 @@
       tracer.detach();
       tracer = null;
     }
-    if (talk) {
-      talk.stop();
-      talk = null;
-    }
-  }
-  function isMoney(a) {   // account changes are sent with a zero amount
-    return /[1-9]/.test(a.amount || "");
-  }
-  // every check opens with what is being approved, so it can't be mistaken for setting up
-  function banner(st) {
-    var a = st.approving, done = st.steps.filter(function(s) { return s.status === "PASSED"; }).length;
-    var what = isMoney(a) ? a.amount + " to " + a.payee : a.type.replace(/_/g, " ").toLowerCase();
-    return UI.modeBanner("verify", "Approving " + what + " · check " + Math.min(done + 1, st.steps.length) + " of " + st.steps.length);
   }
   function renderHeader(st) {
     UI.applyTheme(st.theme);
@@ -90,20 +77,12 @@
     keepDeviceKey(st).then(function() {
       notifyParent(st.status);
     });
-    var a = st.approving;
-    var money = isMoney(a);
     var map = {
-      VERIFIED: [ "ok", "✓", "Verified: transaction approved", "Your bank will now complete it and show you the final result." ],
-      BLOCKED: [ "bad", "✕", "Not approved", "We could not verify it was you, so nothing was sent. Your bank has been notified. If you did not start this, contact your bank now." ],
-      MANUAL_REVIEW: [ "warn", "…", "On hold for a quick review", "Nothing has been sent yet. Your bank will review it and let you know." ],
-      EXPIRED: [ "warn", "⧗", "Timed out: not approved", "Nothing was sent. Return to your bank and start again." ]
+      VERIFIED: [ "ok", "✓", "Approved", "You can return to your bank app. The transaction will now be processed." ],
+      BLOCKED: [ "bad", "!", "Not approved", "We could not verify it was you. Your bank has been notified. If you did not start this transaction, contact your bank now." ],
+      MANUAL_REVIEW: [ "warn", "…", "Referred for review", "Your bank will review this transaction and may contact you." ],
+      EXPIRED: [ "warn", "⧗", "Expired", "This approval timed out. Return to your bank and start again." ]
     }[st.status] || [ "warn", "?", st.status, "" ];
-    var passed = st.steps.filter(function(s) { return s.status === "PASSED"; }).map(function(s) { return UI.FRIENDLY[s.factor]; });
-    var rows = [];
-    function row(k, v) { if (v) rows.push(el("div", { class: "kv" }, [ el("span", { text: k }), el("span", { text: v }) ])); }
-    row(money ? "Amount" : "Request", money ? a.amount : a.type.replace(/_/g, " ").toLowerCase());
-    row("To", money ? a.payee : "");
-    row("Verified with", passed.join(", ") || "none");
     clear(panel).appendChild(el("div", {
       class: "result " + map[0]
     }, [ el("div", {
@@ -112,9 +91,7 @@
       text: map[1]
     }), el("h2", {
       text: map[2]
-    }), el("div", {
-      class: "outcome"
-    }, rows), el("p", {
+    }), el("p", {
       class: "muted",
       text: map[3]
     }) ]));
@@ -154,7 +131,6 @@
     if (st.status !== "PENDING") return final(st);
     var ch = st.challenge;
     clear(panel);
-    panel.appendChild(banner(st));
     if (message) panel.appendChild(message);
     if (!ch) return panel.appendChild(UI.notice("", "Waiting…"));
     ({
@@ -183,7 +159,7 @@
       class: "muted small"
     });
     var form = el("form", {}, [ el("h2", {
-      text: totp ? "Verify with your authenticator code" : "Verify with the code we sent"
+      text: totp ? "Enter your authenticator code" : "Enter the code we sent"
     }), el("p", {
       class: "muted",
       id: "otp-help",
@@ -252,7 +228,7 @@
       text: "Start face check"
     });
     panel.appendChild(el("h2", {
-      text: "Verify with your face"
+      text: "Face check"
     }));
     panel.appendChild(el("p", {
       class: "muted",
@@ -300,34 +276,67 @@
   }
   function voiceStep(ch) {
     var minS = ch.params.minSeconds || 3, maxS = ch.params.maxSeconds || 10;
+    var meter = el("span"), btn = el("button", {
+      type: "button",
+      text: "Start recording"
+    });
+    var status = el("p", {
+      class: "muted",
+      text: "Tap start, then read the words aloud in your normal voice."
+    });
     panel.appendChild(el("h2", {
-      text: "Verify with your voice"
+      text: "Voice check"
     }));
     panel.appendChild(el("p", {
       class: "muted",
-      text: "Hold the button and read these words aloud:"
+      text: "Read these words aloud:"
     }));
     panel.appendChild(el("div", {
       class: "prompt-phrase",
       text: ch.params.prompt
     }));
-    talk = UI.holdToTalk({
-      minSeconds: minS,
-      maxSeconds: maxS,
-      idleText: "Hold the button, read the words, then let go.",
-      onRecorded: function(out) {
-        talk.button.disabled = true;
-        var sending = el("button", { type: "button", class: "hidden" });
-        panel.appendChild(sending);
-        submit(ch, {
-          audio: out.wav
-        }, sending);
-      },
-      onError: function(err) {
-        panel.appendChild(UI.notice("bad", UI.mediaErrorText(err, "microphone")));
+    panel.appendChild(el("div", {
+      class: "meter",
+      "aria-hidden": "true"
+    }, [ meter ]));
+    panel.appendChild(status);
+    panel.appendChild(btn);
+    var recording = false, started = 0, timer = null;
+    function finish() {
+      clearInterval(timer);
+      recording = false;
+      var out = mic.stop();
+      mic = null;
+      if (out.seconds < minS) {
+        status.textContent = "That was too short. Please read all the words.";
+        UI.busy(btn, false, "Start recording");
+        return;
       }
+      submit(ch, {
+        audio: out.wav
+      }, btn);
+    }
+    btn.addEventListener("click", function() {
+      if (recording) {
+        if ((performance.now() - started) / 1e3 >= minS) finish();
+        return;
+      }
+      mic = new AMFA.Microphone;
+      mic.start().then(function() {
+        recording = true;
+        started = performance.now();
+        btn.textContent = "Stop";
+        status.textContent = "Recording…";
+        timer = setInterval(function() {
+          meter.style.width = Math.min(100, mic ? mic.level() * 400 : 0) + "%";
+          if ((performance.now() - started) / 1e3 >= maxS) finish();
+        }, 80);
+      }).catch(function(err) {
+        mic = null;
+        status.textContent = UI.mediaErrorText(err, "microphone");
+        btn.textContent = "Try again";
+      });
     });
-    panel.appendChild(talk.node);
   }
   function typingStep(ch) {
     var phrase = ch.params.phrase;
@@ -343,7 +352,7 @@
     });
     var canvasWrap = el("div");
     var form = el("form", {}, [ el("h2", {
-      text: "Verify with your typing"
+      text: "Typing check"
     }), el("p", {
       class: "muted",
       id: "phrase-help",

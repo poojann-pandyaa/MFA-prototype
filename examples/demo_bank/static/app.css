@@ -237,7 +237,7 @@ select.input { appearance: none; }
   display: inline-flex; gap: 6px; align-items: center; }
 .demo-fab.top { bottom: auto; top: 18px; width: 44px; height: 44px; padding: 0; justify-content: center; }
 @media (prefers-color-scheme: dark) { .demo-fab { color: #1a1033; } }
-.levels { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
+.levels { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
 .levels span { height: 34px; border-radius: 10px; background: var(--line-soft); color: var(--muted); font-size: 13px; font-weight: 700;
   display: flex; align-items: center; justify-content: center; }
 .levels span.on { background: var(--warn); color: var(--card); font-weight: 800; }
@@ -266,10 +266,3 @@ select.input { appearance: none; }
 .new-row .sub { color: var(--brand-deep); font-size: 13px; display: block; }
 .empty { text-align: center; padding: 24px 12px; color: var(--muted); display: flex; flex-direction: column; align-items: center; gap: 10px; }
 @media (max-width: 360px) { .big-amount { font-size: 42px; } .quick { gap: 4px; } h1 { font-size: 24px; } }
-.flow-tag { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; border-radius: 12px; padding: 8px 12px; font-size: 13px; }
-.flow-tag strong { font-size: 11px; letter-spacing: 0.6px; text-transform: uppercase; border-radius: 999px; padding: 2px 9px; white-space: nowrap; }
-.flow-tag span { color: var(--muted); }
-.flow-tag.enroll { border: 1.5px dashed var(--line); }
-.flow-tag.enroll strong { border: 1.5px solid var(--muted); color: var(--muted); }
-.flow-tag.verify { border: 1.5px solid var(--brand); background: color-mix(in srgb, var(--brand) 10%, transparent); }
-.flow-tag.verify strong { background: var(--brand); color: var(--brand-ink); }

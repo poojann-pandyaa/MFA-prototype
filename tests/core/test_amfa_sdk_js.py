@@ -23,12 +23,6 @@ const frames = await cam(["a", "a", "b", "b", "b", "c", "d"]).burst(4, 0);
 assert.deepEqual(frames, ["a", "b", "c", "d"]);
 // a camera that stops: a clear error the page can show, not a burst of identical frames
 await assert.rejects(cam(["x", "y"]).burst(4, 0), (e) => e.name === "CameraStalled");
-// the face check takes two bursts back to back: the second must not start with the first one's last picture,
-// and a retry must not resend any earlier picture (the service reads either as a replay and locks the customer)
-const two = cam(["a", "b", "c", "c", "d", "e", "b", "f", "g"]);
-assert.deepEqual(await two.burst(3, 0), ["a", "b", "c"]);
-assert.deepEqual(await two.burst(2, 0), ["d", "e"]);
-assert.deepEqual(await two.burst(2, 0), ["f", "g"]);
 """
 
 
