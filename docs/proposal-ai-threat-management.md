@@ -247,7 +247,7 @@ Biometrics prove who is at the camera, not whether they are acting freely. In a 
 | Threat | Mitigation in the prototype | Planned |
 |---|---|---|
 | **Evasion** (attacker learns what lowers the score) | Monotone constraints; customers never see scores or thresholds; uniform failure messages; relief only with clean records | Monitor for probing patterns |
-| **Data poisoning** (corrupting training labels) | Customer learning only from *verified* outcomes; reviewer verdicts need two people | Label audit; outlier checks before retraining |
+| **Data poisoning** (corrupting training labels) | The system learns what is "normal" for a customer only from *verified* outcomes; reviewer verdicts need two people | Label audit; outlier checks before retraining |
 | **Prompt injection** | The language model never sees customer-typed text; structured, allow-listed output; add-only authority | Same discipline for any future assistant |
 | **Model tampering** | Checksummed manifests; a model that fails its integrity check will not load and the system fails safe | Signed releases |
 | **Replay of biometric data** | Random challenges; fresh-frame rule; replay guard on frames and audio | Wider coverage |
