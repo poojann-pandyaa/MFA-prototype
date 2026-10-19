@@ -29,7 +29,6 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements/dev.txt
 .venv/bin/python scripts/fetch_models.py
 .venv/bin/python -m amfa.factors.ueba.training.train
-.venv/bin/python -m amfa.engine.risk.train          # risk model (macOS: brew install libomp first)
 
 .venv/bin/python -m amfa.cli serve face &
 .venv/bin/python -m amfa.cli serve voice &
@@ -57,7 +56,6 @@ and open http://127.0.0.1:8050 on a laptop or phone. Development OTP codes are p
 **macOS notes.** Use Python 3.12 (`brew install python@3.12`, then `python3.12 -m venv .venv`). If pip
 rejects the `+cpu` torch pins, install plain `torch` and an unpinned `torchaudio` from PyPI; if
 `vosk==0.3.45` has no wheel, use `vosk==0.3.44`; `llama_cpp` is only needed for `AMFA_AGENT_BACKEND=local`.
-The risk model needs `brew install libomp`.
 
 **Testing on a phone over the internet.** Open two tunnels, one for AMFA and one for the bank
 (`--protocol http2` avoids QUIC, which some networks block):
@@ -96,7 +94,7 @@ can never be replayed or applied to a different amount.
 **The journey.** Every action has the same shape: review (what, to whom, which checks are coming and why,
 and a scam warning when AMFA asks for one) → "Confirm it's you" (AMFA's own pages, full screen, one step at
 a time) → result (sent, held for review with a live timeline, or not sent with what to do next). The reason
-comes from `plan.customerNotice`: never the score or threat level, and never a spoof or risk-list signal.
+comes from `plan.customerNotice`: the rule table's signals in plain words, never a spoof or risk-list signal.
 A customer who closes the checks midway can continue from Activity (`POST /api/actions/{id}/continue`).
 
 **Progressive setup.** Opening an account asks only for the face (SMS codes come from the mobile number),
@@ -111,12 +109,12 @@ bank app, which shows it in its own header. Capture stays on AMFA's origin, so t
 frame or recording.
 
 **Safety and labels.** "This wasn't me" calls `POST /v1/transactions/{id}/feedback`, which stores a `FRAUD`
-label for retraining and raises a security event; review verdicts become labels too (`risk_label`).
+label and raises a security event; review verdicts become labels too (`risk_label`).
 "Freeze my account" suspends the customer in AMFA and blocks every action until the bank unfreezes it.
 
 **Demo mode** (`BANK_DEMO_TOOLS=1`, the default; set `0` for a real deployment). A "Behind the scenes" button
-opens AMFA's decision on the last action (threat level, fraud probability, the model's reasons, the checks
-asked against the old rule table) and stages a SIM swap, a payee on a mule list, a new phone, or an unfreeze.
+opens AMFA's decision on the last action (risk band, the reasons, the checks the rule table asked for and
+anything the AI agent or bank policy added) and stages a SIM swap, a payee on a mule list, a new phone, or an unfreeze.
 
 **Laptop and phone.** Typing and the shape trace are enrolled once per kind of device: keyboard and
 mouse on a computer, touch on a phone. A phone is scored only against touch templates and a computer only
@@ -133,45 +131,28 @@ replacement link (`INTEGRATION.md`, "Device keys on more than one device").
 Layout: `static/js/app.js` (router, guards), `ui.js` (components), `amfa-frame.js` (the full-screen host for
 AMFA's pages), `actions.js`, and one module per screen in `static/js/screens/`. No build step.
 
-## Risk model
+## Decision engine
 
-Every transaction's threat level (T0–T4) comes from the risk model in `amfa/engine/risk`, which
-picks the factors: T0 OTP, T1 + behaviour, T2 + face, T3 + voice, T4 manual review. The bank's
-policy floor still applies on top. With no active model, every transaction fails closed to manual
-review.
+Each request's checks come from the reviewed rule table (`amfa/engine/rules.py`): a routine payment from a
+known device asks for a one-time code; a new payee or high value adds face and typing; an unknown device in
+an unknown place adds face and voice; compound risk asks for everything. The bank's mandated checks are
+added, the local AI agent may add (never remove) checks the table missed, unavailable checks are
+substituted, and the regulatory floor is applied last.
 
-**Memory.** The model looks at each customer's last 365 days, never longer. Besides usual amounts, devices
-and places, it checks whether the payee has been paid before, how long ago, at about what amount and on
-what schedule (weekly to yearly), so rent, premiums and bills that repeat are recognised as familiar.
-
-**Small payments.** A payment is held at T1 (OTP plus the passive behaviour check, still two factors)
-instead of the model's higher level when all of these hold: the money sent in the last 24 hours is in the
-bank's LOW amount band (under Rs 10,000 by default), the payment is under 5x the customer's usual, and
-no hard warning sign is present (spoof attempt, repeated failed checks, payee on a risk list, SIM
-change within 48 h, password reset or contact change within 24 h, an account setting changed today, or
-3+ new payees today). Account changes are never treated as small. The plan records both levels
-(`modelLevel`, `threatLevel`) and the reason (`capReason`). Switch it off per bank with
-`smallPaymentCap: false` in the tenant policy.
-
-`python -m amfa.engine.risk.train` trains on simulated customers and attacks (`scenarios.py`),
-writes `models/risk/<version>/` (model, calibration, `card.json` with metrics, checksum manifest)
-and activates it only if it beats a logistic-regression baseline and passes the per-segment
-fairness check (`--force` overrides). The rule table is still computed and logged as
-`rulesBaseline` for comparison but no longer decides.
-
-`python -m amfa.engine.risk.export` writes the simulated training data as `data/risk-dataset/dataset.csv`
-plus `coverage.md`: 72 scenarios (14 customer types, 47 genuine situations, 25 attacks), 6 customer age
-groups (18-24 to 75+), 7 payment-size ranges (under Rs 100 to over Rs 1 crore)
-and 5 data feeds, with row counts for each and an age x amount grid. Age and amount are columns in the
-dataset for coverage and fairness checks; the model is never given age. Add a scenario in
-`scenarios.py` and its description in `SCENARIO_DOCS`; the tests fail if any documented scenario has no rows. Banks may send optional `accountEvents`
-(SIM, contact or password changes; payee risk flag) with each transaction.
+**Low-touch** (`lowTouch`, on by default): a high-risk request, or one whose preferred checks the customer
+hasn't set up, is answered with the strongest checks the customer can do rather than a queue. A person
+reviews only what checks can't settle: a payee on a risk list, an account takeover followed by a cash-out
+(SIM, contact or password changed in the last day or two, then money to a new payee), a recent suspected
+fake face with repeated failed checks, a watchlisted customer, or a request whose regulatory minimum can't
+be met. A large first payment to a new payee also gets the scam warning and a second biometric. These read
+the account and payment signals in `amfa/engine/risk/features.py`; banks may send optional
+`accountEvents` (SIM, contact or password changes; payee risk flag) with each transaction.
 
 ## Settings
 
 | Variable | Values |
 |---|---|
-| `AMFA_AGENT_BACKEND` | `local` (Qwen2.5-3B on the server, can only add checks), `off` (risk model only) |
+| `AMFA_AGENT_BACKEND` | `local` (Qwen2.5-3B on the server, can only add checks), `off` (rule table only) |
 | `AMFA_ADMIN_TOTP` | `required` (password + authenticator), `off` (password only) |
 | `AMFA_VOICE_PROMPT_CHECK` | `advisory`, `enforce`, `off` |
 | `AMFA_UEBA_TOUCH_MODE` | `live` (phone typing and shape count toward the decision; default), `shadow` (scored and logged only, never counted) |
@@ -183,7 +164,7 @@ authenticator from the customer flow; face or voice then serves as the dynamic f
 ## Layout
 
 ```
-amfa/engine      decision engine: risk model, AI agent, bank policy
+amfa/engine      decision engine: rule table, AI agent, low-touch review rules, bank policy
 amfa/core        platform API, orchestration, proofs, admin console, hosted pages
 amfa/factors     face, voice and behaviour services
 sdk/python       bank client
