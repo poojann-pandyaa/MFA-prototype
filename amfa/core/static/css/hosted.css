@@ -124,3 +124,43 @@ footer { color: var(--muted); font-size: 13px; text-align: center; margin-top: 1
 .embedded .shell { padding: 8px 20px 24px; }
 .embedded .brand, .embedded #approving, .embedded .title-card, .embedded footer { display: none !important; }
 .embedded .card { background: transparent; padding: 0; border-radius: 0; }
+
+/* which flow: setting up (neutral, outlined) versus verifying an approval (brand, filled) */
+.mode { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; border-radius: 14px; padding: 10px 12px; margin: 0 0 14px; font-size: 14px; }
+.mode-tag { border-radius: 999px; padding: 3px 10px; font-size: 12px; font-weight: 800; letter-spacing: 0.6px; text-transform: uppercase; white-space: nowrap; }
+.mode-text { color: var(--ink); font-weight: 600; min-width: 0; }
+.mode.enroll { border: 1.5px dashed var(--line); background: var(--card); }
+.mode.enroll .mode-tag { border: 1.5px solid var(--muted); color: var(--muted); }
+.mode.verify { background: var(--brand-soft); border: 1.5px solid var(--brand); }
+.mode.verify .mode-tag { background: var(--brand); color: var(--brand-ink); }
+.embedded .mode.enroll { background: transparent; }
+p.overall { font-size: 14px; font-weight: 700; color: var(--muted); margin: 10px 0 0; }
+
+/* progress within one step */
+.step-progress { margin: 4px 0 12px; }
+.step-progress-head { display: flex; justify-content: space-between; font-size: 13px; font-weight: 700; color: var(--muted); }
+.step-progress .progress { height: 8px; margin: 6px 0 0; }
+.step-progress .progress > span { transition: width 200ms ease; }
+.step-progress.complete .progress > span { background: var(--ok); }
+
+/* hold-to-talk */
+.talk-wrap { display: flex; flex-direction: column; align-items: center; margin-top: 8px; }
+button.talk { position: relative; width: 132px; height: 132px; min-height: 0; border-radius: 50%; padding: 0; margin: 10px 0 6px;
+  background: var(--brand); color: var(--brand-ink); touch-action: none; user-select: none; -webkit-user-select: none;
+  -webkit-touch-callout: none; transition: transform 120ms ease, box-shadow 120ms ease; box-shadow: 0 8px 22px rgba(15, 27, 45, 0.22); }
+button.talk .mic { position: absolute; left: 50%; top: 50%; width: 30px; height: 46px; margin: -27px 0 0 -15px; border-radius: 15px; border: 4px solid currentColor; }
+button.talk .mic::after { content: ""; position: absolute; left: 50%; bottom: -16px; width: 4px; height: 12px; margin-left: -2px; background: currentColor; border-radius: 2px; }
+.talk-ring { position: absolute; inset: -12px; width: calc(100% + 24px); height: calc(100% + 24px); transform: rotate(-90deg); pointer-events: none; }
+.talk-ring circle { fill: none; stroke-width: 4; }
+.talk-ring .track { stroke: var(--line); }
+.talk-ring .bar { stroke: var(--brand); stroke-linecap: round; transition: stroke-dashoffset 80ms linear; }
+.talk-wrap.recording button.talk { transform: scale(0.94); box-shadow: 0 0 0 10px var(--brand-soft); }
+.talk-wrap.enough .talk-ring .bar { stroke: var(--ok); }
+.talk-wrap .meter { width: 100%; max-width: 280px; }
+.talk-hint { font-size: 15px; font-weight: 700; text-align: center; min-height: 2.8em; margin: 12px 0 0; }
+
+/* the outcome: what was approved and how */
+.result .outcome { max-width: 340px; margin: 14px auto 6px; text-align: left; border-top: 1px solid var(--line); }
+.result .outcome .kv { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 15px; }
+.result .outcome .kv span:first-child { color: var(--muted); }
+.result .outcome .kv span:last-child { font-weight: 700; text-align: right; }

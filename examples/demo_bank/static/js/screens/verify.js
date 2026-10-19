@@ -21,7 +21,10 @@ export async function render(root, [id]) {
     toast("Saved. You can finish it from Activity.");
     return go("activity");
   }
-  await api("POST", `/api/actions/${id}/complete`);
-  await refresh();
+  // always land on the result screen: it reloads the action, so a failed settle call still shows the outcome
+  try {
+    await api("POST", `/api/actions/${id}/complete`);
+    await refresh();
+  } catch { /* the result screen asks again */ }
   go(`result/${id}`);
 }

@@ -515,6 +515,9 @@
     this.video = video;
     this.stream = null;
     this.deviceId = null;
+    // every picture already sent from this camera: a face check takes two bursts back to back (and may be
+    // retried), and the service treats a repeat anywhere -- not just within one burst -- as a replay
+    this.sent = new Set();
   }
   Camera.prototype.start = function(deviceId) {
     var self = this, size = {
@@ -606,7 +609,8 @@
   // the customer), so never send a repeat: wait for the camera's next frame. A camera that stops sending
   // new pictures gives a CameraStalled error the page can show, instead of a burst that looks like an attack.
   Camera.prototype.burst = function(n, intervalMs, onTick) {
-    var self = this, frames = [], last = null;
+    var self = this, frames = [];
+    if (!self.sent) self.sent = new Set();
     function nextVideoFrame() {
       var v = self.video;
       return new Promise(function(r) {
@@ -624,7 +628,7 @@
       var deadline = Date.now() + 1500;
       return function attempt() {
         var f = self.frame();
-        if (f !== last) return Promise.resolve(f);
+        if (!self.sent.has(f)) return Promise.resolve(f);
         if (Date.now() > deadline) return Promise.reject(mediaError("CameraStalled"));
         return nextVideoFrame().then(attempt);
       }();
@@ -633,7 +637,7 @@
       if (i >= n) return Promise.resolve(frames);
       var lead = onTick ? onTick(i) : 0;
       return sleep(lead || 0).then(fresh).then(function(f) {
-        last = f;
+        self.sent.add(f);
         frames.push(f);
         return i + 1 < n ? sleep(intervalMs) : null;
       }).then(function() {

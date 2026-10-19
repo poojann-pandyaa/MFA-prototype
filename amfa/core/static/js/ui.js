@@ -301,6 +301,125 @@
       }
     };
   }
+  // ---------- progress within one step: "Sentences · 1 of 3" over a bar ----------
+  function stepProgress(label) {
+    var count = el("span", { class: "count" }), bar = el("span");
+    var node = el("div", { class: "step-progress" }, [
+      el("div", { class: "step-progress-head" }, [ el("span", { text: label }), count ]),
+      el("div", { class: "progress", role: "progressbar", "aria-label": label, "aria-valuemin": "0" }, [ bar ]) ]);
+    var meter = node.lastChild;
+    function set(done, total) {
+      done = Math.max(0, Math.min(done, total));
+      count.textContent = done + " of " + total;
+      bar.style.width = (total ? Math.round(100 * done / total) : 0) + "%";
+      meter.setAttribute("aria-valuemax", String(total));
+      meter.setAttribute("aria-valuenow", String(done));
+      node.classList.toggle("complete", total > 0 && done >= total);
+    }
+    return { node: node, set: set };
+  }
+  // ---------- which flow the customer is in: setting up (saving a template) or verifying (an approval) ----------
+  function modeBanner(kind, text) {
+    return el("div", { class: "mode " + kind, role: "note" }, [
+      el("span", { class: "mode-tag", text: kind === "enroll" ? "One-time setup" : "Verification" }),
+      el("span", { class: "mode-text", text: text }) ]);
+  }
+  // ---------- hold-to-talk: record only while the button is held (pointer, touch, Space or Enter) ----------
+  function holdToTalk(opts) {
+    var minS = opts.minSeconds || 3, maxS = opts.maxSeconds || 10;
+    var C = 2 * Math.PI * 46;
+    var ring = svgEl("svg", { viewBox: "0 0 100 100", class: "talk-ring", "aria-hidden": "true" });
+    ring.appendChild(svgEl("circle", { cx: 50, cy: 50, r: 46, class: "track" }));
+    var arc = svgEl("circle", { cx: 50, cy: 50, r: 46, class: "bar", "stroke-dasharray": C.toFixed(1), "stroke-dashoffset": C.toFixed(1) });
+    ring.appendChild(arc);
+    var button = el("button", { type: "button", class: "talk", "aria-label": "Hold to record" }, [
+      ring, el("span", { class: "mic", "aria-hidden": "true" }) ]);
+    var level = el("span"), hint = el("p", { class: "talk-hint", role: "status" });
+    var node = el("div", { class: "talk-wrap" }, [ button, el("div", { class: "meter", "aria-hidden": "true" }, [ level ]), hint ]);
+    var state = "idle", mic = null, started = 0, timer = null, released = false;
+    function say(t) { hint.textContent = t; }
+    function fill(f) { arc.setAttribute("stroke-dashoffset", (C * (1 - Math.max(0, Math.min(1, f)))).toFixed(1)); }
+    function idle(text) {
+      state = "idle";
+      clearInterval(timer);
+      node.classList.remove("recording", "enough");
+      fill(0);
+      level.style.width = "0%";
+      say(text || opts.idleText || "Hold the button and speak. Let go when you've finished.");
+    }
+    function discard() {
+      if (mic) try { mic.stop(); } catch (e) {}
+      mic = null;
+    }
+    function press(e) {
+      if (e) e.preventDefault();
+      if (state !== "idle" || button.disabled) return;
+      released = false;
+      state = "starting";
+      say("Starting the microphone…");
+      mic = new global.AMFA.Microphone();
+      mic.start().then(function() {
+        if (released) {   // let go while the browser was asking for permission: nothing to keep yet
+          discard();
+          return idle("Microphone ready. Now hold the button while you speak.");
+        }
+        state = "recording";
+        started = performance.now();
+        node.classList.add("recording");
+        say("Recording… keep holding while you speak.");
+        timer = setInterval(function() {
+          var s = (performance.now() - started) / 1e3;
+          fill(s / minS);
+          level.style.width = Math.min(100, mic ? mic.level() * 400 : 0) + "%";
+          if (s >= minS && !node.classList.contains("enough")) {
+            node.classList.add("enough");
+            say("Let go when you've finished speaking.");
+          }
+          if (s >= maxS) release();
+        }, 80);
+      }, function(err) {
+        mic = null;
+        state = "idle";
+        say("");
+        if (opts.onError) opts.onError(err);
+      });
+    }
+    function release(e) {
+      if (e) e.preventDefault();
+      released = true;
+      if (state !== "recording") return;
+      var seconds = (performance.now() - started) / 1e3;
+      clearInterval(timer);
+      var out = mic.stop();
+      mic = null;
+      if (seconds < minS) return idle("That was too short. Keep holding until the ring is full, then let go.");
+      state = "done";
+      node.classList.remove("recording");
+      say("Got it.");
+      opts.onRecorded(out);
+    }
+    button.addEventListener("pointerdown", function(e) {
+      if (e.button !== 0) return;
+      try { button.setPointerCapture(e.pointerId); } catch (x) {}
+      press(e);
+    });
+    [ "pointerup", "pointercancel", "lostpointercapture" ].forEach(function(t) { button.addEventListener(t, release); });
+    button.addEventListener("keydown", function(e) {
+      if ((e.key === " " || e.key === "Enter") && !e.repeat) press(e);
+    });
+    button.addEventListener("keyup", function(e) {
+      if (e.key === " " || e.key === "Enter") release(e);
+    });
+    button.addEventListener("click", function(e) { e.preventDefault(); });
+    button.addEventListener("contextmenu", function(e) { e.preventDefault(); });
+    idle();
+    return {
+      node: node,
+      button: button,
+      reset: function(text) { discard(); idle(text); },
+      stop: function() { clearInterval(timer); discard(); state = "idle"; }
+    };
+  }
   // keeps counting until the time is up or the screen it was shown on is replaced; it may start before it's shown
   function countdown(node, expiresAt, prefix, onDone) {
     var shown = false;
@@ -328,6 +447,9 @@
     step: step,
     faceCamera: faceCamera,
     codeBoxes: codeBoxes,
-    countdown: countdown
+    countdown: countdown,
+    stepProgress: stepProgress,
+    modeBanner: modeBanner,
+    holdToTalk: holdToTalk
   };
 })(window);

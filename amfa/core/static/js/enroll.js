@@ -14,9 +14,12 @@
     });
     cleanup = [];
   }
+  var LABEL = { CONSENT: "Consent", OTP: "Authenticator", FACE: "Face", VOICE: "Voice", UEBA: "Typing", DEVICE: "This device" };
   function progress() {
     var pct = steps.length ? Math.round(100 * index / steps.length) : 0;
     document.getElementById("progress").style.width = pct + "%";
+    var label = document.getElementById("progress-label"), total = steps.length - 1;
+    if (label && total > 0) label.textContent = index < total ? "Step " + (index + 1) + " of " + total + " · " + (LABEL[names[index]] || "") : "All steps done";
   }
   function next() {
     done();
@@ -44,8 +47,9 @@
     };
     return reasons[res.reason] || "That didn't work (" + (res.reason || "error") + "). Please try again.";
   }
-  function heading(t, sub) {
+  function heading(t, sub, banner) {
     clear(panel);
+    if (banner) panel.appendChild(UI.modeBanner("enroll", banner));
     panel.appendChild(el("h2", {
       text: t
     }));
@@ -109,7 +113,8 @@
     });
   }
   function otpStep() {
-    heading("Link your authenticator app", "Scan this code with Google Authenticator, Microsoft Authenticator or any TOTP app.");
+    heading("Register your authenticator app", "Scan this code with Google Authenticator, Microsoft Authenticator or any TOTP app.",
+      "Linking an app that makes your one-time codes. No payment is being made.");
     api.post("/c/v1/enrollment/totp/start").then(function(t) {
       var img = el("img", {
         alt: "QR code for your authenticator app",
@@ -159,7 +164,10 @@
     });
   }
   function faceStep() {
-    heading("Set up your face", "Hold your device at eye level in good light. We'll take five pictures and wait for you at each one.");
+    heading("Register your face", "Hold your device at eye level in good light. We'll take five pictures and wait for you at each one.",
+      "Saving your face so we can recognise you later. No payment is being made.");
+    var pics = UI.stepProgress("Pictures");
+    pics.set(0, 5);
     var face = UI.faceCamera();
     var prompt = face.prompt;
     prompt.textContent = "Look straight at the camera";
@@ -168,6 +176,7 @@
       text: "Start"
     });
     var problem = null;
+    panel.appendChild(pics.node);
     panel.appendChild(face.node);
     var cam = new AMFA.Camera(face.video);
     cleanup.push(function() {
@@ -191,10 +200,12 @@
           prompt.textContent = cues[i] + " · picture " + (i + 1) + " of 5";
           face.setArrow(arrows[i]);
           face.setProgress(i / 5);
+          pics.set(i, 5);
           return i > 0 && cues[i] !== cues[i - 1] ? 1500 : 0;   // time to move after a new cue
         });
       }).then(function(frames) {
         face.setProgress(1);
+        pics.set(5, 5);
         face.setArrow(null);
         prompt.textContent = "Checking…";
         return api.post("/c/v1/enrollment/face", {
@@ -207,6 +218,7 @@
         panel.appendChild(problem);
         prompt.textContent = cues[0];
         face.setProgress(0);
+        pics.set(0, 5);
       }, function(err) {
         if (err.name !== "CameraStalled") return fail(err);
         UI.busy(btn, false, "Try again");   // nothing was sent: the camera stopped, so let them retry
@@ -215,94 +227,63 @@
         prompt.textContent = cues[0];
         face.setArrow(null);
         face.setProgress(0);
+        pics.set(0, 5);
       });
     });
   }
   function voiceStep() {
     var clips = [], i = 0;
-    heading("Voice", "Read three short sentences aloud in your normal voice.");
+    heading("Register your voice", "Read three short sentences aloud in your normal voice.",
+      "Saving your voice so we can recognise it later. No payment is being made.");
+    var sentences = UI.stepProgress("Sentences");
     var phrase = el("div", {
       class: "prompt-phrase"
-    }), meter = el("span");
-    var status = el("p", {
-      class: "muted"
-    }), btn = el("button", {
-      type: "button",
-      text: "Start recording"
     });
+    var talk = UI.holdToTalk({
+      minSeconds: 2.5,
+      maxSeconds: 10,
+      idleText: "Hold the button and read the sentence. Let go when you've finished.",
+      onRecorded: function(out) {
+        clips.push(out.wav);
+        i += 1;
+        sentences.set(i, SENTENCES.length);
+        if (i < SENTENCES.length) return show();
+        talk.button.disabled = true;
+        api.post("/c/v1/enrollment/voice", {
+          samples: clips
+        }).then(function(res) {
+          if (res.enrolled) return next();
+          clips = [];
+          i = 0;
+          talk.button.disabled = false;
+          show();
+          panel.appendChild(UI.notice("bad", rejected(res)));
+        }, fail);
+      },
+      onError: function(err) {
+        panel.appendChild(UI.notice("bad", UI.mediaErrorText(err, "microphone")));
+      }
+    });
+    panel.appendChild(sentences.node);
     panel.appendChild(phrase);
-    panel.appendChild(el("div", {
-      class: "meter",
-      "aria-hidden": "true"
-    }, [ meter ]));
-    panel.appendChild(status);
-    panel.appendChild(btn);
-    var mic = null, recording = false, started = 0, timer = null;
+    panel.appendChild(talk.node);
     cleanup.push(function() {
-      clearInterval(timer);
-      if (mic) try {
-        mic.stop();
-      } catch (e) {}
+      talk.stop();
     });
     function show() {
       phrase.textContent = SENTENCES[i];
-      status.textContent = "Sentence " + (i + 1) + " of 3";
+      sentences.set(i, SENTENCES.length);
+      talk.reset("Sentence " + (i + 1) + " of 3: hold the button and read it aloud. Let go when you've finished.");
     }
     show();
-    function stop() {
-      clearInterval(timer);
-      recording = false;
-      var out = mic.stop();
-      mic = null;
-      btn.textContent = "Start recording";
-      if (out.seconds < 2.5) {
-        status.textContent = "That was too short. Please read the whole sentence.";
-        return;
-      }
-      clips.push(out.wav);
-      i += 1;
-      if (i < SENTENCES.length) return show();
-      UI.busy(btn, true, "Checking…");
-      api.post("/c/v1/enrollment/voice", {
-        samples: clips
-      }).then(function(res) {
-        if (res.enrolled) return next();
-        clips = [];
-        i = 0;
-        show();
-        UI.busy(btn, false, "Start again");
-        panel.appendChild(UI.notice("bad", rejected(res)));
-      }, fail);
-    }
-    btn.addEventListener("click", function() {
-      if (recording) {
-        if (performance.now() - started > 1500) stop();
-        return;
-      }
-      mic = new AMFA.Microphone;
-      mic.start().then(function() {
-        recording = true;
-        started = performance.now();
-        btn.textContent = "Stop";
-        timer = setInterval(function() {
-          meter.style.width = Math.min(100, mic ? mic.level() * 400 : 0) + "%";
-          if (performance.now() - started > 1e4) stop();
-        }, 80);
-      }, function(err) {
-        mic = null;
-        status.textContent = UI.mediaErrorText(err, "microphone");
-        btn.textContent = "Try again";
-      });
-    });
   }
   function typingStep() {
     var info = state.behaviour, target = info.repetitions || 10, samples = [], traces = [], kinds = [];
     var kind = AMFA.behaviourInput(), wantShape = false;
-    heading("Typing rhythm", "Type the phrase below " + target + " times, pressing Enter after each. " + "The first one is practice — just type naturally." +
-      (kind === "touch" ? " Type each letter yourself; if your keyboard suggests or corrects words, turn that off for now." : ""));
-    var bar = el("span"), count = el("p", {
-      class: "muted"
-    });
+    heading("Register your typing", "Type the phrase below " + target + " times, pressing Enter after each. " + "The first one is practice — just type naturally." +
+      (kind === "touch" ? " Type each letter yourself; if your keyboard suggests or corrects words, turn that off for now." : ""),
+      "Learning how you type so we can recognise it later. No payment is being made.");
+    var typed = UI.stepProgress("Phrases typed");
     var input = el("input", {
       type: "text",
       class: "phrase",
@@ -312,11 +293,7 @@
       class: "prompt-phrase",
       text: info.phrase
     }));
-    panel.appendChild(el("div", {
-      class: "progress",
-      "aria-hidden": "true"
-    }, [ bar ]));
-    panel.appendChild(count);
+    panel.appendChild(typed.node);
     var form = el("form", {}, [ el("label", {
       for: "phrase",
       text: "Phrase"
@@ -327,8 +304,7 @@
       rec.detach();
     });
     function update() {
-      count.textContent = samples.length + " of " + target;
-      bar.style.width = Math.round(100 * samples.length / target) + "%";
+      typed.set(samples.length, target);
     }
     update();
     input.focus();
@@ -351,22 +327,21 @@
     });
     function shapeStage() {
       var need = info.shapeTracesRequired || 4;
-      heading("Trace the line", "Drag from the green dot to the red dot, following the line. " + need + " times.");
+      heading("Register your tracing", "Drag from the green dot to the red dot, following the line. " + need + " times.",
+        "Learning how you move so we can recognise it later. No payment is being made.");
       var canvas = el("canvas", {
         "aria-label": "Tracing area"
-      }), c2 = el("p", {
-        class: "muted",
-        text: "0 of " + need
-      });
+      }), traced = UI.stepProgress("Lines traced");
+      traced.set(0, need);
+      panel.appendChild(traced.node);
       panel.appendChild(canvas);
-      panel.appendChild(c2);
       requestAnimationFrame(function() {
         var note = null;
         var tr = new AMFA.ShapeTracer(canvas, info.shape, function(pts, pointerType) {
           if (pts.length < 10) return;
           traces.push(pts);
           kinds.push(pointerType);
-          c2.textContent = traces.length + " of " + need;
+          traced.set(traces.length, need);
           if (traces.length >= need) {
             tr.detach();
             send();
@@ -385,7 +360,7 @@
       });
     }
     function send() {
-      heading("Typing rhythm", "Checking…");
+      heading("Register your typing", "Checking…");
       api.post("/c/v1/enrollment/behaviour", {
         keystrokeSamples: samples,
         shapeTraces: traces,
@@ -421,6 +396,8 @@
   function completeStep() {
     api.post("/c/v1/enrollment/complete").then(function(r) {
       document.getElementById("progress").style.width = "100%";
+      progress();
+      var LIST = { OTP: "Authenticator app", FACE: "Face", VOICE: "Voice", UEBA: "Typing" };
       clear(panel).appendChild(el("div", {
         class: "result ok"
       }, [ el("div", {
@@ -428,10 +405,11 @@
         "aria-hidden": "true",
         text: "✓"
       }), el("h2", {
-        text: "You're set up"
+        text: "Setup complete"
       }), el("p", {
         class: "muted",
-        text: "You can return to " + state.bank + ". You'll be asked for these checks only when a transaction needs them."
+        text: "Registered: " + (r.enrolled || []).map(function(f) { return LIST[f] || f; }).join(", ") + ". " +
+          "Nothing has been paid or approved. When you make a payment, " + state.bank + " will ask you to verify with these."
       }) ]));
       UI.postToParent({
         type: "amfa:enrolled",
