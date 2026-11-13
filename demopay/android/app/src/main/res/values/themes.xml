@@ -1,0 +1,6 @@
+<resources>
+    <style name="Theme.DemoPay" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">#14325C</item>
+        <item name="android:windowBackground">#EEF2F7</item>
+    </style>
+</resources>

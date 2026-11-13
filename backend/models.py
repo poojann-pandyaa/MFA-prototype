@@ -60,3 +60,36 @@ class LoginHistory(Base):
     success = Column(Boolean, default=False)
 
     user = relationship("User", back_populates="login_history")
+
+
+class Transaction(Base):
+    """One payment that went through /txn/risk. Completed (status="approved") rows are the
+    user's history for the next risk assessment; every row feeds payee-side stats
+    (age, distinct payers) across users."""
+    __tablename__ = "transactions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    payee_vpa = Column(String, index=True)
+    amount = Column(Float)
+    channel = Column(String)
+    device_identifier = Column(String)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, index=True)
+    # approved | pending (friction not yet cleared) | blocked
+    status = Column(String, default="pending")
+    action = Column(String)
+    severity = Column(String)
+    threat_type = Column(String)
+    score = Column(Float)
+    reasons = Column(String)  # JSON list of codes; server-side only (never returned to the client)
+    release_at = Column(DateTime, nullable=True)  # cooling-off hold ends here
+    stepup_passed = Column(Boolean, default=False)
+
+
+class TxnStepUp(Base):
+    """Links a face-challenge VerificationSession to the payment it unlocks."""
+    __tablename__ = "txn_stepups"
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(String, unique=True, index=True)
+    txn_id = Column(Integer, ForeignKey("transactions.id"))

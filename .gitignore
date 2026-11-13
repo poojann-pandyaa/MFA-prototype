@@ -22,3 +22,11 @@ backend/models/arcface/
 backend/tests/fixtures/*.jpg
 backend/tests/fixtures/*.jpeg
 backend/tests/fixtures/*.png
+
+# Cached synthetic ATO datasets (reproducible from a seed)
+backend/ato/_cache/
+
+# DemoPay (new app in demopay/)
+demopay/backend/demopay.db
+demopay/backend/.secret_key
+demopay/frontend/dist/

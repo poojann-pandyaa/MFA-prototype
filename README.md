@@ -223,3 +223,21 @@ Notes:
 *   Point `API_URL` (currently derived from `window.location.hostname` in `Login.jsx`/`Enroll.jsx`/`Dashboard.jsx`) at your backend's real, reachable address - `localhost` won't resolve from inside the Android WebView/emulator.
 *   This has **not** been built or run in this pass - there's no Android SDK/emulator in the environment this was developed in. The steps above are the intended path, not a verified one; the actual native build and camera-permission flow still need to be exercised on a real device or emulator.
 *   Once the `ml/` PAD model is trained and exported to ONNX, the same file runs on Android via `onnxruntime-react-native` (or plain `onnxruntime-android` if a fully native client is built later) - no separate mobile-specific conversion needed, since ONNX is the one artifact shared across server, web, and Android.
+
+
+## Payment risk model (`backend/ato/`)
+
+`POST /txn/risk` scores a UPI payment *before* the PIN screen for three kinds of risk and returns an action. `POST /txn/{id}/confirm` releases it once the hard gates are cleared (face step-up done, hold elapsed, not blocked).
+
+| Risk | Example scams | Actions (medium / high / critical) |
+|---|---|---|
+| Takeover (someone else pays) | SIM swap, UPI moved to another phone, remote control, stolen phone | device prompt / face + liveness check / block and lock |
+| Coached (the owner is tricked) | digital arrest, fake customer care, collect-request tricks, investment/task, extortion, prize fees, "relative in trouble", romance | scam warning / 30-minute hold / block and offer helpline 1930 |
+| Bad payee | look-alike payee id, fake seller, mule account | payee badge / hold and verify / block |
+
+*   **Model**: three gradient-boosted-tree detectors over 46 features (`ato/features.py`; one featurizer shared by training and serving), a small router that names the scam family so the action fits it, and a `server_only` variant used when the client has no attested SDK. Severity thresholds are *friction budgets* (max share of legitimate payments reaching each level: 2% / 0.3% / 0.05%), shared by all three detectors.
+*   **Data is synthetic.** No labelled Indian UPI fraud data is public, so `ato/simulate.py` generates users, hard legitimate look-alikes (phone change, SIM replacement, travel, VPN, someone else using the phone, collect requests from non-contacts) and 14 scam types at varying stealth. `docs/ato-model-report.md` (generated) shows results including stress tests; they validate the pipeline and robustness, **not** real-world accuracy. The simulator caught one of its own bugs (a missing-value shortcut that leaked the label); the report has a shortcut check.
+*   **Retrain**: `cd backend && .venv/bin/python -m ato.train --users 6000 --seed 7` (writes `backend/models/ato/` and the report, about 4 minutes). Replace `build_dataset` with a loader over real labelled history to train for real.
+*   **Rollout**: `MFA_ATO_SHADOW=1` scores and logs without ever adding friction. Reasons are logged server-side only. If the artifacts are missing the endpoint falls back to a few blunt rules.
+*   **Known gaps**: the first payment on a genuinely new phone still gets a face challenge (needs the vouched-transfer flow); detection of coached scams leans on payee intelligence (government fraud-risk band, account age and sender counts), and falls to about 60% when scam payees look like ordinary old accounts; payee-side scams and romance/fake-seller scams are the weakest; device signals are request fields in this demo (spoofable); no payment UI yet.
+*   **Evidence**: `python -m ato.evaluate` re-scores the saved model on every scam type, genuine situation and user segment, plus 22 "what if my assumptions are wrong" worlds, and writes `docs/ato-evidence.md`, charts in `docs/evidence/`, and (with `python -m tools.build_evidence_pdf`) `docs/ato-model-evidence.pdf`. It also compares the simulated world with reported real-world figures. It cannot prove real-world accuracy; only shadow-mode data can.

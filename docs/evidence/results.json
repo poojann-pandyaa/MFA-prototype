@@ -1,0 +1,3035 @@
+{
+ "main": {
+  "n_test": 272875,
+  "n_incidents": 347,
+  "reproduces_card": true,
+  "headline": {
+   "full": {
+    "fpr_MEDIUM": 0.015563142945444378,
+    "inc_MEDIUM": {
+     "incidents": 347,
+     "caught": 0.9711815561959655,
+     "caught_ci": [
+      0.9477718776982308,
+      0.9842726689005764
+     ],
+     "first_payment_caught": 0.9481268011527377,
+     "rupees_saved": 0.9951455977896699
+    },
+    "fpr_HIGH": 0.0019315957556402597,
+    "inc_HIGH": {
+     "incidents": 347,
+     "caught": 0.8962536023054755,
+     "caught_ci": [
+      0.8597128967602954,
+      0.9241166149053679
+     ],
+     "first_payment_caught": 0.8472622478386167,
+     "rupees_saved": 0.9550316188856095
+    },
+    "fpr_CRITICAL": 9.933921029007049e-05,
+    "inc_CRITICAL": {
+     "incidents": 347,
+     "caught": 0.6945244956772334,
+     "caught_ci": [
+      0.6441490880153462,
+      0.7406399449841612
+     ],
+     "first_payment_caught": 0.547550432276657,
+     "rupees_saved": 0.8899828564013219
+    },
+    "txn_recall_HIGH": 0.8767377201112141
+   },
+   "server_only": {
+    "fpr_MEDIUM": 0.015725029065917086,
+    "inc_MEDIUM": {
+     "incidents": 347,
+     "caught": 0.968299711815562,
+     "caught_ci": [
+      0.9441352330258933,
+      0.9822087353062544
+     ],
+     "first_payment_caught": 0.9510086455331412,
+     "rupees_saved": 0.9955181744073172
+    },
+    "fpr_HIGH": 0.0018285773153394458,
+    "inc_HIGH": {
+     "incidents": 347,
+     "caught": 0.8933717579250721,
+     "caught_ci": [
+      0.8564822058808607,
+      0.9216467275181434
+     ],
+     "first_payment_caught": 0.8443804034582133,
+     "rupees_saved": 0.972197994328738
+    },
+    "fpr_CRITICAL": 9.198075026858379e-05,
+    "inc_CRITICAL": {
+     "incidents": 347,
+     "caught": 0.7031700288184438,
+     "caught_ci": [
+      0.653087411142627,
+      0.7488033566568586
+     ],
+     "first_payment_caught": 0.5417867435158501,
+     "rupees_saved": 0.8991581232409331
+    },
+    "txn_recall_HIGH": 0.8767377201112141
+   },
+   "rules": {
+    "fpr_MEDIUM": 0.019838408217928153,
+    "inc_MEDIUM": {
+     "incidents": 347,
+     "caught": 0.6109510086455331,
+     "caught_ci": [
+      0.5587057310869937,
+      0.660766532179392
+     ],
+     "first_payment_caught": 0.5389048991354467,
+     "rupees_saved": 0.8499413384654458
+    },
+    "fpr_HIGH": 0.0015747104445981545,
+    "inc_HIGH": {
+     "incidents": 347,
+     "caught": 0.33429394812680113,
+     "caught_ci": [
+      0.28671152936810407,
+      0.38550522029898215
+     ],
+     "first_payment_caught": 0.2334293948126801,
+     "rupees_saved": 0.5169925129947773
+    },
+    "fpr_CRITICAL": 0.0,
+    "inc_CRITICAL": {
+     "incidents": 347,
+     "caught": 0.10951008645533142,
+     "caught_ci": [
+      0.08083027920928355,
+      0.14674136565837187
+     ],
+     "first_payment_caught": 0.07204610951008646,
+     "rupees_saved": 0.09694714462666422
+    },
+    "txn_recall_HIGH": 0.21872103799814643
+   }
+  },
+  "discrimination": {
+   "takeover": {
+    "roc_auc": 0.9997789646734667,
+    "pr_auc": 0.9602120237238176,
+    "positives": 410
+   },
+   "coached": {
+    "roc_auc": 0.9936189450516645,
+    "pr_auc": 0.6421648560022362,
+    "positives": 612
+   },
+   "payee": {
+    "roc_auc": 0.9942960000352442,
+    "pr_auc": 0.8955316227561227,
+    "positives": 1079
+   },
+   "combined": {
+    "roc_auc": 0.9974946489537873,
+    "pr_auc": 0.8861437633369512,
+    "positives": 1079
+   }
+  },
+  "score_quantiles": {
+   "legit": [
+    0.13682857800893508,
+    0.4653592496229443,
+    0.9359731458677919,
+    1.7000730640969732,
+    3.378465081527331
+   ],
+   "fraud": [
+    4.791214809467105,
+    7.757546394632303,
+    9.123176734563254,
+    10.414682064135308,
+    11.512925464970229
+   ]
+  },
+  "curve": {
+   "full": [
+    {
+     "legit_alert_rate": 0.0001,
+     "payment_recall": 0.6848934198331789,
+     "incidents_caught": 0.7031700288184438,
+     "first_payment": 0.5504322766570605,
+     "rupees_saved": 0.9066668670461947
+    },
+    {
+     "legit_alert_rate": 0.0003,
+     "payment_recall": 0.76274328081557,
+     "incidents_caught": 0.8011527377521613,
+     "first_payment": 0.6887608069164265,
+     "rupees_saved": 0.9288005754390571
+    },
+    {
+     "legit_alert_rate": 0.001,
+     "payment_recall": 0.8489341983317887,
+     "incidents_caught": 0.8760806916426513,
+     "first_payment": 0.8126801152737753,
+     "rupees_saved": 0.9460844888606771
+    },
+    {
+     "legit_alert_rate": 0.003,
+     "payment_recall": 0.9026876737720111,
+     "incidents_caught": 0.9164265129682997,
+     "first_payment": 0.8789625360230547,
+     "rupees_saved": 0.9806877748254129
+    },
+    {
+     "legit_alert_rate": 0.01,
+     "payment_recall": 0.9416126042632067,
+     "incidents_caught": 0.9567723342939481,
+     "first_payment": 0.9337175792507204,
+     "rupees_saved": 0.9939116767419185
+    },
+    {
+     "legit_alert_rate": 0.03,
+     "payment_recall": 0.9712696941612604,
+     "incidents_caught": 0.9798270893371758,
+     "first_payment": 0.962536023054755,
+     "rupees_saved": 0.9966116881376066
+    },
+    {
+     "legit_alert_rate": 0.1,
+     "payment_recall": 0.9981464318813716,
+     "incidents_caught": 1.0,
+     "first_payment": 1.0,
+     "rupees_saved": 1.0
+    }
+   ],
+   "server_only": [
+    {
+     "legit_alert_rate": 0.0001,
+     "payment_recall": 0.6858202038924931,
+     "incidents_caught": 0.7262247838616714,
+     "first_payment": 0.5677233429394812,
+     "rupees_saved": 0.9048813037141568
+    },
+    {
+     "legit_alert_rate": 0.0003,
+     "payment_recall": 0.7924003707136237,
+     "incidents_caught": 0.8242074927953891,
+     "first_payment": 0.7406340057636888,
+     "rupees_saved": 0.9379260246453678
+    },
+    {
+     "legit_alert_rate": 0.001,
+     "payment_recall": 0.8526413345690455,
+     "incidents_caught": 0.8731988472622478,
+     "first_payment": 0.8069164265129684,
+     "rupees_saved": 0.944853709692235
+    },
+    {
+     "legit_alert_rate": 0.003,
+     "payment_recall": 0.9008341056533827,
+     "incidents_caught": 0.9193083573487032,
+     "first_payment": 0.8818443804034583,
+     "rupees_saved": 0.9857507623861936
+    },
+    {
+     "legit_alert_rate": 0.01,
+     "payment_recall": 0.93790546802595,
+     "incidents_caught": 0.9567723342939481,
+     "first_payment": 0.9365994236311239,
+     "rupees_saved": 0.9945723193892869
+    },
+    {
+     "legit_alert_rate": 0.03,
+     "payment_recall": 0.9777571825764597,
+     "incidents_caught": 0.9913544668587896,
+     "first_payment": 0.9827089337175793,
+     "rupees_saved": 0.9985665161869005
+    },
+    {
+     "legit_alert_rate": 0.1,
+     "payment_recall": 0.9981464318813716,
+     "incidents_caught": 1.0,
+     "first_payment": 1.0,
+     "rupees_saved": 1.0
+    }
+   ],
+   "rules": [
+    {
+     "legit_alert_rate": 0.0001,
+     "payment_recall": 0.06487488415199258,
+     "incidents_caught": 0.10951008645533142,
+     "first_payment": 0.07204610951008646,
+     "rupees_saved": 0.09694714462666422
+    },
+    {
+     "legit_alert_rate": 0.0003,
+     "payment_recall": 0.06487488415199258,
+     "incidents_caught": 0.10951008645533142,
+     "first_payment": 0.07204610951008646,
+     "rupees_saved": 0.09694714462666422
+    },
+    {
+     "legit_alert_rate": 0.001,
+     "payment_recall": 0.12604263206672844,
+     "incidents_caught": 0.21613832853025935,
+     "first_payment": 0.14121037463976946,
+     "rupees_saved": 0.23742452184565765
+    },
+    {
+     "legit_alert_rate": 0.003,
+     "payment_recall": 0.21872103799814643,
+     "incidents_caught": 0.33429394812680113,
+     "first_payment": 0.2334293948126801,
+     "rupees_saved": 0.5169925129947773
+    },
+    {
+     "legit_alert_rate": 0.01,
+     "payment_recall": 0.4151992585727525,
+     "incidents_caught": 0.5504322766570605,
+     "first_payment": 0.4553314121037464,
+     "rupees_saved": 0.7867550006577974
+    },
+    {
+     "legit_alert_rate": 0.03,
+     "payment_recall": 0.5885078776645042,
+     "incidents_caught": 0.6801152737752162,
+     "first_payment": 0.6253602305475504,
+     "rupees_saved": 0.8668782656418765
+    },
+    {
+     "legit_alert_rate": 0.1,
+     "payment_recall": 0.6617238183503243,
+     "incidents_caught": 0.7694524495677233,
+     "first_payment": 0.7002881844380403,
+     "rupees_saved": 0.8887214068934504
+    }
+   ]
+  },
+  "severity_bins": [
+   {
+    "level": "no alert (surprise under 2)",
+    "legit_share": 0.812947946253808,
+    "fraud_share": 0.0,
+    "precision_sim": 0.0,
+    "precision_1e-4": 0.0,
+    "precision_1e-5": 0.0
+   },
+   {
+    "level": "quiet (2 to MEDIUM)",
+    "legit_share": 0.17148891080074763,
+    "fraud_share": 0.04541241890639481,
+    "precision_sim": 0.0010501725283439422,
+    "precision_1e-4": 2.6483203843190707e-05,
+    "precision_1e-5": 2.648145151963238e-06
+   },
+   {
+    "level": "MEDIUM",
+    "legit_share": 0.013631547189804118,
+    "fraud_share": 0.0778498609823911,
+    "precision_sim": 0.022169437846397466,
+    "precision_1e-4": 0.0005708317775283817,
+    "precision_1e-5": 5.7107379345031706e-05
+   },
+   {
+    "level": "HIGH",
+    "legit_share": 0.001832256545350189,
+    "fraud_share": 0.19647822057460612,
+    "precision_sim": 0.29859154929577464,
+    "precision_1e-4": 0.010610572841901596,
+    "precision_1e-5": 0.0010711912478609516
+   },
+   {
+    "level": "CRITICAL",
+    "legit_share": 9.933921029007049e-05,
+    "fraud_share": 0.680259499536608,
+    "precision_sim": 0.9645203679369252,
+    "precision_1e-4": 0.40647640022003223,
+    "precision_1e-5": 0.06409028604569518
+   }
+  ],
+  "segments": [
+   {
+    "segment": "history: under 5 payments (new user)",
+    "legit_n": 69,
+    "legit_medium": 0.028985507246376812,
+    "legit_high": 0.0,
+    "fraud_incidents": 1,
+    "caught": 1.0,
+    "caught_ci": [
+     0.20654329147389294,
+     1.0
+    ],
+    "first_payment": 1.0,
+    "rupees_saved": 1.0
+   },
+   {
+    "segment": "history: 5 to 19",
+    "legit_n": 1027,
+    "legit_medium": 0.055501460564751706,
+    "legit_high": 0.008763388510223954,
+    "fraud_incidents": 12,
+    "caught": 0.9166666666666666,
+    "caught_ci": [
+     0.6461140782014047,
+     0.9851352905492264
+    ],
+    "first_payment": 0.8333333333333334,
+    "rupees_saved": 0.9772075930300755
+   },
+   {
+    "segment": "history: 20 to 99",
+    "legit_n": 23697,
+    "legit_medium": 0.03726210068785078,
+    "legit_high": 0.005106131577836857,
+    "fraud_incidents": 109,
+    "caught": 0.9357798165137615,
+    "caught_ci": [
+     0.8733413439762652,
+     0.9685467540301438
+    ],
+    "first_payment": 0.908256880733945,
+    "rupees_saved": 0.9932268857625098
+   },
+   {
+    "segment": "history: 100 or more",
+    "legit_n": 247003,
+    "legit_medium": 0.013311579211588523,
+    "legit_high": 0.001599170860272952,
+    "fraud_incidents": 235,
+    "caught": 0.8765957446808511,
+    "caught_ci": [
+     0.8283884931641636,
+     0.9126884381576832
+    ],
+    "first_payment": 0.8212765957446808,
+    "rupees_saved": 0.934837647910481
+   },
+   {
+    "segment": "activity: light users",
+    "legit_n": 90614,
+    "legit_medium": 0.024080164213035514,
+    "legit_high": 0.0031010660604321627,
+    "fraud_incidents": 214,
+    "caught": 0.9018691588785047,
+    "caught_ci": [
+     0.8546459024885779,
+     0.934918625131491
+    ],
+    "first_payment": 0.8551401869158879,
+    "rupees_saved": 0.9441646225906681
+   },
+   {
+    "segment": "activity: medium",
+    "legit_n": 90627,
+    "legit_medium": 0.01381486753395787,
+    "legit_high": 0.0015447934942125416,
+    "fraud_incidents": 100,
+    "caught": 0.89,
+    "caught_ci": [
+     0.8136853697209698,
+     0.9374586804477487
+    ],
+    "first_payment": 0.86,
+    "rupees_saved": 0.9813288668597067
+   },
+   {
+    "segment": "activity: heavy users",
+    "legit_n": 90555,
+    "legit_medium": 0.008790237976920103,
+    "legit_high": 0.0011484733035171996,
+    "fraud_incidents": 33,
+    "caught": 0.8787878787878788,
+    "caught_ci": [
+     0.7267415674973484,
+     0.9518391673241576
+    ],
+    "first_payment": 0.7575757575757576,
+    "rupees_saved": 0.9781745892202155
+   },
+   {
+    "segment": "spend: small payments",
+    "legit_n": 90683,
+    "legit_medium": 0.01552661469073586,
+    "legit_high": 0.0018636348598965627,
+    "fraud_incidents": 118,
+    "caught": 0.8898305084745762,
+    "caught_ci": [
+     0.8206010282641124,
+     0.9344776969003633
+    ],
+    "first_payment": 0.8220338983050848,
+    "rupees_saved": 0.970081303167798
+   },
+   {
+    "segment": "spend: medium",
+    "legit_n": 90564,
+    "legit_medium": 0.015326178172342211,
+    "legit_high": 0.001788790247780575,
+    "fraud_incidents": 105,
+    "caught": 0.8952380952380953,
+    "caught_ci": [
+     0.8220863332710213,
+     0.9404897405830932
+    ],
+    "first_payment": 0.8761904761904762,
+    "rupees_saved": 0.9794493980516586
+   },
+   {
+    "segment": "spend: large payments",
+    "legit_n": 90549,
+    "legit_medium": 0.015836729284696684,
+    "legit_high": 0.002142486388585186,
+    "fraud_incidents": 124,
+    "caught": 0.9032258064516129,
+    "caught_ci": [
+     0.8384456460293676,
+     0.9437723487391584
+    ],
+    "first_payment": 0.8467741935483871,
+    "rupees_saved": 0.9463941034706936
+   },
+   {
+    "segment": "pays mostly by day",
+    "legit_n": 217286,
+    "legit_medium": 0.015394457075007133,
+    "legit_high": 0.0018546984159126681,
+    "fraud_incidents": 278,
+    "caught": 0.8992805755395683,
+    "caught_ci": [
+     0.8582828143607655,
+     0.9293936677483341
+    ],
+    "first_payment": 0.8597122302158273,
+    "rupees_saved": 0.9487050843207647
+   },
+   {
+    "segment": "night owls",
+    "legit_n": 31065,
+    "legit_medium": 0.015258329309512313,
+    "legit_high": 0.0021889586351199098,
+    "fraud_incidents": 39,
+    "caught": 0.8461538461538461,
+    "caught_ci": [
+     0.7027023013426569,
+     0.9275262615494854
+    ],
+    "first_payment": 0.7435897435897436,
+    "rupees_saved": 0.9738145471445661
+   },
+   {
+    "segment": "early birds",
+    "legit_n": 23445,
+    "legit_medium": 0.017530390275111964,
+    "legit_high": 0.0023032629558541267,
+    "fraud_incidents": 30,
+    "caught": 0.9333333333333333,
+    "caught_ci": [
+     0.7867618227892791,
+     0.9815233646723066
+    ],
+    "first_payment": 0.8666666666666667,
+    "rupees_saved": 0.9942157139240632
+   },
+   {
+    "segment": "phone SDK reports",
+    "legit_n": 258229,
+    "legit_medium": 0.01500606051218105,
+    "legit_high": 0.0018743053646182264,
+    "fraud_incidents": 317,
+    "caught": 0.8990536277602523,
+    "caught_ci": [
+     0.8609663937749642,
+     0.9275847168042125
+    ],
+    "first_payment": 0.8485804416403786,
+    "rupees_saved": 0.9549609929476611
+   },
+   {
+    "segment": "phone SDK silent",
+    "legit_n": 13567,
+    "legit_medium": 0.02616643325716813,
+    "legit_high": 0.0030220387705461784,
+    "fraud_incidents": 58,
+    "caught": 0.7931034482758621,
+    "caught_ci": [
+     0.6723053695067633,
+     0.8774863564511679
+    ],
+    "first_payment": 0.7758620689655172,
+    "rupees_saved": 0.926699375580114
+   },
+   {
+    "segment": "new user AND SDK silent",
+    "legit_n": 5,
+    "legit_medium": 0.2,
+    "legit_high": 0.0,
+    "fraud_incidents": 0,
+    "caught": NaN,
+    "caught_ci": [
+     0.0,
+     0.0
+    ],
+    "first_payment": NaN,
+    "rupees_saved": NaN
+   }
+  ],
+  "overall": {
+   "segment": "everyone",
+   "legit_n": 271796,
+   "legit_medium": 0.015563142945444378,
+   "legit_high": 0.0019315957556402597,
+   "fraud_incidents": 347,
+   "caught": 0.8962536023054755,
+   "caught_ci": [
+    0.8597128967602954,
+    0.9241166149053679
+   ],
+   "first_payment": 0.8472622478386167,
+   "rupees_saved": 0.9550316188856095
+  },
+  "segments_server_only": [
+   {
+    "segment": "history: under 5 payments (new user)",
+    "legit_n": 69,
+    "legit_medium": 0.014492753623188406,
+    "legit_high": 0.0,
+    "fraud_incidents": 1,
+    "caught": 1.0,
+    "caught_ci": [
+     0.20654329147389294,
+     1.0
+    ],
+    "first_payment": 1.0,
+    "rupees_saved": 1.0
+   },
+   {
+    "segment": "phone SDK reports",
+    "legit_n": 258229,
+    "legit_medium": 0.015730223948510817,
+    "legit_high": 0.0018394525789125157,
+    "fraud_incidents": 317,
+    "caught": 0.889589905362776,
+    "caught_ci": [
+     0.85031597803423,
+     0.9195343156932667
+    ],
+    "first_payment": 0.8391167192429022,
+    "rupees_saved": 0.9742302931554272
+   },
+   {
+    "segment": "phone SDK silent",
+    "legit_n": 13567,
+    "legit_medium": 0.01562615169160463,
+    "legit_high": 0.0016215817793174615,
+    "fraud_incidents": 58,
+    "caught": 0.8275862068965517,
+    "caught_ci": [
+     0.7109149994332449,
+     0.9035581060491489
+    ],
+    "first_payment": 0.8275862068965517,
+    "rupees_saved": 0.9417594743465542
+   },
+   {
+    "segment": "new user AND SDK silent",
+    "legit_n": 5,
+    "legit_medium": 0.0,
+    "legit_high": 0.0,
+    "fraud_incidents": 0,
+    "caught": NaN,
+    "caught_ci": [
+     0.0,
+     0.0
+    ],
+    "first_payment": NaN,
+    "rupees_saved": NaN
+   }
+  ],
+  "types": [
+   {
+    "type": "sim_swap",
+    "family": "takeover",
+    "overall": {
+     "incidents": 24,
+     "caught": 1.0,
+     "caught_ci": [
+      0.8620194241710247,
+      1.0
+     ],
+     "first_payment_caught": 1.0,
+     "rupees_saved": 1.0
+    },
+    "medium": {
+     "incidents": 24,
+     "caught": 1.0,
+     "caught_ci": [
+      0.8620194241710247,
+      1.0
+     ],
+     "first_payment_caught": 1.0,
+     "rupees_saved": 1.0
+    },
+    "server_only": {
+     "incidents": 24,
+     "caught": 1.0,
+     "caught_ci": [
+      0.8620194241710247,
+      1.0
+     ],
+     "first_payment_caught": 1.0,
+     "rupees_saved": 1.0
+    },
+    "by_stealth": {
+     "loud": {
+      "incidents": 4,
+      "caught": 1.0,
+      "caught_ci": [
+       0.5100999795960008,
+       1.0
+      ],
+      "first_payment_caught": 1.0,
+      "rupees_saved": 1.0
+     },
+     "mid": {
+      "incidents": 11,
+      "caught": 1.0,
+      "caught_ci": [
+       0.7411599827511859,
+       1.0
+      ],
+      "first_payment_caught": 1.0,
+      "rupees_saved": 1.0
+     },
+     "stealthy": {
+      "incidents": 9,
+      "caught": 1.0,
+      "caught_ci": [
+       0.7008472464490407,
+       1.0
+      ],
+      "first_payment_caught": 1.0,
+      "rupees_saved": 1.0
+     }
+    },
+    "by_history": {
+     "new victim (under 20 payments)": {
+      "incidents": 2,
+      "caught": 1.0,
+      "caught_ci": [
+       0.34237195288961925,
+       1.0
+      ],
+      "first_payment_caught": 1.0,
+      "rupees_saved": 1.0
+     },
+     "established victim": {
+      "incidents": 23,
+      "caught": 1.0,
+      "caught_ci": [
+       0.8568788745827374,
+       1.0000000000000002
+      ],
+      "first_payment_caught": 1.0,
+      "rupees_saved": 1.0
+     }
+    }
+   },
+   {
+    "type": "apk_binding",
+    "family": "takeover",
+    "overall": {
+     "incidents": 23,
+     "caught": 1.0,
+     "caught_ci": [
+      0.8568788745827374,
+      1.0000000000000002
+     ],
+     "first_payment_caught": 1.0,
+     "rupees_saved": 1.0
+    },
+    "medium": {
+     "incidents": 23,
+     "caught": 1.0,
+     "caught_ci": [
+      0.8568788745827374,
+      1.0000000000000002
+     ],
+     "first_payment_caught": 1.0,
+     "rupees_saved": 1.0
+    },
+    "server_only": {
+     "incidents": 23,
+     "caught": 1.0,
+     "caught_ci": [
+      0.8568788745827374,
+      1.0000000000000002
+     ],
+     "first_payment_caught": 1.0,
+     "rupees_saved": 1.0
+    },
+    "by_stealth": {
+     "loud": {
+      "incidents": 5,
+      "caught": 1.0,
+      "caught_ci": [
+       0.5655085052479191,
+       1.0000000000000002
+      ],
+      "first_payment_caught": 1.0,
+      "rupees_saved": 1.0
+     },
+     "mid": {
+      "incidents": 8,
+      "caught": 1.0,
+      "caught_ci": [
+       0.6755843804891231,
+       1.0
+      ],
+      "first_payment_caught": 1.0,
+      "rupees_saved": 1.0
+     },
+     "stealthy": {
+      "incidents": 10,
+      "caught": 1.0,
+      "caught_ci": [
+       0.7224598312333834,
+       1.0
+      ],
+      "first_payment_caught": 1.0,
+      "rupees_saved": 1.0
+     }
+    },
+    "by_history": {
+     "new victim (under 20 payments)": {
+      "incidents": 0,
+      "caught": 0.0,
+      "caught_ci": [
+       0.0,
+       0.0
+      ],
+      "first_payment_caught": 0.0,
+      "rupees_saved": 0.0
+     },
+     "established victim": {
+      "incidents": 23,
+      "caught": 1.0,
+      "caught_ci": [
+       0.8568788745827374,
+       1.0000000000000002
+      ],
+      "first_payment_caught": 1.0,
+      "rupees_saved": 1.0
+     }
+    }
+   },
+   {
+    "type": "remote_access",
+    "family": "takeover",
+    "overall": {
+     "incidents": 19,
+     "caught": 1.0,
+     "caught_ci": [
+      0.8318156346315496,
+      1.0000000000000002
+     ],
+     "first_payment_caught": 1.0,
+     "rupees_saved": 1.0
+    },
+    "medium": {
+     "incidents": 19,
+     "caught": 1.0,
+     "caught_ci": [
+      0.8318156346315496,
+      1.0000000000000002
+     ],
+     "first_payment_caught": 1.0,
+     "rupees_saved": 1.0
+    },
+    "server_only": {
+     "incidents": 19,
+     "caught": 1.0,
+     "caught_ci": [
+      0.8318156346315496,
+      1.0000000000000002
+     ],
+     "first_payment_caught": 1.0,
+     "rupees_saved": 1.0
+    },
+    "by_stealth": {
+     "loud": {
+      "incidents": 2,
+      "caught": 1.0,
+      "caught_ci": [
+       0.34237195288961925,
+       1.0
+      ],
+      "first_payment_caught": 1.0,
+      "rupees_saved": 1.0
+     },
+     "mid": {
+      "incidents": 11,
+      "caught": 1.0,
+      "caught_ci": [
+       0.7411599827511859,
+       1.0
+      ],
+      "first_payment_caught": 1.0,
+      "rupees_saved": 1.0
+     },
+     "stealthy": {
+      "incidents": 6,
+      "caught": 1.0,
+      "caught_ci": [
+       0.6096569663469354,
+       0.9999999999999999
+      ],
+      "first_payment_caught": 1.0,
+      "rupees_saved": 1.0
+     }
+    },
+    "by_history": {
+     "new victim (under 20 payments)": {
+      "incidents": 0,
+      "caught": 0.0,
+      "caught_ci": [
+       0.0,
+       0.0
+      ],
+      "first_payment_caught": 0.0,
+      "rupees_saved": 0.0
+     },
+     "established victim": {
+      "incidents": 19,
+      "caught": 1.0,
+      "caught_ci": [
+       0.8318156346315496,
+       1.0000000000000002
+      ],
+      "first_payment_caught": 1.0,
+      "rupees_saved": 1.0
+     }
+    }
+   },
+   {
+    "type": "physical_theft",
+    "family": "takeover",
+    "overall": {
+     "incidents": 15,
+     "caught": 1.0,
+     "caught_ci": [
+      0.7961107336956521,
+      1.0
+     ],
+     "first_payment_caught": 0.9333333333333333,
+     "rupees_saved": 0.9999458514250652
+    },
+    "medium": {
+     "incidents": 15,
+     "caught": 1.0,
+     "caught_ci": [
+      0.7961107336956521,
+      1.0
+     ],
+     "first_payment_caught": 1.0,
+     "rupees_saved": 1.0
+    },
+    "server_only": {
+     "incidents": 15,
+     "caught": 1.0,
+     "caught_ci": [
+      0.7961107336956521,
+      1.0
+     ],
+     "first_payment_caught": 1.0,
+     "rupees_saved": 1.0
+    },
+    "by_stealth": {
+     "loud": {
+      "incidents": 2,
+      "caught": 1.0,
+      "caught_ci": [
+       0.34237195288961925,
+       1.0
+      ],
+      "first_payment_caught": 0.5,
+      "rupees_saved": 0.9996585519544975
+     },
+     "mid": {
+      "incidents": 3,
+      "caught": 1.0,
+      "caught_ci": [
+       0.43849391955098227,
+       1.0
+      ],
+      "first_payment_caught": 1.0,
+      "rupees_saved": 1.0
+     },
+     "stealthy": {
+      "incidents": 10,
+      "caught": 1.0,
+      "caught_ci": [
+       0.7224598312333834,
+       1.0
+      ],
+      "first_payment_caught": 1.0,
+      "rupees_saved": 1.0
+     }
+    },
+    "by_history": {
+     "new victim (under 20 payments)": {
+      "incidents": 0,
+      "caught": 0.0,
+      "caught_ci": [
+       0.0,
+       0.0
+      ],
+      "first_payment_caught": 0.0,
+      "rupees_saved": 0.0
+     },
+     "established victim": {
+      "incidents": 15,
+      "caught": 1.0,
+      "caught_ci": [
+       0.7961107336956521,
+       1.0
+      ],
+      "first_payment_caught": 0.9333333333333333,
+      "rupees_saved": 0.9999458514250652
+     }
+    }
+   },
+   {
+    "type": "digital_arrest",
+    "family": "coached",
+    "overall": {
+     "incidents": 28,
+     "caught": 0.9642857142857143,
+     "caught_ci": [
+      0.8228742388150135,
+      0.9936676435024582
+     ],
+     "first_payment_caught": 0.8571428571428571,
+     "rupees_saved": 0.9278293230602179
+    },
+    "medium": {
+     "incidents": 28,
+     "caught": 1.0,
+     "caught_ci": [
+      0.8793527963418923,
+      1.0
+     ],
+     "first_payment_caught": 0.9642857142857143,
+     "rupees_saved": 0.9994827616783787
+    },
+    "server_only": {
+     "incidents": 28,
+     "caught": 0.9285714285714286,
+     "caught_ci": [
+      0.7735426157408214,
+      0.9801883525522292
+     ],
+     "first_payment_caught": 0.8571428571428571,
+     "rupees_saved": 0.9809269131999274
+    },
+    "by_stealth": {
+     "loud": {
+      "incidents": 4,
+      "caught": 1.0,
+      "caught_ci": [
+       0.5100999795960008,
+       1.0
+      ],
+      "first_payment_caught": 1.0,
+      "rupees_saved": 1.0
+     },
+     "mid": {
+      "incidents": 12,
+      "caught": 1.0,
+      "caught_ci": [
+       0.7574992425007574,
+       1.0
+      ],
+      "first_payment_caught": 1.0,
+      "rupees_saved": 1.0
+     },
+     "stealthy": {
+      "incidents": 12,
+      "caught": 0.9166666666666666,
+      "caught_ci": [
+       0.6461140782014047,
+       0.9851352905492264
+      ],
+      "first_payment_caught": 0.6666666666666666,
+      "rupees_saved": 0.6981052861465344
+     }
+    },
+    "by_history": {
+     "new victim (under 20 payments)": {
+      "incidents": 2,
+      "caught": 1.0,
+      "caught_ci": [
+       0.34237195288961925,
+       1.0
+      ],
+      "first_payment_caught": 1.0,
+      "rupees_saved": 1.0
+     },
+     "established victim": {
+      "incidents": 27,
+      "caught": 0.9629629629629629,
+      "caught_ci": [
+       0.8171614606584348,
+       0.9934320234669025
+      ],
+      "first_payment_caught": 0.8518518518518519,
+      "rupees_saved": 0.926254475892677
+     }
+    }
+   },
+   {
+    "type": "fake_care",
+    "family": "coached",
+    "overall": {
+     "incidents": 34,
+     "caught": 1.0,
+     "caught_ci": [
+      0.8984820937803899,
+      1.0
+     ],
+     "first_payment_caught": 0.9705882352941176,
+     "rupees_saved": 0.9679143027956998
+    },
+    "medium": {
+     "incidents": 34,
+     "caught": 1.0,
+     "caught_ci": [
+      0.8984820937803899,
+      1.0
+     ],
+     "first_payment_caught": 0.9705882352941176,
+     "rupees_saved": 0.9816667920744977
+    },
+    "server_only": {
+     "incidents": 34,
+     "caught": 0.9117647058823529,
+     "caught_ci": [
+      0.7703918204763959,
+      0.9695346096956899
+     ],
+     "first_payment_caught": 0.8529411764705882,
+     "rupees_saved": 0.916286695951787
+    },
+    "by_stealth": {
+     "loud": {
+      "incidents": 1,
+      "caught": 1.0,
+      "caught_ci": [
+       0.20654329147389294,
+       1.0
+      ],
+      "first_payment_caught": 1.0,
+      "rupees_saved": 1.0
+     },
+     "mid": {
+      "incidents": 13,
+      "caught": 1.0,
+      "caught_ci": [
+       0.7718981569447083,
+       1.0
+      ],
+      "first_payment_caught": 1.0,
+      "rupees_saved": 1.0
+     },
+     "stealthy": {
+      "incidents": 20,
+      "caught": 1.0,
+      "caught_ci": [
+       0.8388698745050667,
+       1.0
+      ],
+      "first_payment_caught": 0.95,
+      "rupees_saved": 0.9490658002941849
+     }
+    },
+    "by_history": {
+     "new victim (under 20 payments)": {
+      "incidents": 2,
+      "caught": 1.0,
+      "caught_ci": [
+       0.34237195288961925,
+       1.0
+      ],
+      "first_payment_caught": 1.0,
+      "rupees_saved": 1.0
+     },
+     "established victim": {
+      "incidents": 32,
+      "caught": 1.0,
+      "caught_ci": [
+       0.8928172849426366,
+       1.0
+      ],
+      "first_payment_caught": 0.96875,
+      "rupees_saved": 0.960432168675295
+     }
+    }
+   },
+   {
+    "type": "collect_qr",
+    "family": "coached",
+    "overall": {
+     "incidents": 44,
+     "caught": 0.8863636363636364,
+     "caught_ci": [
+      0.7602056485186641,
+      0.950472924104325
+     ],
+     "first_payment_caught": 0.8863636363636364,
+     "rupees_saved": 0.915277797154953
+    },
+    "medium": {
+     "incidents": 44,
+     "caught": 0.9090909090909091,
+     "caught_ci": [
+      0.7884048060208251,
+      0.9640783885211635
+     ],
+     "first_payment_caught": 0.9090909090909091,
+     "rupees_saved": 0.9277897536142468
+    },
+    "server_only": {
+     "incidents": 44,
+     "caught": 0.8409090909090909,
+     "caught_ci": [
+      0.7063350943621745,
+      0.920734234422816
+     ],
+     "first_payment_caught": 0.8409090909090909,
+     "rupees_saved": 0.8471889698332484
+    },
+    "by_stealth": {
+     "loud": {
+      "incidents": 5,
+      "caught": 0.8,
+      "caught_ci": [
+       0.3755282641185388,
+       0.9637768390302125
+      ],
+      "first_payment_caught": 0.8,
+      "rupees_saved": 0.8948794367309448
+     },
+     "mid": {
+      "incidents": 19,
+      "caught": 0.9473684210526315,
+      "caught_ci": [
+       0.7536078466345479,
+       0.99064824750947
+      ],
+      "first_payment_caught": 0.9473684210526315,
+      "rupees_saved": 0.9638919100800046
+     },
+     "stealthy": {
+      "incidents": 20,
+      "caught": 0.85,
+      "caught_ci": [
+       0.6395767041130426,
+       0.9476322080405041
+      ],
+      "first_payment_caught": 0.85,
+      "rupees_saved": 0.8789546985368542
+     }
+    },
+    "by_history": {
+     "new victim (under 20 payments)": {
+      "incidents": 2,
+      "caught": 1.0,
+      "caught_ci": [
+       0.34237195288961925,
+       1.0
+      ],
+      "first_payment_caught": 1.0,
+      "rupees_saved": 1.0
+     },
+     "established victim": {
+      "incidents": 43,
+      "caught": 0.8837209302325582,
+      "caught_ci": [
+       0.755205511093586,
+       0.9492964700513791
+      ],
+      "first_payment_caught": 0.8837209302325582,
+      "rupees_saved": 0.9133322779531318
+     }
+    }
+   },
+   {
+    "type": "task_invest",
+    "family": "coached",
+    "overall": {
+     "incidents": 30,
+     "caught": 1.0,
+     "caught_ci": [
+      0.8864829086095221,
+      1.0
+     ],
+     "first_payment_caught": 0.8,
+     "rupees_saved": 0.9704603077267835
+    },
+    "medium": {
+     "incidents": 30,
+     "caught": 1.0,
+     "caught_ci": [
+      0.8864829086095221,
+      1.0
+     ],
+     "first_payment_caught": 0.9333333333333333,
+     "rupees_saved": 0.99887114161195
+    },
+    "server_only": {
+     "incidents": 30,
+     "caught": 1.0,
+     "caught_ci": [
+      0.8864829086095221,
+      1.0
+     ],
+     "first_payment_caught": 0.8,
+     "rupees_saved": 0.9704603077267835
+    },
+    "by_stealth": {
+     "loud": {
+      "incidents": 6,
+      "caught": 1.0,
+      "caught_ci": [
+       0.6096569663469354,
+       0.9999999999999999
+      ],
+      "first_payment_caught": 0.8333333333333334,
+      "rupees_saved": 0.9979704317145021
+     },
+     "mid": {
+      "incidents": 11,
+      "caught": 1.0,
+      "caught_ci": [
+       0.7411599827511859,
+       1.0
+      ],
+      "first_payment_caught": 0.9090909090909091,
+      "rupees_saved": 0.9862442896503216
+     },
+     "stealthy": {
+      "incidents": 13,
+      "caught": 1.0,
+      "caught_ci": [
+       0.7718981569447083,
+       1.0
+      ],
+      "first_payment_caught": 0.6923076923076923,
+      "rupees_saved": 0.9360191321183635
+     }
+    },
+    "by_history": {
+     "new victim (under 20 payments)": {
+      "incidents": 1,
+      "caught": 1.0,
+      "caught_ci": [
+       0.20654329147389294,
+       1.0
+      ],
+      "first_payment_caught": 0.0,
+      "rupees_saved": 0.7912839228636597
+     },
+     "established victim": {
+      "incidents": 30,
+      "caught": 1.0,
+      "caught_ci": [
+       0.8864829086095221,
+       1.0
+      ],
+      "first_payment_caught": 0.8333333333333334,
+      "rupees_saved": 0.9767837270178658
+     }
+    }
+   },
+   {
+    "type": "extortion",
+    "family": "coached",
+    "overall": {
+     "incidents": 12,
+     "caught": 1.0,
+     "caught_ci": [
+      0.7574992425007574,
+      1.0
+     ],
+     "first_payment_caught": 0.9166666666666666,
+     "rupees_saved": 0.9744529445584534
+    },
+    "medium": {
+     "incidents": 12,
+     "caught": 1.0,
+     "caught_ci": [
+      0.7574992425007574,
+      1.0
+     ],
+     "first_payment_caught": 1.0,
+     "rupees_saved": 1.0
+    },
+    "server_only": {
+     "incidents": 12,
+     "caught": 1.0,
+     "caught_ci": [
+      0.7574992425007574,
+      1.0
+     ],
+     "first_payment_caught": 1.0,
+     "rupees_saved": 1.0
+    },
+    "by_stealth": {
+     "loud": {
+      "incidents": 0,
+      "caught": 0.0,
+      "caught_ci": [
+       0.0,
+       0.0
+      ],
+      "first_payment_caught": 0.0,
+      "rupees_saved": 0.0
+     },
+     "mid": {
+      "incidents": 7,
+      "caught": 1.0,
+      "caught_ci": [
+       0.6456611570247934,
+       1.0
+      ],
+      "first_payment_caught": 0.8571428571428571,
+      "rupees_saved": 0.9710503733528231
+     },
+     "stealthy": {
+      "incidents": 5,
+      "caught": 1.0,
+      "caught_ci": [
+       0.5655085052479191,
+       1.0000000000000002
+      ],
+      "first_payment_caught": 1.0,
+      "rupees_saved": 1.0
+     }
+    },
+    "by_history": {
+     "new victim (under 20 payments)": {
+      "incidents": 0,
+      "caught": 0.0,
+      "caught_ci": [
+       0.0,
+       0.0
+      ],
+      "first_payment_caught": 0.0,
+      "rupees_saved": 0.0
+     },
+     "established victim": {
+      "incidents": 12,
+      "caught": 1.0,
+      "caught_ci": [
+       0.7574992425007574,
+       1.0
+      ],
+      "first_payment_caught": 0.9166666666666666,
+      "rupees_saved": 0.9744529445584534
+     }
+    }
+   },
+   {
+    "type": "prize_fee",
+    "family": "coached",
+    "overall": {
+     "incidents": 21,
+     "caught": 0.9047619047619048,
+     "caught_ci": [
+      0.7108541613925933,
+      0.9734817912030528
+     ],
+     "first_payment_caught": 0.8571428571428571,
+     "rupees_saved": 0.8490806281109506
+    },
+    "medium": {
+     "incidents": 21,
+     "caught": 1.0,
+     "caught_ci": [
+      0.8453561767357979,
+      0.9999999999999999
+     ],
+     "first_payment_caught": 0.9523809523809523,
+     "rupees_saved": 0.9463668082717431
+    },
+    "server_only": {
+     "incidents": 21,
+     "caught": 0.9047619047619048,
+     "caught_ci": [
+      0.7108541613925933,
+      0.9734817912030528
+     ],
+     "first_payment_caught": 0.8571428571428571,
+     "rupees_saved": 0.8490806281109506
+    },
+    "by_stealth": {
+     "loud": {
+      "incidents": 2,
+      "caught": 1.0,
+      "caught_ci": [
+       0.34237195288961925,
+       1.0
+      ],
+      "first_payment_caught": 0.5,
+      "rupees_saved": 0.5361055188157929
+     },
+     "mid": {
+      "incidents": 8,
+      "caught": 0.875,
+      "caught_ci": [
+       0.5291051942301386,
+       0.9775830911367038
+      ],
+      "first_payment_caught": 0.875,
+      "rupees_saved": 0.8392057128986696
+     },
+     "stealthy": {
+      "incidents": 11,
+      "caught": 0.9090909090909091,
+      "caught_ci": [
+       0.6226353745137962,
+       0.9837682477371741
+      ],
+      "first_payment_caught": 0.9090909090909091,
+      "rupees_saved": 0.9187878548590784
+     }
+    },
+    "by_history": {
+     "new victim (under 20 payments)": {
+      "incidents": 0,
+      "caught": 0.0,
+      "caught_ci": [
+       0.0,
+       0.0
+      ],
+      "first_payment_caught": 0.0,
+      "rupees_saved": 0.0
+     },
+     "established victim": {
+      "incidents": 21,
+      "caught": 0.9047619047619048,
+      "caught_ci": [
+       0.7108541613925933,
+       0.9734817912030528
+      ],
+      "first_payment_caught": 0.8571428571428571,
+      "rupees_saved": 0.8490806281109506
+     }
+    }
+   },
+   {
+    "type": "relative_trouble",
+    "family": "coached",
+    "overall": {
+     "incidents": 13,
+     "caught": 0.8461538461538461,
+     "caught_ci": [
+      0.5776482949136899,
+      0.9567427368172621
+     ],
+     "first_payment_caught": 0.6153846153846154,
+     "rupees_saved": 0.806792778379922
+    },
+    "medium": {
+     "incidents": 13,
+     "caught": 1.0,
+     "caught_ci": [
+      0.7718981569447083,
+      1.0
+     ],
+     "first_payment_caught": 1.0,
+     "rupees_saved": 1.0
+    },
+    "server_only": {
+     "incidents": 13,
+     "caught": 0.9230769230769231,
+     "caught_ci": [
+      0.6668546607175265,
+      0.9862899336203037
+     ],
+     "first_payment_caught": 0.6923076923076923,
+     "rupees_saved": 0.8236566287645812
+    },
+    "by_stealth": {
+     "loud": {
+      "incidents": 2,
+      "caught": 1.0,
+      "caught_ci": [
+       0.34237195288961925,
+       1.0
+      ],
+      "first_payment_caught": 0.5,
+      "rupees_saved": 0.8309853528120924
+     },
+     "mid": {
+      "incidents": 4,
+      "caught": 1.0,
+      "caught_ci": [
+       0.5100999795960008,
+       1.0
+      ],
+      "first_payment_caught": 0.75,
+      "rupees_saved": 0.9755344366014399
+     },
+     "stealthy": {
+      "incidents": 7,
+      "caught": 0.7142857142857143,
+      "caught_ci": [
+       0.35892909014821267,
+       0.9177828342909844
+      ],
+      "first_payment_caught": 0.5714285714285714,
+      "rupees_saved": 0.49032130898407356
+     }
+    },
+    "by_history": {
+     "new victim (under 20 payments)": {
+      "incidents": 0,
+      "caught": 0.0,
+      "caught_ci": [
+       0.0,
+       0.0
+      ],
+      "first_payment_caught": 0.0,
+      "rupees_saved": 0.0
+     },
+     "established victim": {
+      "incidents": 13,
+      "caught": 0.8461538461538461,
+      "caught_ci": [
+       0.5776482949136899,
+       0.9567427368172621
+      ],
+      "first_payment_caught": 0.6153846153846154,
+      "rupees_saved": 0.806792778379922
+     }
+    }
+   },
+   {
+    "type": "romance",
+    "family": "coached",
+    "overall": {
+     "incidents": 35,
+     "caught": 0.7714285714285715,
+     "caught_ci": [
+      0.6098236221989801,
+      0.879342632538209
+     ],
+     "first_payment_caught": 0.7714285714285715,
+     "rupees_saved": 0.8435038239345234
+    },
+    "medium": {
+     "incidents": 35,
+     "caught": 0.9428571428571428,
+     "caught_ci": [
+      0.8139261926062996,
+      0.984187170385956
+     ],
+     "first_payment_caught": 0.8571428571428571,
+     "rupees_saved": 0.9630691310980398
+    },
+    "server_only": {
+     "incidents": 35,
+     "caught": 0.7428571428571429,
+     "caught_ci": [
+      0.5793037572935127,
+      0.8583713127344985
+     ],
+     "first_payment_caught": 0.6857142857142857,
+     "rupees_saved": 0.7704106348984603
+    },
+    "by_stealth": {
+     "loud": {
+      "incidents": 4,
+      "caught": 0.5,
+      "caught_ci": [
+       0.15003570882017148,
+       0.8499642911798285
+      ],
+      "first_payment_caught": 0.5,
+      "rupees_saved": 0.8974698757533162
+     },
+     "mid": {
+      "incidents": 13,
+      "caught": 0.7692307692307693,
+      "caught_ci": [
+       0.49743126004873084,
+       0.918206209075343
+      ],
+      "first_payment_caught": 0.7692307692307693,
+      "rupees_saved": 0.8229217744460464
+     },
+     "stealthy": {
+      "incidents": 18,
+      "caught": 0.8333333333333334,
+      "caught_ci": [
+       0.6077750036164076,
+       0.9416352959953425
+      ],
+      "first_payment_caught": 0.8333333333333334,
+      "rupees_saved": 0.8452753760379315
+     }
+    },
+    "by_history": {
+     "new victim (under 20 payments)": {
+      "incidents": 1,
+      "caught": 1.0,
+      "caught_ci": [
+       0.20654329147389294,
+       1.0
+      ],
+      "first_payment_caught": 1.0,
+      "rupees_saved": 1.0
+     },
+     "established victim": {
+      "incidents": 34,
+      "caught": 0.7647058823529411,
+      "caught_ci": [
+       0.6000353719173557,
+       0.8756316189075566
+      ],
+      "first_payment_caught": 0.7647058823529411,
+      "rupees_saved": 0.8423201828049501
+     }
+    }
+   },
+   {
+    "type": "lookalike",
+    "family": "payee",
+    "overall": {
+     "incidents": 27,
+     "caught": 0.7407407407407407,
+     "caught_ci": [
+      0.553210695973843,
+      0.8682979157713322
+     ],
+     "first_payment_caught": 0.7407407407407407,
+     "rupees_saved": 0.7344754132528533
+    },
+    "medium": {
+     "incidents": 27,
+     "caught": 0.9629629629629629,
+     "caught_ci": [
+      0.8171614606584348,
+      0.9934320234669025
+     ],
+     "first_payment_caught": 0.9629629629629629,
+     "rupees_saved": 0.9347219523619942
+    },
+    "server_only": {
+     "incidents": 27,
+     "caught": 0.7407407407407407,
+     "caught_ci": [
+      0.553210695973843,
+      0.8682979157713322
+     ],
+     "first_payment_caught": 0.7407407407407407,
+     "rupees_saved": 0.7344754132528533
+    },
+    "by_stealth": {
+     "loud": {
+      "incidents": 1,
+      "caught": 1.0,
+      "caught_ci": [
+       0.20654329147389294,
+       1.0
+      ],
+      "first_payment_caught": 1.0,
+      "rupees_saved": 1.0
+     },
+     "mid": {
+      "incidents": 12,
+      "caught": 0.8333333333333334,
+      "caught_ci": [
+       0.5519636426153274,
+       0.9530358523851776
+      ],
+      "first_payment_caught": 0.8333333333333334,
+      "rupees_saved": 0.7585191838606127
+     },
+     "stealthy": {
+      "incidents": 14,
+      "caught": 0.6428571428571429,
+      "caught_ci": [
+       0.3876400468214042,
+       0.8365550926279727
+      ],
+      "first_payment_caught": 0.6428571428571429,
+      "rupees_saved": 0.6710851330240094
+     }
+    },
+    "by_history": {
+     "new victim (under 20 payments)": {
+      "incidents": 1,
+      "caught": 1.0,
+      "caught_ci": [
+       0.20654329147389294,
+       1.0
+      ],
+      "first_payment_caught": 1.0,
+      "rupees_saved": 1.0
+     },
+     "established victim": {
+      "incidents": 26,
+      "caught": 0.7307692307692307,
+      "caught_ci": [
+       0.5391659658023868,
+       0.8629572447493261
+      ],
+      "first_payment_caught": 0.7307692307692307,
+      "rupees_saved": 0.7122512574219387
+     }
+    }
+   },
+   {
+    "type": "fake_seller",
+    "family": "payee",
+    "overall": {
+     "incidents": 22,
+     "caught": 0.5,
+     "caught_ci": [
+      0.3072180469247956,
+      0.6927819530752044
+     ],
+     "first_payment_caught": 0.45454545454545453,
+     "rupees_saved": 0.5695751563391881
+    },
+    "medium": {
+     "incidents": 22,
+     "caught": 0.8636363636363636,
+     "caught_ci": [
+      0.6666458812053,
+      0.9525108273576373
+     ],
+     "first_payment_caught": 0.8636363636363636,
+     "rupees_saved": 0.8532236817106518
+    },
+    "server_only": {
+     "incidents": 22,
+     "caught": 0.7272727272727273,
+     "caught_ci": [
+      0.5184787630099802,
+      0.8684941798418556
+     ],
+     "first_payment_caught": 0.6818181818181818,
+     "rupees_saved": 0.766286554995043
+    },
+    "by_stealth": {
+     "loud": {
+      "incidents": 3,
+      "caught": 0.3333333333333333,
+      "caught_ci": [
+       0.0614903152761605,
+       0.7923450448735121
+      ],
+      "first_payment_caught": 0.3333333333333333,
+      "rupees_saved": 0.09161841925615108
+     },
+     "mid": {
+      "incidents": 6,
+      "caught": 0.3333333333333333,
+      "caught_ci": [
+       0.09676933255921683,
+       0.7000116786584712
+      ],
+      "first_payment_caught": 0.16666666666666666,
+      "rupees_saved": 0.4804236100342102
+     },
+     "stealthy": {
+      "incidents": 13,
+      "caught": 0.6153846153846154,
+      "caught_ci": [
+       0.35522480972268555,
+       0.8229055341876319
+      ],
+      "first_payment_caught": 0.6153846153846154,
+      "rupees_saved": 0.7781388004250733
+     }
+    },
+    "by_history": {
+     "new victim (under 20 payments)": {
+      "incidents": 2,
+      "caught": 0.5,
+      "caught_ci": [
+       0.09452865480086614,
+       0.9054713451991339
+      ],
+      "first_payment_caught": 0.5,
+      "rupees_saved": 0.5288004313721992
+     },
+     "established victim": {
+      "incidents": 20,
+      "caught": 0.5,
+      "caught_ci": [
+       0.2992949144298199,
+       0.7007050855701801
+      ],
+      "first_payment_caught": 0.45,
+      "rupees_saved": 0.5723744223558126
+     }
+    }
+   }
+  ],
+  "legit_situations": [
+   {
+    "situation": "big_oneoff",
+    "n": 4063,
+    "full": {
+     "MEDIUM": 0.03741078021166626,
+     "HIGH": 0.0039379768643859215,
+     "CRITICAL": 0.0
+    },
+    "server_only": {
+     "MEDIUM": 0.05611617031749939,
+     "HIGH": 0.008614324390844204,
+     "CRITICAL": 0.0
+    },
+    "rules": {
+     "MEDIUM": 0.028304208712773813,
+     "HIGH": 0.0019689884321929607,
+     "CRITICAL": 0.0
+    }
+   },
+   {
+    "situation": "call_during_payment",
+    "n": 9452,
+    "full": {
+     "MEDIUM": 0.022111722386796446,
+     "HIGH": 0.0030681337283114687,
+     "CRITICAL": 0.00021159542953872197
+    },
+    "server_only": {
+     "MEDIUM": 0.014388489208633094,
+     "HIGH": 0.0010579771476936098,
+     "CRITICAL": 0.00010579771476936098
+    },
+    "rules": {
+     "MEDIUM": 0.022005924672027083,
+     "HIGH": 0.002010156580617859,
+     "CRITICAL": 0.0
+    }
+   },
+   {
+    "situation": "collect_from_noncontact",
+    "n": 1845,
+    "full": {
+     "MEDIUM": 0.10948509485094851,
+     "HIGH": 0.01788617886178862,
+     "CRITICAL": 0.0005420054200542005
+    },
+    "server_only": {
+     "MEDIUM": 0.05365853658536585,
+     "HIGH": 0.005420054200542005,
+     "CRITICAL": 0.0
+    },
+    "rules": {
+     "MEDIUM": 0.4303523035230352,
+     "HIGH": 0.003794037940379404,
+     "CRITICAL": 0.0
+    }
+   },
+   {
+    "situation": "new_payee",
+    "n": 40996,
+    "full": {
+     "MEDIUM": 0.017440725924480437,
+     "HIGH": 0.0013659869255537125,
+     "CRITICAL": 4.878524734120402e-05
+    },
+    "server_only": {
+     "MEDIUM": 0.024368231046931407,
+     "HIGH": 0.0019026246463069568,
+     "CRITICAL": 2.439262367060201e-05
+    },
+    "rules": {
+     "MEDIUM": 0.04839496536247439,
+     "HIGH": 0.0014635574202361205,
+     "CRITICAL": 0.0
+    }
+   },
+   {
+    "situation": "new_young_payee",
+    "n": 6839,
+    "full": {
+     "MEDIUM": 0.13466881122971194,
+     "HIGH": 0.017107764293025296,
+     "CRITICAL": 0.0005848808305307793
+    },
+    "server_only": {
+     "MEDIUM": 0.1642052931715163,
+     "HIGH": 0.019008626992250328,
+     "CRITICAL": 0.0016084222839596433
+    },
+    "rules": {
+     "MEDIUM": 0.006433689135838573,
+     "HIGH": 0.0014622020763269484,
+     "CRITICAL": 0.0
+    }
+   },
+   {
+    "situation": "other_user",
+    "n": 10019,
+    "full": {
+     "MEDIUM": 0.04192035133246831,
+     "HIGH": 0.007685397744285857,
+     "CRITICAL": 0.0007984828825232059
+    },
+    "server_only": {
+     "MEDIUM": 0.015470605848887115,
+     "HIGH": 0.0016967761253618126,
+     "CRITICAL": 0.0
+    },
+    "rules": {
+     "MEDIUM": 0.02016169278371095,
+     "HIGH": 0.0015969657650464117,
+     "CRITICAL": 0.0
+    }
+   },
+   {
+    "situation": "phone_change",
+    "n": 989,
+    "full": {
+     "MEDIUM": 0.1820020222446916,
+     "HIGH": 0.05156723963599596,
+     "CRITICAL": 0.005055611729019211
+    },
+    "server_only": {
+     "MEDIUM": 0.15672396359959556,
+     "HIGH": 0.04954499494438827,
+     "CRITICAL": 0.007077856420626896
+    },
+    "rules": {
+     "MEDIUM": 0.017189079878665317,
+     "HIGH": 0.0010111223458038423,
+     "CRITICAL": 0.0
+    }
+   },
+   {
+    "situation": "routine",
+    "n": 184007,
+    "full": {
+     "MEDIUM": 0.0057932578651899115,
+     "HIGH": 0.0005217192824186036,
+     "CRITICAL": 5.434575858527121e-06
+    },
+    "server_only": {
+     "MEDIUM": 0.005722608379029059,
+     "HIGH": 0.0007119294374670529,
+     "CRITICAL": 1.6303727575581363e-05
+    },
+    "rules": {
+     "MEDIUM": 0.009390947083534865,
+     "HIGH": 0.0015325503921046482,
+     "CRITICAL": 0.0
+    }
+   },
+   {
+    "situation": "screen_share",
+    "n": 617,
+    "full": {
+     "MEDIUM": 0.11183144246353323,
+     "HIGH": 0.02106969205834684,
+     "CRITICAL": 0.0016207455429497568
+    },
+    "server_only": {
+     "MEDIUM": 0.009724473257698542,
+     "HIGH": 0.0016207455429497568,
+     "CRITICAL": 0.0
+    },
+    "rules": {
+     "MEDIUM": 0.11345218800648298,
+     "HIGH": 0.0016207455429497568,
+     "CRITICAL": 0.0
+    }
+   },
+   {
+    "situation": "sideload",
+    "n": 1520,
+    "full": {
+     "MEDIUM": 0.01381578947368421,
+     "HIGH": 0.0013157894736842105,
+     "CRITICAL": 0.0
+    },
+    "server_only": {
+     "MEDIUM": 0.013157894736842105,
+     "HIGH": 0.001973684210526316,
+     "CRITICAL": 0.0
+    },
+    "rules": {
+     "MEDIUM": 0.02894736842105263,
+     "HIGH": 0.003289473684210526,
+     "CRITICAL": 0.0
+    }
+   },
+   {
+    "situation": "sim_replace",
+    "n": 592,
+    "full": {
+     "MEDIUM": 0.02195945945945946,
+     "HIGH": 0.0016891891891891893,
+     "CRITICAL": 0.0
+    },
+    "server_only": {
+     "MEDIUM": 0.02533783783783784,
+     "HIGH": 0.0016891891891891893,
+     "CRITICAL": 0.0
+    },
+    "rules": {
+     "MEDIUM": 0.02027027027027027,
+     "HIGH": 0.0016891891891891893,
+     "CRITICAL": 0.0
+    }
+   },
+   {
+    "situation": "similar_legit_payee",
+    "n": 2440,
+    "full": {
+     "MEDIUM": 0.0651639344262295,
+     "HIGH": 0.006557377049180328,
+     "CRITICAL": 0.0004098360655737705
+    },
+    "server_only": {
+     "MEDIUM": 0.07213114754098361,
+     "HIGH": 0.00778688524590164,
+     "CRITICAL": 0.0004098360655737705
+    },
+    "rules": {
+     "MEDIUM": 0.007377049180327869,
+     "HIGH": 0.003278688524590164,
+     "CRITICAL": 0.0
+    }
+   },
+   {
+    "situation": "travel",
+    "n": 5561,
+    "full": {
+     "MEDIUM": 0.012587664089192591,
+     "HIGH": 0.002157885272433016,
+     "CRITICAL": 0.0
+    },
+    "server_only": {
+     "MEDIUM": 0.013127135407300846,
+     "HIGH": 0.002157885272433016,
+     "CRITICAL": 0.0001798237727027513
+    },
+    "rules": {
+     "MEDIUM": 0.018342024815680633,
+     "HIGH": 0.0003596475454055026,
+     "CRITICAL": 0.0
+    }
+   },
+   {
+    "situation": "vpn",
+    "n": 2856,
+    "full": {
+     "MEDIUM": 0.011554621848739496,
+     "HIGH": 0.0021008403361344537,
+     "CRITICAL": 0.0007002801120448179
+    },
+    "server_only": {
+     "MEDIUM": 0.012605042016806723,
+     "HIGH": 0.00035014005602240897,
+     "CRITICAL": 0.0
+    },
+    "rules": {
+     "MEDIUM": 0.018907563025210083,
+     "HIGH": 0.0028011204481792717,
+     "CRITICAL": 0.0
+    }
+   }
+  ],
+  "importance": {
+   "base_pr_auc": {
+    "takeover": 0.9667930809122397,
+    "coached": 0.7036161880902572,
+    "payee": 0.9405942699547596
+   },
+   "drop": {
+    "amount vs usual": {
+     "takeover": 0.007390063165068295,
+     "coached": 0.17200505865203286,
+     "payee": 0.08497281914055754
+    },
+    "payee basics": {
+     "takeover": 0.25806956983247564,
+     "coached": 0.4979992437054459,
+     "payee": 0.7573244974395424
+    },
+    "payee fraud-risk data": {
+     "takeover": -0.0034471560493598563,
+     "coached": 0.18332435836540806,
+     "payee": 0.05165408772408708
+    },
+    "recent activity": {
+     "takeover": 0.031119418415907263,
+     "coached": 0.07068419896423406,
+     "payee": 0.0354339887737567
+    },
+    "time of day": {
+     "takeover": -0.0011028934865858764,
+     "coached": 0.02435728016381944,
+     "payee": 0.017974156726524027
+    },
+    "history and device identity": {
+     "takeover": 0.009100272319249147,
+     "coached": 0.10544368764098444,
+     "payee": 0.01701042475366288
+    },
+    "binding / SIM / PIN reset": {
+     "takeover": 0.05114538787706857,
+     "coached": 0.0022507035695188415,
+     "payee": 0.01069616026235709
+    },
+    "PIN tries and IP distance": {
+     "takeover": 0.011011024225584864,
+     "coached": -0.0011979820207800307,
+     "payee": 9.801554578015015e-05
+    },
+    "payment type": {
+     "takeover": 0.011673950114120424,
+     "coached": 0.027500467432280185,
+     "payee": 0.0035679299416262467
+    },
+    "phone telemetry": {
+     "takeover": 0.18867041257810735,
+     "coached": 0.03673895973707719,
+     "payee": 0.0047879535958552655
+    },
+    "call in progress": {
+     "takeover": 0.042594247308275435,
+     "coached": 0.031247507295038335,
+     "payee": 0.00198684079546696
+    }
+   }
+  },
+  "examples": [
+   {
+    "case": "routine genuine payment",
+    "inputs": {
+     "amt_over_p95": 0.15,
+     "new_payee": 0.0,
+     "payee_age_days": 883.76,
+     "payee_fan_in_24h": 4.0,
+     "payee_fri": 0.0,
+     "call_active": 0.0,
+     "call_minutes": 0.0,
+     "channel_collect": 0.0,
+     "device_known": 1.0,
+     "device_bound_hours": null,
+     "sim_changed_hours": null,
+     "bio_similarity": 0.86,
+     "new_payees_72h": 0.0,
+     "payee_lookalike": 0.0
+    },
+    "surprise": {
+     "takeover": 1.42,
+     "coached": 1.88,
+     "payee": 2.3
+    },
+    "severity": "LOW",
+    "family": "none",
+    "reasons": []
+   },
+   {
+    "case": "genuine phone change",
+    "inputs": {
+     "amt_over_p95": 0.22,
+     "new_payee": 0.0,
+     "payee_age_days": 151.03,
+     "payee_fan_in_24h": 0.0,
+     "payee_fri": 0.0,
+     "call_active": 0.0,
+     "call_minutes": 0.0,
+     "channel_collect": 0.0,
+     "device_known": 1.0,
+     "device_bound_hours": 62.71,
+     "sim_changed_hours": null,
+     "bio_similarity": 0.83,
+     "new_payees_72h": 0.0,
+     "payee_lookalike": 0.0
+    },
+    "surprise": {
+     "takeover": 3.64,
+     "coached": 1.43,
+     "payee": 2.37
+    },
+    "severity": "LOW",
+    "family": "none",
+    "reasons": []
+   },
+   {
+    "case": "genuine new payee (a shop)",
+    "inputs": {
+     "amt_over_p95": 0.14,
+     "new_payee": 1.0,
+     "payee_age_days": 2020.32,
+     "payee_fan_in_24h": 121.0,
+     "payee_fri": 1.0,
+     "call_active": 0.0,
+     "call_minutes": 0.0,
+     "channel_collect": 0.0,
+     "device_known": 1.0,
+     "device_bound_hours": null,
+     "sim_changed_hours": null,
+     "bio_similarity": 0.92,
+     "new_payees_72h": 2.0,
+     "payee_lookalike": 0.0
+    },
+    "surprise": {
+     "takeover": 1.15,
+     "coached": 1.28,
+     "payee": 0.47
+    },
+    "severity": "LOW",
+    "family": "none",
+    "reasons": []
+   },
+   {
+    "case": "genuine collect request from a non-contact",
+    "inputs": {
+     "amt_over_p95": 0.16,
+     "new_payee": 1.0,
+     "payee_age_days": 2058.31,
+     "payee_fan_in_24h": 0.0,
+     "payee_fri": 0.0,
+     "call_active": 0.0,
+     "call_minutes": 0.0,
+     "channel_collect": 1.0,
+     "device_known": 1.0,
+     "device_bound_hours": null,
+     "sim_changed_hours": null,
+     "bio_similarity": 0.82,
+     "new_payees_72h": 3.0,
+     "payee_lookalike": 0.43
+    },
+    "surprise": {
+     "takeover": 1.12,
+     "coached": 1.36,
+     "payee": 1.64
+    },
+    "severity": "LOW",
+    "family": "none",
+    "reasons": []
+   },
+   {
+    "case": "scam: sim_swap",
+    "inputs": {
+     "amt_over_p95": 0.4,
+     "new_payee": 1.0,
+     "payee_age_days": 110.37,
+     "payee_fan_in_24h": 7.0,
+     "payee_fri": 1.0,
+     "call_active": 0.0,
+     "call_minutes": 0.0,
+     "channel_collect": 0.0,
+     "device_known": 0.0,
+     "device_bound_hours": 1.1,
+     "sim_changed_hours": 19.97,
+     "bio_similarity": 0.34,
+     "new_payees_72h": 2.0,
+     "payee_lookalike": 0.82
+    },
+    "surprise": {
+     "takeover": 9.21,
+     "coached": 3.87,
+     "payee": 10.66
+    },
+    "severity": "CRITICAL",
+    "family": "takeover",
+    "reasons": [
+     [
+      "payee_age_days",
+      2.29
+     ],
+     [
+      "device_bound_hours",
+      1.28
+     ],
+     [
+      "bio_similarity",
+      0.69
+     ]
+    ]
+   },
+   {
+    "case": "scam: remote_access",
+    "inputs": {
+     "amt_over_p95": 4.54,
+     "new_payee": 1.0,
+     "payee_age_days": 434.21,
+     "payee_fan_in_24h": 7.0,
+     "payee_fri": 0.0,
+     "call_active": 0.0,
+     "call_minutes": 0.0,
+     "channel_collect": 0.0,
+     "device_known": 1.0,
+     "device_bound_hours": null,
+     "sim_changed_hours": null,
+     "bio_similarity": null,
+     "new_payees_72h": 1.0,
+     "payee_lookalike": 0.77
+    },
+    "surprise": {
+     "takeover": 11.51,
+     "coached": 2.74,
+     "payee": 11.51
+    },
+    "severity": "CRITICAL",
+    "family": "takeover",
+    "reasons": [
+     [
+      "payee_age_days",
+      2.27
+     ],
+     [
+      "remote_access_active",
+      1.02
+     ],
+     [
+      "failed_pin_attempts",
+      1.02
+     ]
+    ]
+   },
+   {
+    "case": "scam: digital_arrest",
+    "inputs": {
+     "amt_over_p95": 6.08,
+     "new_payee": 1.0,
+     "payee_age_days": 515.82,
+     "payee_fan_in_24h": 2.0,
+     "payee_fri": 1.0,
+     "call_active": 0.0,
+     "call_minutes": 0.0,
+     "channel_collect": 0.0,
+     "device_known": 1.0,
+     "device_bound_hours": null,
+     "sim_changed_hours": null,
+     "bio_similarity": 0.88,
+     "new_payees_72h": 2.0,
+     "payee_lookalike": 0.0
+    },
+    "surprise": {
+     "takeover": 3.88,
+     "coached": 4.57,
+     "payee": 6.22
+    },
+    "severity": "MEDIUM",
+    "family": "coached",
+    "reasons": [
+     [
+      "payee_age_days",
+      3.57
+     ],
+     [
+      "payee_fri",
+      1.7
+     ],
+     [
+      "amt_z",
+      0.65
+     ]
+    ]
+   },
+   {
+    "case": "scam: collect_qr",
+    "inputs": {
+     "amt_over_p95": 0.76,
+     "new_payee": 1.0,
+     "payee_age_days": 0.2,
+     "payee_fan_in_24h": 4.0,
+     "payee_fri": 2.0,
+     "call_active": 0.0,
+     "call_minutes": 0.0,
+     "channel_collect": 1.0,
+     "device_known": 1.0,
+     "device_bound_hours": null,
+     "sim_changed_hours": null,
+     "bio_similarity": 0.83,
+     "new_payees_72h": 3.0,
+     "payee_lookalike": 0.0
+    },
+    "surprise": {
+     "takeover": 7.54,
+     "coached": 9.36,
+     "payee": 8.39
+    },
+    "severity": "CRITICAL",
+    "family": "coached",
+    "reasons": [
+     [
+      "payee_age_days",
+      7.31
+     ],
+     [
+      "payee_complaints",
+      1.2
+     ],
+     [
+      "requester_is_contact",
+      0.96
+     ]
+    ]
+   },
+   {
+    "case": "scam: task_invest",
+    "inputs": {
+     "amt_over_p95": 0.32,
+     "new_payee": 1.0,
+     "payee_age_days": 387.11,
+     "payee_fan_in_24h": 5.0,
+     "payee_fri": 0.0,
+     "call_active": 0.0,
+     "call_minutes": 0.0,
+     "channel_collect": 0.0,
+     "device_known": 1.0,
+     "device_bound_hours": null,
+     "sim_changed_hours": null,
+     "bio_similarity": null,
+     "new_payees_72h": 3.0,
+     "payee_lookalike": 0.0
+    },
+    "surprise": {
+     "takeover": 8.3,
+     "coached": 7.92,
+     "payee": 9.03
+    },
+    "severity": "CRITICAL",
+    "family": "coached",
+    "reasons": [
+     [
+      "payee_age_days",
+      6.69
+     ],
+     [
+      "payee_risky_category",
+      1.45
+     ],
+     [
+      "amt_z",
+      0.87
+     ]
+    ]
+   },
+   {
+    "case": "scam: lookalike",
+    "inputs": {
+     "amt_over_p95": 0.23,
+     "new_payee": 1.0,
+     "payee_age_days": 406.22,
+     "payee_fan_in_24h": 2.0,
+     "payee_fri": null,
+     "call_active": null,
+     "call_minutes": null,
+     "channel_collect": 0.0,
+     "device_known": 1.0,
+     "device_bound_hours": null,
+     "sim_changed_hours": null,
+     "bio_similarity": null,
+     "new_payees_72h": 2.0,
+     "payee_lookalike": 0.95
+    },
+    "surprise": {
+     "takeover": 5.16,
+     "coached": 3.32,
+     "payee": 4.63
+    },
+    "severity": "MEDIUM",
+    "family": "payee",
+    "reasons": [
+     [
+      "payee_age_days",
+      3.34
+     ],
+     [
+      "new_payee",
+      1.73
+     ],
+     [
+      "payee_fri",
+      1.0
+     ]
+    ]
+   },
+   {
+    "case": "scam: fake_seller",
+    "inputs": {
+     "amt_over_p95": 0.55,
+     "new_payee": 1.0,
+     "payee_age_days": 558.08,
+     "payee_fan_in_24h": 9.0,
+     "payee_fri": null,
+     "call_active": null,
+     "call_minutes": null,
+     "channel_collect": 0.0,
+     "device_known": 1.0,
+     "device_bound_hours": null,
+     "sim_changed_hours": null,
+     "bio_similarity": null,
+     "new_payees_72h": 2.0,
+     "payee_lookalike": 0.0
+    },
+    "surprise": {
+     "takeover": 3.03,
+     "coached": 3.36,
+     "payee": 5.98
+    },
+    "severity": "MEDIUM",
+    "family": "coached",
+    "reasons": [
+     [
+      "payee_age_days",
+      2.3
+     ],
+     [
+      "payee_fri",
+      0.66
+     ],
+     [
+      "call_active",
+      0.51
+     ]
+    ]
+   },
+   {
+    "case": "scam: romance",
+    "inputs": {
+     "amt_over_p95": 0.2,
+     "new_payee": 0.0,
+     "payee_age_days": 701.4,
+     "payee_fan_in_24h": 6.0,
+     "payee_fri": null,
+     "call_active": 0.0,
+     "call_minutes": 0.0,
+     "channel_collect": 0.0,
+     "device_known": 1.0,
+     "device_bound_hours": null,
+     "sim_changed_hours": null,
+     "bio_similarity": null,
+     "new_payees_72h": 4.0,
+     "payee_lookalike": 0.0
+    },
+    "surprise": {
+     "takeover": 7.63,
+     "coached": 3.76,
+     "payee": 6.86
+    },
+    "severity": "HIGH",
+    "family": "coached",
+    "reasons": [
+     [
+      "payee_age_days",
+      2.58
+     ],
+     [
+      "payee_fan_in_24h",
+      0.68
+     ]
+    ]
+   }
+  ],
+  "latency_ms": {
+   "full": 41.40695749999999,
+   "server_only": 31.181353750000014
+  },
+  "model_facts": {
+   "trees_per_head": {
+    "takeover": 400,
+    "coached": 400,
+    "payee": 200
+   },
+   "features": 46,
+   "device_features": 10,
+   "training_rows": 755233,
+   "validation_rows": 268969,
+   "test_rows": 272875,
+   "files_kb": {
+    "ato_server_only.joblib": 596,
+    "model_card.json": 78,
+    "ato_full.joblib": 586
+   },
+   "thresholds": {
+    "MEDIUM": 4.663657835202617,
+    "HIGH": 6.579013066732831,
+    "CRITICAL": 8.19100137239127
+   },
+   "budgets": {
+    "MEDIUM": 0.02,
+    "HIGH": 0.003,
+    "CRITICAL": 0.0005
+   }
+  },
+  "reconcile": {
+   "sim_prevalence": 0.0037607636246730146,
+   "rupee_share_by_type": {
+    "sim_swap": 0.1578382220389229,
+    "apk_binding": 0.130913554888162,
+    "remote_access": 0.16155402609393127,
+    "physical_theft": 0.12427422017691088,
+    "digital_arrest": 0.2756820634120589,
+    "fake_care": 0.01916595000390749,
+    "collect_qr": 0.011408471695459691,
+    "task_invest": 0.06524444605185342,
+    "extortion": 0.010089128006534557,
+    "prize_fee": 0.0031450112298368094,
+    "relative_trouble": 0.006554256278910826,
+    "romance": 0.022546212411533338,
+    "lookalike": 0.0030318580922652607,
+    "fake_seller": 0.008552579619712746
+   },
+   "rupee_share_by_family": {
+    "takeover": 0.574580023197927,
+    "coached": 0.4138355390900951,
+    "payee": 0.011584437711978007
+   },
+   "incident_share_by_family": {
+    "takeover": 0.2692565304755526,
+    "coached": 0.5847287340924313,
+    "payee": 0.14601473543201607
+   },
+   "unreported_share": 0.15887658876588762
+  }
+ },
+ "shifts": [
+  {
+   "scenario": "same assumptions, fresh sample",
+   "legit_medium": 0.024799131214022083,
+   "legit_high": 0.002973161803794104,
+   "legit_critical": 0.00014049423593918498,
+   "caught": 0.9388489208633094,
+   "first_payment": 0.8920863309352518,
+   "rupees_saved": 0.9899132817884593,
+   "incidents": 278,
+   "family_caught": {
+    "takeover": 1.0,
+    "coached": 0.9393939393939394,
+    "payee": 0.8409090909090909
+   }
+  },
+  {
+   "scenario": "fraud-risk data covers half as many scam payees",
+   "legit_medium": 0.02691556913485946,
+   "legit_high": 0.003452692328464844,
+   "legit_critical": 0.00018131456920429908,
+   "caught": 0.9206349206349206,
+   "first_payment": 0.8507936507936508,
+   "rupees_saved": 0.9843679873010154,
+   "incidents": 315,
+   "family_caught": {
+    "takeover": 1.0,
+    "coached": 0.9326424870466321,
+    "payee": 0.7333333333333333
+   }
+  },
+  {
+   "scenario": "fraud-risk data almost useless",
+   "legit_medium": 0.02454595740757813,
+   "legit_high": 0.003007744076703236,
+   "legit_critical": 0.00015749362342890508,
+   "caught": 0.9196141479099679,
+   "first_payment": 0.842443729903537,
+   "rupees_saved": 0.9750599430403344,
+   "incidents": 311,
+   "family_caught": {
+    "takeover": 1.0,
+    "coached": 0.9281767955801105,
+    "payee": 0.7391304347826086
+   }
+  },
+  {
+   "scenario": "half of scam payees are rented, aged accounts",
+   "legit_medium": 0.024712107535247708,
+   "legit_high": 0.0032858831660806213,
+   "legit_critical": 0.00017751322851240138,
+   "caught": 0.9096774193548387,
+   "first_payment": 0.8193548387096774,
+   "rupees_saved": 0.9769338093135354,
+   "incidents": 310,
+   "family_caught": {
+    "takeover": 1.0,
+    "coached": 0.9127906976744186,
+    "payee": 0.7758620689655172
+   }
+  },
+  {
+   "scenario": "nearly all scam payees are rented, aged accounts",
+   "legit_medium": 0.025475776721561767,
+   "legit_high": 0.0033067489134145827,
+   "legit_critical": 0.00015344542521645394,
+   "caught": 0.8741721854304636,
+   "first_payment": 0.804635761589404,
+   "rupees_saved": 0.9845723405598322,
+   "incidents": 302,
+   "family_caught": {
+    "takeover": 1.0,
+    "coached": 0.9133333333333333,
+    "payee": 0.6527777777777778
+   }
+  },
+  {
+   "scenario": "aged scam payees AND fraud-risk data almost useless",
+   "legit_medium": 0.02547257987601335,
+   "legit_high": 0.0032656175488793514,
+   "legit_critical": 0.0001335240820219361,
+   "caught": 0.856655290102389,
+   "first_payment": 0.7372013651877133,
+   "rupees_saved": 0.9589913056176358,
+   "incidents": 293,
+   "family_caught": {
+    "takeover": 1.0,
+    "coached": 0.9005524861878453,
+    "payee": 0.4418604651162791
+   }
+  },
+  {
+   "scenario": "takeover attackers nearly always run the SDK",
+   "legit_medium": 0.02540114648529061,
+   "legit_high": 0.0029607941507866667,
+   "legit_critical": 0.00015215192163764814,
+   "caught": 0.9616613418530351,
+   "first_payment": 0.9233226837060703,
+   "rupees_saved": 0.9912702021038031,
+   "incidents": 313,
+   "family_caught": {
+    "takeover": 1.0,
+    "coached": 0.9593023255813954,
+    "payee": 0.8958333333333334
+   }
+  },
+  {
+   "scenario": "takeover attackers nearly never run the SDK",
+   "legit_medium": 0.025270235490927807,
+   "legit_high": 0.0029195084287736454,
+   "legit_critical": 0.00014074765152490026,
+   "caught": 0.939873417721519,
+   "first_payment": 0.879746835443038,
+   "rupees_saved": 0.9694069971664385,
+   "incidents": 316,
+   "family_caught": {
+    "takeover": 1.0,
+    "coached": 0.9382022471910112,
+    "payee": 0.8518518518518519
+   }
+  },
+  {
+   "scenario": "genuine users take calls while paying 4x more",
+   "legit_medium": 0.026819102970978472,
+   "legit_high": 0.003693648912170688,
+   "legit_critical": 0.00017971169655488854,
+   "caught": 0.9473684210526315,
+   "first_payment": 0.9052631578947369,
+   "rupees_saved": 0.9845364198019467,
+   "incidents": 285,
+   "family_caught": {
+    "takeover": 1.0,
+    "coached": 0.9444444444444444,
+    "payee": 0.8695652173913043
+   }
+  },
+  {
+   "scenario": "phone SDK silent on 40% of genuine payments",
+   "legit_medium": 0.03179479386031567,
+   "legit_high": 0.004302265835884298,
+   "legit_critical": 0.00024966891730531253,
+   "caught": 0.935374149659864,
+   "first_payment": 0.8707482993197279,
+   "rupees_saved": 0.976993059054369,
+   "incidents": 294,
+   "family_caught": {
+    "takeover": 1.0,
+    "coached": 0.9393939393939394,
+    "payee": 0.82
+   }
+  },
+  {
+   "scenario": "heavy phone churn (45% change phone)",
+   "legit_medium": 0.02379634119798846,
+   "legit_high": 0.0028905375941715764,
+   "legit_critical": 0.00021001263894245272,
+   "caught": 0.9331210191082803,
+   "first_payment": 0.8694267515923567,
+   "rupees_saved": 0.9781247538055016,
+   "incidents": 314,
+   "family_caught": {
+    "takeover": 1.0,
+    "coached": 0.923469387755102,
+    "payee": 0.85
+   }
+  },
+  {
+   "scenario": "night-heavy population (50% night owls)",
+   "legit_medium": 0.02599095473969373,
+   "legit_high": 0.003045313202528441,
+   "legit_critical": 0.00017758029841046742,
+   "caught": 0.9444444444444444,
+   "first_payment": 0.8801169590643275,
+   "rupees_saved": 0.9841934499445182,
+   "incidents": 342,
+   "family_caught": {
+    "takeover": 1.0,
+    "coached": 0.9417989417989417,
+    "payee": 0.8666666666666667
+   }
+  },
+  {
+   "scenario": "light users (0.3 payments/day)",
+   "legit_medium": 0.04173716864072194,
+   "legit_high": 0.005877638258081752,
+   "legit_critical": 0.00020779529195238519,
+   "caught": 0.9316546762589928,
+   "first_payment": 0.8884892086330936,
+   "rupees_saved": 0.9854393502676323,
+   "incidents": 278,
+   "family_caught": {
+    "takeover": 1.0,
+    "coached": 0.9219858156028369,
+    "payee": 0.8260869565217391
+   }
+  },
+  {
+   "scenario": "heavy users (4 payments/day)",
+   "legit_medium": 0.020309748276379064,
+   "legit_high": 0.002869904381275468,
+   "legit_critical": 0.0001723061499869092,
+   "caught": 0.9265175718849841,
+   "first_payment": 0.865814696485623,
+   "rupees_saved": 0.9853423981374537,
+   "incidents": 313,
+   "family_caught": {
+    "takeover": 1.0,
+    "coached": 0.9081081081081082,
+    "payee": 0.8636363636363636
+   }
+  },
+  {
+   "scenario": "5x bigger payments",
+   "legit_medium": 0.0250517284137977,
+   "legit_high": 0.0032573169332361074,
+   "legit_critical": 0.00015546285363172331,
+   "caught": 0.9509803921568627,
+   "first_payment": 0.9117647058823529,
+   "rupees_saved": 0.9853779996795196,
+   "incidents": 306,
+   "family_caught": {
+    "takeover": 1.0,
+    "coached": 0.9464285714285714,
+    "payee": 0.85
+   }
+  },
+  {
+   "scenario": "5x smaller payments",
+   "legit_medium": 0.027235540627985087,
+   "legit_high": 0.0034241826641604784,
+   "legit_critical": 0.00016562413336209287,
+   "caught": 0.939297124600639,
+   "first_payment": 0.8913738019169329,
+   "rupees_saved": 0.9852226950563123,
+   "incidents": 313,
+   "family_caught": {
+    "takeover": 1.0,
+    "coached": 0.9353233830845771,
+    "payee": 0.8604651162790697
+   }
+  },
+  {
+   "scenario": "2x more new payees in genuine life",
+   "legit_medium": 0.04176384506333745,
+   "legit_high": 0.006421396015304645,
+   "legit_critical": 0.0005068520296946693,
+   "caught": 0.9381107491856677,
+   "first_payment": 0.8794788273615635,
+   "rupees_saved": 0.9697979991920704,
+   "incidents": 307,
+   "family_caught": {
+    "takeover": 1.0,
+    "coached": 0.9354838709677419,
+    "payee": 0.7741935483870968
+   }
+  },
+  {
+   "scenario": "half as many new payees",
+   "legit_medium": 0.01810372098164092,
+   "legit_high": 0.002042861988665165,
+   "legit_critical": 7.241488392656369e-05,
+   "caught": 0.9305555555555556,
+   "first_payment": 0.8923611111111112,
+   "rupees_saved": 0.9666702490688046,
+   "incidents": 288,
+   "family_caught": {
+    "takeover": 1.0,
+    "coached": 0.9364161849710982,
+    "payee": 0.8
+   }
+  },
+  {
+   "scenario": "scammers 0.3 stealthier",
+   "legit_medium": 0.024824112266519874,
+   "legit_high": 0.0030502288614238423,
+   "legit_critical": 0.00015458514625262982,
+   "caught": 0.9366666666666666,
+   "first_payment": 0.8633333333333333,
+   "rupees_saved": 0.9702404295400004,
+   "incidents": 300,
+   "family_caught": {
+    "takeover": 1.0,
+    "coached": 0.9302325581395349,
+    "payee": 0.8653846153846154
+   }
+  },
+  {
+   "scenario": "coached-scam heavy mix",
+   "legit_medium": 0.02450317283156977,
+   "legit_high": 0.003304950721528323,
+   "legit_critical": 0.00019719276381433907,
+   "caught": 0.9510703363914373,
+   "first_payment": 0.8532110091743119,
+   "rupees_saved": 0.9775412238083253,
+   "incidents": 327,
+   "family_caught": {
+    "takeover": 0.0,
+    "coached": 0.9510703363914373,
+    "payee": 0.0
+   }
+  },
+  {
+   "scenario": "takeover heavy mix",
+   "legit_medium": 0.02513397864650409,
+   "legit_high": 0.0030440250622212318,
+   "legit_critical": 0.00015862165336636693,
+   "caught": 1.0,
+   "first_payment": 0.9876923076923076,
+   "rupees_saved": 0.9999319317684398,
+   "incidents": 325,
+   "family_caught": {
+    "takeover": 1.0,
+    "coached": 0.0,
+    "payee": 0.0
+   }
+  },
+  {
+   "scenario": "40% of victims never report (noisy labels)",
+   "legit_medium": 0.023341853640064376,
+   "legit_high": 0.002836315440689198,
+   "legit_critical": 0.00013632490769667708,
+   "caught": 0.9344262295081968,
+   "first_payment": 0.8918032786885246,
+   "rupees_saved": 0.9821955215225787,
+   "incidents": 305,
+   "family_caught": {
+    "takeover": 1.0,
+    "coached": 0.9277777777777778,
+    "payee": 0.8444444444444444
+   }
+  }
+ ]
+}

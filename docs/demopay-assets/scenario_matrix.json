@@ -1,0 +1,1439 @@
+[
+ {
+  "device": "web-device",
+  "customer": "asha",
+  "scenario": "Routine payment",
+  "amount": 300,
+  "severity": "LOW",
+  "threat": "NONE",
+  "decision": "allow",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.0,
+  "reasons": [],
+  "senior": false
+ },
+ {
+  "device": "web-device",
+  "customer": "asha",
+  "scenario": "New local shop",
+  "amount": 450,
+  "severity": "LOW",
+  "threat": "NONE",
+  "decision": "allow",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.0,
+  "reasons": [],
+  "senior": false
+ },
+ {
+  "device": "web-device",
+  "customer": "asha",
+  "scenario": "Fake refund",
+  "amount": 9000,
+  "severity": "CRITICAL",
+  "threat": "COACHED",
+  "decision": "block",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.4064748201438849,
+  "reasons": [
+   "payee_age_days",
+   "payee_complaints",
+   "payee_fri"
+  ],
+  "senior": false
+ },
+ {
+  "device": "web-device",
+  "customer": "asha",
+  "scenario": "Digital arrest",
+  "amount": 20000,
+  "severity": "CRITICAL",
+  "threat": "COACHED",
+  "decision": "block",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.4064748201438849,
+  "reasons": [
+   "payee_age_days",
+   "call_minutes"
+  ],
+  "senior": false
+ },
+ {
+  "device": "web-device",
+  "customer": "asha",
+  "scenario": "Digital arrest (large)",
+  "amount": 60000,
+  "severity": "CRITICAL",
+  "threat": "COACHED",
+  "decision": "block",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.4064748201438849,
+  "reasons": [
+   "payee_age_days",
+   "call_minutes"
+  ],
+  "senior": false
+ },
+ {
+  "device": "web-device",
+  "customer": "asha",
+  "scenario": "Investment scam",
+  "amount": 20000,
+  "severity": "HIGH",
+  "threat": "COACHED",
+  "decision": "steps",
+  "steps": [
+   "payee_check",
+   "typed_confirm",
+   "warning"
+  ],
+  "seconds": 22,
+  "p_scam": 0.01060734994359898,
+  "reasons": [
+   "payee_age_days",
+   "payee_risky_category",
+   "outflow_24h_over_balance"
+  ],
+  "senior": false
+ },
+ {
+  "device": "web-device",
+  "customer": "asha",
+  "scenario": "Look-alike payee",
+  "amount": 4000,
+  "severity": "HIGH",
+  "threat": "PAYEE_RISK",
+  "decision": "steps",
+  "steps": [
+   "payee_check",
+   "typed_confirm",
+   "warning"
+  ],
+  "seconds": 22,
+  "p_scam": 0.09690833483999278,
+  "reasons": [
+   "payee_age_days",
+   "amt_z",
+   "payee_fan_in_24h"
+  ],
+  "senior": false
+ },
+ {
+  "device": "web-device",
+  "customer": "asha",
+  "scenario": "Fake seller",
+  "amount": 6000,
+  "severity": "LOW",
+  "threat": "NONE",
+  "decision": "allow",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.0,
+  "reasons": [],
+  "senior": false
+ },
+ {
+  "device": "web-device",
+  "customer": "asha",
+  "scenario": "Prize fee",
+  "amount": 3000,
+  "severity": "LOW",
+  "threat": "NONE",
+  "decision": "allow",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.0,
+  "reasons": [],
+  "senior": false
+ },
+ {
+  "device": "web-device",
+  "customer": "asha",
+  "scenario": "SIM swap + new phone",
+  "amount": 60000,
+  "severity": "CRITICAL",
+  "threat": "UNAUTHORISED",
+  "decision": "block",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.4064748201438849,
+  "reasons": [
+   "payee_age_days",
+   "device_bound_hours",
+   "bio_similarity"
+  ],
+  "senior": false
+ },
+ {
+  "device": "web-device",
+  "customer": "asha",
+  "scenario": "Remote control",
+  "amount": 30000,
+  "severity": "HIGH",
+  "threat": "UNAUTHORISED",
+  "decision": "block",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.01060734994359898,
+  "reasons": [
+   "payee_age_days",
+   "remote_access_active",
+   "bio_similarity"
+  ],
+  "senior": false
+ },
+ {
+  "device": "web-new1",
+  "customer": "asha",
+  "scenario": "Routine payment",
+  "amount": 300,
+  "severity": "LOW",
+  "threat": "NONE",
+  "decision": "allow",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.0,
+  "reasons": [],
+  "senior": false
+ },
+ {
+  "device": "web-new1",
+  "customer": "asha",
+  "scenario": "New local shop",
+  "amount": 450,
+  "severity": "LOW",
+  "threat": "NONE",
+  "decision": "allow",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.0,
+  "reasons": [],
+  "senior": false
+ },
+ {
+  "device": "web-new1",
+  "customer": "asha",
+  "scenario": "Fake refund",
+  "amount": 9000,
+  "severity": "CRITICAL",
+  "threat": "COACHED",
+  "decision": "block",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.4064748201438849,
+  "reasons": [
+   "payee_age_days",
+   "payee_complaints",
+   "payee_fri"
+  ],
+  "senior": false
+ },
+ {
+  "device": "web-new1",
+  "customer": "asha",
+  "scenario": "Digital arrest",
+  "amount": 20000,
+  "severity": "HIGH",
+  "threat": "COACHED",
+  "decision": "steps",
+  "steps": [
+   "payee_check",
+   "typed_confirm",
+   "warning"
+  ],
+  "seconds": 22,
+  "p_scam": 0.01060734994359898,
+  "reasons": [
+   "payee_age_days",
+   "call_minutes",
+   "amt_z"
+  ],
+  "senior": false
+ },
+ {
+  "device": "web-new1",
+  "customer": "asha",
+  "scenario": "Digital arrest (large)",
+  "amount": 60000,
+  "severity": "HIGH",
+  "threat": "COACHED",
+  "decision": "steps",
+  "steps": [
+   "typed_confirm",
+   "cooling_off",
+   "warning"
+  ],
+  "seconds": 16,
+  "p_scam": 0.01060734994359898,
+  "reasons": [
+   "payee_age_days",
+   "call_minutes",
+   "amt_z"
+  ],
+  "senior": false
+ },
+ {
+  "device": "web-new1",
+  "customer": "asha",
+  "scenario": "Investment scam",
+  "amount": 20000,
+  "severity": "HIGH",
+  "threat": "COACHED",
+  "decision": "steps",
+  "steps": [
+   "payee_check",
+   "typed_confirm",
+   "warning"
+  ],
+  "seconds": 22,
+  "p_scam": 0.01060734994359898,
+  "reasons": [
+   "payee_age_days",
+   "payee_risky_category",
+   "outflow_24h_over_balance"
+  ],
+  "senior": false
+ },
+ {
+  "device": "web-new1",
+  "customer": "asha",
+  "scenario": "Look-alike payee",
+  "amount": 4000,
+  "severity": "MEDIUM",
+  "threat": "COACHED",
+  "decision": "steps",
+  "steps": [
+   "warning"
+  ],
+  "seconds": 8,
+  "p_scam": 0.005673335323977307,
+  "reasons": [
+   "payee_age_days",
+   "payee_fri",
+   "payee_fan_in_24h"
+  ],
+  "senior": false
+ },
+ {
+  "device": "web-new1",
+  "customer": "asha",
+  "scenario": "Fake seller",
+  "amount": 6000,
+  "severity": "LOW",
+  "threat": "NONE",
+  "decision": "allow",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.0,
+  "reasons": [],
+  "senior": false
+ },
+ {
+  "device": "web-new1",
+  "customer": "asha",
+  "scenario": "Prize fee",
+  "amount": 3000,
+  "severity": "LOW",
+  "threat": "NONE",
+  "decision": "allow",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.0,
+  "reasons": [],
+  "senior": false
+ },
+ {
+  "device": "web-new1",
+  "customer": "asha",
+  "scenario": "SIM swap + new phone",
+  "amount": 60000,
+  "severity": "CRITICAL",
+  "threat": "UNAUTHORISED",
+  "decision": "block",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.4064748201438849,
+  "reasons": [
+   "payee_age_days",
+   "device_bound_hours",
+   "bio_similarity"
+  ],
+  "senior": false
+ },
+ {
+  "device": "web-new1",
+  "customer": "asha",
+  "scenario": "Remote control",
+  "amount": 30000,
+  "severity": "MEDIUM",
+  "threat": "UNAUTHORISED",
+  "decision": "allow",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.0005697322258538487,
+  "reasons": [
+   "payee_age_days",
+   "remote_access_active",
+   "bio_similarity"
+  ],
+  "senior": false
+ },
+ {
+  "device": "web-device",
+  "customer": "ramesh",
+  "scenario": "Routine payment",
+  "amount": 300,
+  "severity": "MEDIUM",
+  "threat": "COACHED",
+  "decision": "allow",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.0005697322258538487,
+  "reasons": [
+   "payee_age_days"
+  ],
+  "senior": true
+ },
+ {
+  "device": "web-device",
+  "customer": "ramesh",
+  "scenario": "New local shop",
+  "amount": 450,
+  "severity": "LOW",
+  "threat": "NONE",
+  "decision": "allow",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.0,
+  "reasons": [],
+  "senior": true
+ },
+ {
+  "device": "web-device",
+  "customer": "ramesh",
+  "scenario": "Fake refund",
+  "amount": 9000,
+  "severity": "CRITICAL",
+  "threat": "COACHED",
+  "decision": "block",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.4064748201438849,
+  "reasons": [
+   "payee_age_days",
+   "payee_complaints",
+   "payee_fri"
+  ],
+  "senior": true
+ },
+ {
+  "device": "web-device",
+  "customer": "ramesh",
+  "scenario": "Digital arrest",
+  "amount": 20000,
+  "severity": "HIGH",
+  "threat": "COACHED",
+  "decision": "steps",
+  "steps": [
+   "typed_confirm",
+   "cooling_off",
+   "warning"
+  ],
+  "seconds": 16,
+  "p_scam": 0.01060734994359898,
+  "reasons": [
+   "payee_age_days",
+   "call_minutes",
+   "amt_z"
+  ],
+  "senior": true
+ },
+ {
+  "device": "web-device",
+  "customer": "ramesh",
+  "scenario": "Digital arrest (large)",
+  "amount": 60000,
+  "severity": "CRITICAL",
+  "threat": "COACHED",
+  "decision": "block",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.4064748201438849,
+  "reasons": [
+   "payee_age_days",
+   "call_minutes",
+   "amt_z"
+  ],
+  "senior": true
+ },
+ {
+  "device": "web-device",
+  "customer": "ramesh",
+  "scenario": "Investment scam",
+  "amount": 20000,
+  "severity": "HIGH",
+  "threat": "COACHED",
+  "decision": "steps",
+  "steps": [
+   "typed_confirm",
+   "cooling_off",
+   "warning"
+  ],
+  "seconds": 16,
+  "p_scam": 0.01060734994359898,
+  "reasons": [
+   "payee_age_days",
+   "payee_risky_category",
+   "hist_n"
+  ],
+  "senior": true
+ },
+ {
+  "device": "web-device",
+  "customer": "ramesh",
+  "scenario": "Look-alike payee",
+  "amount": 4000,
+  "severity": "HIGH",
+  "threat": "COACHED",
+  "decision": "block",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.09690833483999278,
+  "reasons": [
+   "payee_age_days",
+   "payee_fri",
+   "amt_z"
+  ],
+  "senior": true
+ },
+ {
+  "device": "web-device",
+  "customer": "ramesh",
+  "scenario": "Fake seller",
+  "amount": 6000,
+  "severity": "LOW",
+  "threat": "NONE",
+  "decision": "allow",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.0,
+  "reasons": [],
+  "senior": true
+ },
+ {
+  "device": "web-device",
+  "customer": "ramesh",
+  "scenario": "Prize fee",
+  "amount": 3000,
+  "severity": "MEDIUM",
+  "threat": "COACHED",
+  "decision": "allow",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.0005697322258538487,
+  "reasons": [
+   "payee_age_days",
+   "amt_z",
+   "hist_n"
+  ],
+  "senior": true
+ },
+ {
+  "device": "web-device",
+  "customer": "ramesh",
+  "scenario": "SIM swap + new phone",
+  "amount": 60000,
+  "severity": "CRITICAL",
+  "threat": "UNAUTHORISED",
+  "decision": "block",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.4064748201438849,
+  "reasons": [
+   "payee_age_days"
+  ],
+  "senior": true
+ },
+ {
+  "device": "web-device",
+  "customer": "ramesh",
+  "scenario": "Remote control",
+  "amount": 30000,
+  "severity": "HIGH",
+  "threat": "UNAUTHORISED",
+  "decision": "block",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.01060734994359898,
+  "reasons": [
+   "payee_age_days",
+   "remote_access_active",
+   "bio_similarity"
+  ],
+  "senior": true
+ },
+ {
+  "device": "web-new1",
+  "customer": "ramesh",
+  "scenario": "Routine payment",
+  "amount": 300,
+  "severity": "LOW",
+  "threat": "NONE",
+  "decision": "allow",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.0,
+  "reasons": [],
+  "senior": true
+ },
+ {
+  "device": "web-new1",
+  "customer": "ramesh",
+  "scenario": "New local shop",
+  "amount": 450,
+  "severity": "LOW",
+  "threat": "NONE",
+  "decision": "allow",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.0,
+  "reasons": [],
+  "senior": true
+ },
+ {
+  "device": "web-new1",
+  "customer": "ramesh",
+  "scenario": "Fake refund",
+  "amount": 9000,
+  "severity": "CRITICAL",
+  "threat": "COACHED",
+  "decision": "block",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.4064748201438849,
+  "reasons": [
+   "payee_age_days",
+   "payee_complaints",
+   "payee_fri"
+  ],
+  "senior": true
+ },
+ {
+  "device": "web-new1",
+  "customer": "ramesh",
+  "scenario": "Digital arrest",
+  "amount": 20000,
+  "severity": "MEDIUM",
+  "threat": "COACHED",
+  "decision": "steps",
+  "steps": [
+   "warning"
+  ],
+  "seconds": 8,
+  "p_scam": 0.0005697322258538487,
+  "reasons": [
+   "payee_age_days",
+   "call_minutes",
+   "amt_z"
+  ],
+  "senior": true
+ },
+ {
+  "device": "web-new1",
+  "customer": "ramesh",
+  "scenario": "Digital arrest (large)",
+  "amount": 60000,
+  "severity": "HIGH",
+  "threat": "COACHED",
+  "decision": "steps",
+  "steps": [
+   "typed_confirm",
+   "cooling_off",
+   "warning"
+  ],
+  "seconds": 16,
+  "p_scam": 0.01060734994359898,
+  "reasons": [
+   "payee_age_days",
+   "call_minutes",
+   "amt_z"
+  ],
+  "senior": true
+ },
+ {
+  "device": "web-new1",
+  "customer": "ramesh",
+  "scenario": "Investment scam",
+  "amount": 20000,
+  "severity": "MEDIUM",
+  "threat": "COACHED",
+  "decision": "steps",
+  "steps": [
+   "warning"
+  ],
+  "seconds": 8,
+  "p_scam": 0.0005697322258538487,
+  "reasons": [
+   "payee_age_days",
+   "payee_risky_category",
+   "amt_z"
+  ],
+  "senior": true
+ },
+ {
+  "device": "web-new1",
+  "customer": "ramesh",
+  "scenario": "Look-alike payee",
+  "amount": 4000,
+  "severity": "HIGH",
+  "threat": "COACHED",
+  "decision": "block",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.09690833483999278,
+  "reasons": [
+   "payee_age_days",
+   "payee_fri",
+   "amt_z"
+  ],
+  "senior": true
+ },
+ {
+  "device": "web-new1",
+  "customer": "ramesh",
+  "scenario": "Fake seller",
+  "amount": 6000,
+  "severity": "LOW",
+  "threat": "NONE",
+  "decision": "allow",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.0,
+  "reasons": [],
+  "senior": true
+ },
+ {
+  "device": "web-new1",
+  "customer": "ramesh",
+  "scenario": "Prize fee",
+  "amount": 3000,
+  "severity": "MEDIUM",
+  "threat": "COACHED",
+  "decision": "allow",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.0005697322258538487,
+  "reasons": [
+   "payee_age_days",
+   "amt_z"
+  ],
+  "senior": true
+ },
+ {
+  "device": "web-new1",
+  "customer": "ramesh",
+  "scenario": "SIM swap + new phone",
+  "amount": 60000,
+  "severity": "CRITICAL",
+  "threat": "UNAUTHORISED",
+  "decision": "block",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.4064748201438849,
+  "reasons": [
+   "payee_age_days"
+  ],
+  "senior": true
+ },
+ {
+  "device": "web-new1",
+  "customer": "ramesh",
+  "scenario": "Remote control",
+  "amount": 30000,
+  "severity": "HIGH",
+  "threat": "UNAUTHORISED",
+  "decision": "block",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.01060734994359898,
+  "reasons": [
+   "payee_age_days",
+   "remote_access_active",
+   "bio_similarity"
+  ],
+  "senior": true
+ },
+ {
+  "device": "web-device",
+  "customer": "kabir",
+  "scenario": "Routine payment",
+  "amount": 300,
+  "severity": "LOW",
+  "threat": "NONE",
+  "decision": "allow",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.0,
+  "reasons": [],
+  "senior": false
+ },
+ {
+  "device": "web-device",
+  "customer": "kabir",
+  "scenario": "New local shop",
+  "amount": 450,
+  "severity": "LOW",
+  "threat": "NONE",
+  "decision": "allow",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.0,
+  "reasons": [],
+  "senior": false
+ },
+ {
+  "device": "web-device",
+  "customer": "kabir",
+  "scenario": "Fake refund",
+  "amount": 9000,
+  "severity": "CRITICAL",
+  "threat": "COACHED",
+  "decision": "block",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.4064748201438849,
+  "reasons": [
+   "payee_age_days",
+   "payee_complaints",
+   "payee_fri"
+  ],
+  "senior": false
+ },
+ {
+  "device": "web-device",
+  "customer": "kabir",
+  "scenario": "Digital arrest",
+  "amount": 20000,
+  "severity": "CRITICAL",
+  "threat": "COACHED",
+  "decision": "block",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.4064748201438849,
+  "reasons": [
+   "payee_age_days",
+   "call_minutes",
+   "amt_z"
+  ],
+  "senior": false
+ },
+ {
+  "device": "web-device",
+  "customer": "kabir",
+  "scenario": "Digital arrest (large)",
+  "amount": 60000,
+  "severity": "CRITICAL",
+  "threat": "COACHED",
+  "decision": "block",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.4064748201438849,
+  "reasons": [
+   "payee_age_days",
+   "call_minutes"
+  ],
+  "senior": false
+ },
+ {
+  "device": "web-device",
+  "customer": "kabir",
+  "scenario": "Investment scam",
+  "amount": 20000,
+  "severity": "MEDIUM",
+  "threat": "COACHED",
+  "decision": "steps",
+  "steps": [
+   "warning"
+  ],
+  "seconds": 8,
+  "p_scam": 0.0005697322258538487,
+  "reasons": [
+   "payee_age_days",
+   "payee_risky_category",
+   "hist_n"
+  ],
+  "senior": false
+ },
+ {
+  "device": "web-device",
+  "customer": "kabir",
+  "scenario": "Look-alike payee",
+  "amount": 4000,
+  "severity": "HIGH",
+  "threat": "COACHED",
+  "decision": "block",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.09690833483999278,
+  "reasons": [
+   "payee_age_days",
+   "payee_fri",
+   "amt_z"
+  ],
+  "senior": false
+ },
+ {
+  "device": "web-device",
+  "customer": "kabir",
+  "scenario": "Fake seller",
+  "amount": 6000,
+  "severity": "LOW",
+  "threat": "NONE",
+  "decision": "allow",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.0,
+  "reasons": [],
+  "senior": false
+ },
+ {
+  "device": "web-device",
+  "customer": "kabir",
+  "scenario": "Prize fee",
+  "amount": 3000,
+  "severity": "MEDIUM",
+  "threat": "COACHED",
+  "decision": "allow",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.0005697322258538487,
+  "reasons": [
+   "payee_age_days",
+   "amt_z",
+   "hour_prob"
+  ],
+  "senior": false
+ },
+ {
+  "device": "web-device",
+  "customer": "kabir",
+  "scenario": "SIM swap + new phone",
+  "amount": 60000,
+  "severity": "CRITICAL",
+  "threat": "UNAUTHORISED",
+  "decision": "block",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.4064748201438849,
+  "reasons": [
+   "payee_age_days"
+  ],
+  "senior": false
+ },
+ {
+  "device": "web-device",
+  "customer": "kabir",
+  "scenario": "Remote control",
+  "amount": 30000,
+  "severity": "HIGH",
+  "threat": "COACHED",
+  "decision": "steps",
+  "steps": [
+   "payee_check",
+   "typed_confirm",
+   "warning"
+  ],
+  "seconds": 22,
+  "p_scam": 0.01060734994359898,
+  "reasons": [
+   "payee_age_days",
+   "outflow_24h_over_balance",
+   "hour_prob"
+  ],
+  "senior": false
+ },
+ {
+  "device": "web-new1",
+  "customer": "kabir",
+  "scenario": "Routine payment",
+  "amount": 300,
+  "severity": "LOW",
+  "threat": "NONE",
+  "decision": "allow",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.0,
+  "reasons": [],
+  "senior": false
+ },
+ {
+  "device": "web-new1",
+  "customer": "kabir",
+  "scenario": "New local shop",
+  "amount": 450,
+  "severity": "LOW",
+  "threat": "NONE",
+  "decision": "allow",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.0,
+  "reasons": [],
+  "senior": false
+ },
+ {
+  "device": "web-new1",
+  "customer": "kabir",
+  "scenario": "Fake refund",
+  "amount": 9000,
+  "severity": "CRITICAL",
+  "threat": "COACHED",
+  "decision": "block",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.4064748201438849,
+  "reasons": [
+   "payee_age_days",
+   "payee_complaints"
+  ],
+  "senior": false
+ },
+ {
+  "device": "web-new1",
+  "customer": "kabir",
+  "scenario": "Digital arrest",
+  "amount": 20000,
+  "severity": "HIGH",
+  "threat": "COACHED",
+  "decision": "steps",
+  "steps": [
+   "payee_check",
+   "typed_confirm",
+   "warning"
+  ],
+  "seconds": 22,
+  "p_scam": 0.01060734994359898,
+  "reasons": [
+   "payee_age_days",
+   "call_minutes",
+   "amt_z"
+  ],
+  "senior": false
+ },
+ {
+  "device": "web-new1",
+  "customer": "kabir",
+  "scenario": "Digital arrest (large)",
+  "amount": 60000,
+  "severity": "HIGH",
+  "threat": "COACHED",
+  "decision": "steps",
+  "steps": [
+   "typed_confirm",
+   "cooling_off",
+   "warning"
+  ],
+  "seconds": 16,
+  "p_scam": 0.01060734994359898,
+  "reasons": [
+   "payee_age_days",
+   "call_minutes",
+   "amt_z"
+  ],
+  "senior": false
+ },
+ {
+  "device": "web-new1",
+  "customer": "kabir",
+  "scenario": "Investment scam",
+  "amount": 20000,
+  "severity": "MEDIUM",
+  "threat": "COACHED",
+  "decision": "steps",
+  "steps": [
+   "warning"
+  ],
+  "seconds": 8,
+  "p_scam": 0.0005697322258538487,
+  "reasons": [
+   "payee_age_days",
+   "payee_risky_category",
+   "amt_z"
+  ],
+  "senior": false
+ },
+ {
+  "device": "web-new1",
+  "customer": "kabir",
+  "scenario": "Look-alike payee",
+  "amount": 4000,
+  "severity": "MEDIUM",
+  "threat": "COACHED",
+  "decision": "steps",
+  "steps": [
+   "warning"
+  ],
+  "seconds": 8,
+  "p_scam": 0.005673335323977307,
+  "reasons": [
+   "payee_age_days",
+   "payee_fri",
+   "amt_z"
+  ],
+  "senior": false
+ },
+ {
+  "device": "web-new1",
+  "customer": "kabir",
+  "scenario": "Fake seller",
+  "amount": 6000,
+  "severity": "LOW",
+  "threat": "NONE",
+  "decision": "allow",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.0,
+  "reasons": [],
+  "senior": false
+ },
+ {
+  "device": "web-new1",
+  "customer": "kabir",
+  "scenario": "Prize fee",
+  "amount": 3000,
+  "severity": "LOW",
+  "threat": "NONE",
+  "decision": "allow",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.0,
+  "reasons": [],
+  "senior": false
+ },
+ {
+  "device": "web-new1",
+  "customer": "kabir",
+  "scenario": "SIM swap + new phone",
+  "amount": 60000,
+  "severity": "CRITICAL",
+  "threat": "UNAUTHORISED",
+  "decision": "block",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.4064748201438849,
+  "reasons": [
+   "payee_age_days"
+  ],
+  "senior": false
+ },
+ {
+  "device": "web-new1",
+  "customer": "kabir",
+  "scenario": "Remote control",
+  "amount": 30000,
+  "severity": "HIGH",
+  "threat": "UNAUTHORISED",
+  "decision": "block",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.01060734994359898,
+  "reasons": [
+   "payee_age_days",
+   "remote_access_active",
+   "bio_similarity"
+  ],
+  "senior": false
+ },
+ {
+  "device": "web-device",
+  "customer": "meera",
+  "scenario": "Routine payment",
+  "amount": 300,
+  "severity": "LOW",
+  "threat": "NONE",
+  "decision": "allow",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.0,
+  "reasons": [],
+  "senior": false
+ },
+ {
+  "device": "web-device",
+  "customer": "meera",
+  "scenario": "New local shop",
+  "amount": 450,
+  "severity": "LOW",
+  "threat": "NONE",
+  "decision": "allow",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.0,
+  "reasons": [],
+  "senior": false
+ },
+ {
+  "device": "web-device",
+  "customer": "meera",
+  "scenario": "Fake refund",
+  "amount": 9000,
+  "severity": "HIGH",
+  "threat": "COACHED",
+  "decision": "steps",
+  "steps": [
+   "typed_confirm",
+   "warning"
+  ],
+  "seconds": 16,
+  "p_scam": 0.01060734994359898,
+  "reasons": [
+   "payee_age_days",
+   "payee_complaints",
+   "payee_fri"
+  ],
+  "senior": false
+ },
+ {
+  "device": "web-device",
+  "customer": "meera",
+  "scenario": "Digital arrest",
+  "amount": 20000,
+  "severity": "MEDIUM",
+  "threat": "COACHED",
+  "decision": "steps",
+  "steps": [
+   "warning"
+  ],
+  "seconds": 8,
+  "p_scam": 0.0005697322258538487,
+  "reasons": [
+   "payee_age_days",
+   "call_minutes"
+  ],
+  "senior": false
+ },
+ {
+  "device": "web-device",
+  "customer": "meera",
+  "scenario": "Investment scam",
+  "amount": 20000,
+  "severity": "LOW",
+  "threat": "NONE",
+  "decision": "allow",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.0,
+  "reasons": [],
+  "senior": false
+ },
+ {
+  "device": "web-device",
+  "customer": "meera",
+  "scenario": "Look-alike payee",
+  "amount": 4000,
+  "severity": "MEDIUM",
+  "threat": "COACHED",
+  "decision": "steps",
+  "steps": [
+   "warning"
+  ],
+  "seconds": 8,
+  "p_scam": 0.005673335323977307,
+  "reasons": [
+   "payee_age_days",
+   "payee_fri"
+  ],
+  "senior": false
+ },
+ {
+  "device": "web-device",
+  "customer": "meera",
+  "scenario": "Fake seller",
+  "amount": 6000,
+  "severity": "LOW",
+  "threat": "NONE",
+  "decision": "allow",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.0,
+  "reasons": [],
+  "senior": false
+ },
+ {
+  "device": "web-device",
+  "customer": "meera",
+  "scenario": "Prize fee",
+  "amount": 3000,
+  "severity": "LOW",
+  "threat": "NONE",
+  "decision": "allow",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.0,
+  "reasons": [],
+  "senior": false
+ },
+ {
+  "device": "web-device",
+  "customer": "meera",
+  "scenario": "Remote control",
+  "amount": 30000,
+  "severity": "MEDIUM",
+  "threat": "COACHED",
+  "decision": "steps",
+  "steps": [
+   "warning"
+  ],
+  "seconds": 8,
+  "p_scam": 0.0005697322258538487,
+  "reasons": [
+   "payee_age_days"
+  ],
+  "senior": false
+ },
+ {
+  "device": "web-new1",
+  "customer": "meera",
+  "scenario": "Routine payment",
+  "amount": 300,
+  "severity": "LOW",
+  "threat": "NONE",
+  "decision": "allow",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.0,
+  "reasons": [],
+  "senior": false
+ },
+ {
+  "device": "web-new1",
+  "customer": "meera",
+  "scenario": "New local shop",
+  "amount": 450,
+  "severity": "LOW",
+  "threat": "NONE",
+  "decision": "allow",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.0,
+  "reasons": [],
+  "senior": false
+ },
+ {
+  "device": "web-new1",
+  "customer": "meera",
+  "scenario": "Fake refund",
+  "amount": 9000,
+  "severity": "HIGH",
+  "threat": "COACHED",
+  "decision": "steps",
+  "steps": [
+   "typed_confirm",
+   "warning"
+  ],
+  "seconds": 16,
+  "p_scam": 0.01060734994359898,
+  "reasons": [
+   "payee_age_days",
+   "payee_complaints",
+   "payee_fri"
+  ],
+  "senior": false
+ },
+ {
+  "device": "web-new1",
+  "customer": "meera",
+  "scenario": "Digital arrest",
+  "amount": 20000,
+  "severity": "LOW",
+  "threat": "NONE",
+  "decision": "allow",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.0,
+  "reasons": [],
+  "senior": false
+ },
+ {
+  "device": "web-new1",
+  "customer": "meera",
+  "scenario": "Investment scam",
+  "amount": 20000,
+  "severity": "LOW",
+  "threat": "NONE",
+  "decision": "allow",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.0,
+  "reasons": [],
+  "senior": false
+ },
+ {
+  "device": "web-new1",
+  "customer": "meera",
+  "scenario": "Look-alike payee",
+  "amount": 4000,
+  "severity": "MEDIUM",
+  "threat": "COACHED",
+  "decision": "steps",
+  "steps": [
+   "warning"
+  ],
+  "seconds": 8,
+  "p_scam": 0.005673335323977307,
+  "reasons": [
+   "payee_age_days"
+  ],
+  "senior": false
+ },
+ {
+  "device": "web-new1",
+  "customer": "meera",
+  "scenario": "Fake seller",
+  "amount": 6000,
+  "severity": "LOW",
+  "threat": "NONE",
+  "decision": "allow",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.0,
+  "reasons": [],
+  "senior": false
+ },
+ {
+  "device": "web-new1",
+  "customer": "meera",
+  "scenario": "Prize fee",
+  "amount": 3000,
+  "severity": "LOW",
+  "threat": "NONE",
+  "decision": "allow",
+  "steps": [],
+  "seconds": 0.0,
+  "p_scam": 0.0,
+  "reasons": [],
+  "senior": false
+ },
+ {
+  "device": "web-new1",
+  "customer": "meera",
+  "scenario": "Remote control",
+  "amount": 30000,
+  "severity": "MEDIUM",
+  "threat": "COACHED",
+  "decision": "steps",
+  "steps": [
+   "warning"
+  ],
+  "seconds": 8,
+  "p_scam": 0.0005697322258538487,
+  "reasons": [
+   "payee_age_days"
+  ],
+  "senior": false
+ }
+]

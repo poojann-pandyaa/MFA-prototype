@@ -1,0 +1,12 @@
+# DemoPay backend. The risk model is imported from ../../backend/ato (the existing project), which needs numpy, scikit-learn and joblib.
+fastapi
+uvicorn[standard]
+sqlalchemy
+pydantic>=2
+bcrypt
+pyjwt
+numpy<2
+scikit-learn>=1.5,<1.7
+joblib
+pytest
+httpx

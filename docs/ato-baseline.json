@@ -1,0 +1,30 @@
+{
+ "note": "Takeover-only model baseline, frozen before the combined model. Synthetic data; test = days 120-150.",
+ "features": 33,
+ "budgets": {
+  "MEDIUM": 0.02,
+  "HIGH": 0.003,
+  "CRITICAL": 0.0005
+ },
+ "full": {
+  "pr_auc": 0.9309,
+  "legit_hit_HIGH": 0.00218,
+  "incidents_caught_HIGH": 0.9926,
+  "first_payment_caught_HIGH": 0.9118,
+  "rupees_saved_HIGH": 0.9971
+ },
+ "server_only": {
+  "pr_auc": 0.8827,
+  "legit_hit_HIGH": 0.00194,
+  "incidents_caught_HIGH": 0.9779,
+  "first_payment_caught_HIGH": 0.8309,
+  "rupees_saved_HIGH": 0.962
+ },
+ "rules": {
+  "pr_auc": 0.3783,
+  "legit_hit_HIGH": 0.00248,
+  "incidents_caught_HIGH": 0.6471,
+  "first_payment_caught_HIGH": 0.5221,
+  "rupees_saved_HIGH": 0.6902
+ }
+}

@@ -26,3 +26,4 @@ onnx>=1.18
 # time. Its own code runs fine on protobuf 5.x, so install it separately,
 # without its dependencies, when you need to run the export:
 #     pip install --no-deps tf2onnx
+reportlab<4.3  # builds the evidence PDF (tools/build_evidence_pdf.py)

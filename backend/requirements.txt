@@ -25,3 +25,6 @@ mediapipe==0.10.35
 # weights to ONNX - see backend/anti_spoofing/export_onnx.py. The server
 # runs that model via onnxruntime instead, which is lighter and faster to
 # start (no PyTorch import in the request path).
+# Account-takeover model (backend/ato): trained with and served by sklearn's HistGradientBoosting
+scikit-learn>=1.5,<1.7
+joblib

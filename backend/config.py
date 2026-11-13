@@ -100,3 +100,7 @@ CORS_ALLOW_ORIGINS = [
     ).split(",")
     if o.strip()
 ]
+
+# Account-takeover model (ato/): in shadow mode /txn/risk scores and logs but always allows the
+# payment, so you can collect real outcomes before turning friction on. Enable with MFA_ATO_SHADOW=1.
+ATO_SHADOW = os.environ.get("MFA_ATO_SHADOW", "0").lower() in ("1", "true", "yes")
