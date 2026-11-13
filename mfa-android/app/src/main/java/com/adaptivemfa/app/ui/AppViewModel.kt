@@ -1,18 +1,17 @@
 package com.adaptivemfa.app.ui
 
-import android.app.Application
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.adaptivemfa.app.data.Api
 import com.adaptivemfa.app.data.ApiException
 import com.adaptivemfa.app.data.HistoryItem
+import com.adaptivemfa.app.data.Settings
 import com.adaptivemfa.app.data.Step1Result
-import com.adaptivemfa.app.data.Store
-import com.adaptivemfa.app.data.UrlConnectionHttp
 import com.adaptivemfa.app.logic.normalizeBaseUrl
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -26,9 +25,11 @@ sealed interface Screen {
     data object Settings : Screen
 }
 
-class AppViewModel(app: Application) : AndroidViewModel(app) {
-    val store = Store(app)
-    private val api = Api(UrlConnectionHttp(), { store.baseUrl }, { store.deviceId })
+class AppViewModel(
+    val store: Settings,
+    private val api: Api,
+    private val io: CoroutineDispatcher = Dispatchers.IO,
+) : ViewModel() {
 
     var screen by mutableStateOf<Screen>(if (store.token != null) Screen.Dashboard else Screen.Login)
         private set
@@ -88,7 +89,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun login(user: String, password: String) = run {
         val u = user.trim()
-        when (val r = withContext(Dispatchers.IO) { api.loginStep1(u, password) }) {
+        when (val r = withContext(io) { api.loginStep1(u, password) }) {
             is Step1Result.LoggedIn -> signedIn(u, r.accessToken, "Signed in with your password only: ${r.riskScore} risk (known device).")
             is Step1Result.FaceCheckRequired -> go(Screen.FaceCheck(u, r.sessionId, r.challengeType, r.riskScore))
         }
@@ -99,7 +100,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val s = screen as? Screen.FaceCheck ?: return
         run {
             val token = try {
-                withContext(Dispatchers.IO) { api.loginStep2(s.username, s.sessionId, frames) }
+                withContext(io) { api.loginStep2(s.username, s.sessionId, frames) }
             } catch (e: ApiException) {
                 // The server uses up the session on every attempt, so a retry needs a fresh step 1.
                 go(Screen.Login)
@@ -111,7 +112,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun enroll(user: String, password: String, faceDataUrl: String) = run {
         val u = user.trim()
-        val token = withContext(Dispatchers.IO) { api.enroll(u, password, faceDataUrl) }
+        val token = withContext(io) { api.enroll(u, password, faceDataUrl) }
         signedIn(u, token, "Account created. Your next login from this phone will ask for a face check once.")
     }
 
@@ -122,7 +123,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     private suspend fun loadHistory(token: String) {
         try {
-            history = withContext(Dispatchers.IO) { api.history(token) }
+            history = withContext(io) { api.history(token) }
         } catch (e: ApiException) {
             if (e.status == 401) {
                 logout()
@@ -152,7 +153,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun testConnection(input: String) {
         if (!saveBaseUrl(input)) return
         run {
-            withContext(Dispatchers.IO) { api.ping() }
+            withContext(io) { api.ping() }
             notice = "Connected to ${store.baseUrl}"
         }
     }

@@ -6,6 +6,11 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
+import com.adaptivemfa.app.data.Api
+import com.adaptivemfa.app.data.Store
+import com.adaptivemfa.app.data.UrlConnectionHttp
 import com.adaptivemfa.app.ui.AppViewModel
 import com.adaptivemfa.app.ui.DashboardScreen
 import com.adaptivemfa.app.ui.EnrollScreen
@@ -16,7 +21,14 @@ import com.adaptivemfa.app.ui.Screen
 import com.adaptivemfa.app.ui.SettingsScreen
 
 class MainActivity : ComponentActivity() {
-    private val vm: AppViewModel by viewModels()
+    private val vm: AppViewModel by viewModels {
+        viewModelFactory {
+            initializer {
+                val store = Store(applicationContext)
+                AppViewModel(store, Api(UrlConnectionHttp(), { store.baseUrl }, { store.deviceId }))
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()

@@ -39,11 +39,10 @@ class ApiException(val status: Int, override val message: String) : Exception(me
 
 /** FastAPI errors look like {"detail": "text"} or {"detail": [validation problems]}. */
 fun parseError(status: Int, body: String): ApiException = try {
-    when (val d = JSONObject(body).opt("detail")) {
-        is String -> ApiException(status, d)
-        is JSONArray -> ApiException(status, (0 until d.length()).joinToString("; ") { d.getJSONObject(it).optString("msg", "invalid") })
-        else -> ApiException(status, "Request failed ($status)")
-    }
+    val d: Any? = JSONObject(body).opt("detail")
+    if (d is String) ApiException(status, d)
+    else if (d is JSONArray) ApiException(status, (0 until d.length()).joinToString("; ") { d.getJSONObject(it).optString("msg", "invalid") })
+    else ApiException(status, "Request failed ($status)")
 } catch (e: Exception) {
     ApiException(status, "Request failed ($status)")
 }

@@ -12,7 +12,8 @@ All biometric work stays on the server: face detection (MediaPipe), anti-spoofin
 | App name | Adaptive MFA |
 | Version | 1.0.0 (versionCode 1) |
 | Min SDK | 26 (Android 8.0) |
-| Target / compile SDK | 36 |
+| Target SDK | 36 (Android 16) |
+| Compile SDK | 37 (required by Compose 1.12) |
 | Language / UI | Kotlin, Jetpack Compose (Material 3), CameraX 1.6.2 |
 | Build tools | Android Gradle Plugin 9.5.1, Gradle 9.7.1 (wrapper included), JDK 17+ (Android Studio's bundled JDK works) |
 | Permissions | `INTERNET`, `CAMERA` |
@@ -41,6 +42,18 @@ $env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"
 .\gradlew.bat :app:testDebugUnitTest     # unit tests, no device needed
 .\gradlew.bat :app:assembleDebug         # app\build\outputs\apk\debug\app-debug.apk
 ```
+
+## Tests
+
+| Kind | Where | Command | What it covers |
+|---|---|---|---|
+| Unit (JVM) | `src/test/.../ApiTest.kt`, `LogicTest.kt`, `AppViewModelTest.kt` | `gradlew :app:testDebugUnitTest` | Request/response contract for every endpoint, error messages, burst constants, data URLs, address cleanup; every ViewModel flow (low-risk login, face check pass/fail, enroll, expired token, settings, navigation) |
+| Integration (JVM, real HTTP) | `src/test/.../BackendIntegrationTest.kt` | same command | The real network stack against a local server that follows `backend/main.py`'s rules: enroll, HIGH-risk login with face check, then LOW-risk login; session is single use and bound to the device; forged token refused; server down |
+| UI (emulator or phone) | `src/androidTest/.../AppUiTest.kt` | `gradlew :app:connectedDebugAndroidTest` (start an emulator first) | The installed app: login button rules, enroll password check and photo requirement, settings address validation, unreachable-server message |
+
+Last run: 37 JVM tests and 4 UI tests passed (UI tests on the Android 17 / API 37 emulator). The camera was also checked by hand on the emulator: a photo is captured, rotated and shown on the Enroll screen.
+
+The full flow against the **real** Python backend (actual face matching) is not automated: it needs the backend running with `models/arcface/arcface.onnx` and a real face in front of the camera.
 
 If Gradle cannot find the SDK, create `local.properties` here with `sdk.dir=C\:\\Users\\<you>\\AppData\\Local\\Android\\Sdk` (Android Studio does this on first open).
 
