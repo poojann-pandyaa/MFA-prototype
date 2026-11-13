@@ -1,0 +1,14 @@
+.gradle/
+build/
+local.properties
+*.iml
+.idea/
+captures/
+.externalNativeBuild/
+.cxx/
+.kotlin/
+# Files the VS Code / Eclipse Java extension creates
+.project
+.settings/
+.classpath
+bin/

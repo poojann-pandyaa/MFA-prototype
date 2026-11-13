@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Shield with a face outline: password + face. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,22 L80,32 L80,54 C80,69 69,80 54,86 C39,80 28,69 28,54 L28,32 Z" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#2563EB"
+        android:strokeWidth="4"
+        android:pathData="M54,38 C61,38 65,44 65,51 C65,59 60,66 54,66 C48,66 43,59 43,51 C43,44 47,38 54,38 Z" />
+    <path
+        android:fillColor="#2563EB"
+        android:pathData="M49,49 m-2,0 a2,2 0,1 1,4 0 a2,2 0,1 1,-4 0 M59,49 m-2,0 a2,2 0,1 1,4 0 a2,2 0,1 1,-4 0" />
+</vector>

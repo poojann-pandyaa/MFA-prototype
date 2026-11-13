@@ -205,24 +205,7 @@ The app ships with a pretrained, vendored anti-spoofing model (now served via ON
 
 ## Running on Android
 
-The frontend is a standard React SPA, so the lowest-friction path to an Android build is wrapping it with [Capacitor](https://capacitorjs.com/) rather than writing a second native client:
-
-```bash
-cd frontend
-npm install @capacitor/core @capacitor/android
-npx cap init "Adaptive MFA" "com.example.adaptivemfa" --web-dir=dist
-npm run build
-npx cap add android
-npx cap sync android
-npx cap open android   # opens Android Studio
-```
-
-Notes:
-*   `react-webcam` (already used by `CameraCapture.jsx`) works inside Capacitor's WebView via `getUserMedia`, so no camera-plugin rewrite should be needed for the web camera flow to work as-is.
-*   Add the `android.permission.CAMERA` and `android.permission.INTERNET` permissions in `android/app/src/main/AndroidManifest.xml`.
-*   Point `API_URL` (currently derived from `window.location.hostname` in `Login.jsx`/`Enroll.jsx`/`Dashboard.jsx`) at your backend's real, reachable address - `localhost` won't resolve from inside the Android WebView/emulator.
-*   This has **not** been built or run in this pass - there's no Android SDK/emulator in the environment this was developed in. The steps above are the intended path, not a verified one; the actual native build and camera-permission flow still need to be exercised on a real device or emulator.
-*   Once the `ml/` PAD model is trained and exported to ONNX, the same file runs on Android via `onnxruntime-react-native` (or plain `onnxruntime-android` if a fully native client is built later) - no separate mobile-specific conversion needed, since ONNX is the one artifact shared across server, web, and Android.
+`mfa-android/` is a native Android app (Kotlin, Jetpack Compose, CameraX) for this backend: enrollment with a face photo, adaptive login, the step-2 blink/head-turn challenge (same 13-frame burst as the web client) and the login history. Face detection, anti-spoofing and matching stay on the server. Build, SDK details, test login and how to point it at the backend: see `mfa-android/README.md`.
 
 
 ## Payment risk model (`backend/ato/`)
