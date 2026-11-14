@@ -356,7 +356,7 @@ def initiate(body: InitiateTxn, request: Request,
                         "escalate": plan.escalate, "rulesBaseline": [f.value for f in plan.rulesBaseline],
                         "agentAdded": [f.value for f in plan.agentAdded],
                         "orgAdded": [f.value for f in plan.orgAdded],
-                        "customerNotice": customer_notice(plan, body.type)}
+                        "customerNotice": customer_notice(plan, body.type, assembled.features)}
         if sess.status == orchestrator.PENDING:
             view["challengeUrl"] = f"{config.get().public_url}/hosted/challenge?t={tenant.slug}#token={client_token}"
             view["clientToken"] = client_token

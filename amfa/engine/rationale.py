@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Optional
+
 from .context import Appetite, Band, Context, Plan, Segment, TxnType
 
 SIGNALS = [
@@ -74,10 +76,28 @@ SCAM_WARNING_FROM = "T2"
 MONEY_TYPES = {TxnType.TRANSFER, TxnType.PAYMENT, TxnType.CARD_NOT_PRESENT}
 
 
-def customer_notice(plan: Plan, txn_type: TxnType) -> dict:
+def _holds(key: str, f: dict) -> bool:
+    """Is the reason true of this customer's numbers? (A missing value proves nothing, so it supports no reason.)"""
+    v = f.get(key)
+    if v is None:
+        return False
+    return {
+        "amount_ratio": v >= 2, "amount_vs_max": v >= 1, "amount_24h_ratio": v >= 2, "amount_vs_payee_avg": v >= 2,
+        "velocity_1h": v >= 3, "velocity_24h": v >= 5, "new_payees_24h": v >= 1,
+        "payee_seen": v == 0, "payee_age_days": v < 30, "device_seen": v == 0, "device_age_days": v < 7,
+        "network_seen": v == 0, "place_seen": v == 0, "place_changed": v == 1, "country_changed": v == 1,
+        "hour_deviation": v >= 3, "is_night": v == 1,
+        "sim_changed_hours": v < 48, "contact_changed_hours": v < 24, "password_reset_hours": v < 24,
+    }.get(key, True)
+
+
+def customer_notice(plan: Plan, txn_type: TxnType, features: Optional[dict] = None) -> dict:
     """What the customer sees before the checks: a plain reason and, for riskier payments, a scam
     warning. Never the score, the threat level or the thresholds."""
-    why = list(dict.fromkeys(CUSTOMER_REASONS[k] for k, _ in plan.riskReasons if k in CUSTOMER_REASONS))
+    # The model names its strongest contributions even for a routine payment, and "strongest" is relative: a payee paid
+    # for two years can still top the list. Say a reason only if the customer's own numbers support it.
+    why = list(dict.fromkeys(CUSTOMER_REASONS[k] for k, _ in plan.riskReasons
+                             if k in CUSTOMER_REASONS and (features is None or _holds(k, features))))
     reason = ("We need a quick extra check because " + " and ".join(why[:2]) + "." if why
               else "This is a routine check to keep your account safe.")
     warn = txn_type in MONEY_TYPES and (plan.scamRisk or (plan.threatLevel is not None
