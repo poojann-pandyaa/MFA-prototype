@@ -14,7 +14,7 @@ from amfa.engine.decide import decide
 
 # what a check costs the customer: a code is a few seconds, a typing check is nearly invisible, a face or voice
 # check is a deliberate step, and a person looking at it is a wait
-FRICTION = {Factor.OTP: 1.0, Factor.UEBA: 0.5, Factor.FACE: 2.0, Factor.VOICE: 2.0}
+FRICTION = {Factor.OTP: 1.0, Factor.DEVICE: 0.5, Factor.UEBA: 0.5, Factor.FACE: 2.0, Factor.VOICE: 2.0}
 REVIEW_FRICTION = 4.0
 LEVELS = ["LOW", "MEDIUM", "HIGH", "CRITICAL"]
 

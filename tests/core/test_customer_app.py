@@ -886,3 +886,173 @@ def test_a_bank_cannot_set_a_maximum_above_the_platform_ceiling(stack):
         base = s.get(db.Tenant, stack.tenant["id"]).policy
     with pytest.raises(ValidationError):
         TenantPolicy.model_validate({**base, "customerBypass": {"enabled": True, "maxMinor": 99_999_999}})
+
+
+# ---- the learning phase: a new customer confirms payments with the phone's own fingerprint or screen lock ----------
+
+SCORE = {"now": 0.02}
+
+
+def _device_pair():
+    from cryptography.hazmat.primitives.asymmetric import ec
+    key = ec.generate_private_key(ec.SECP256R1())
+    n = key.public_key().public_numbers()
+    b = lambda v: crypto.b64e(v.to_bytes(32, "big"))
+    return key, {"kty": "EC", "crv": "P-256", "x": b(n.x), "y": b(n.y)}
+
+
+def _sign(key, message: str, wrong=False):
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
+    r, s = decode_dss_signature(key.sign(message.encode() + (b"x" if wrong else b""), ec.ECDSA(hashes.SHA256())))
+    return crypto.b64e(r.to_bytes(32, "big") + s.to_bytes(32, "big"))
+
+
+def _policy_patch(stack, **changes):
+    with db.session() as s:
+        t = s.get(db.Tenant, stack.tenant["id"])
+        t.policy = {**(t.policy or {}), **changes}
+
+
+@pytest.fixture
+def learning(stack, app, monkeypatch):
+    """Learning phase on, with DEVICE a permitted factor, and the new customer's phone holding a key."""
+    from amfa.engine.risk import scorer as sc
+    monkeypatch.setattr(sc, "active", lambda: SimpleNamespace(score=lambda f: sc.Result(
+        score=SCORE["now"], raw=SCORE["now"], level=LEVEL["now"], reasons=[("amount_ratio", .5)], version="stub")))
+    SCORE["now"], LEVEL["now"] = 0.02, "T3"        # a model that is wary of an unknown customer
+    old = None
+    with db.session() as s:
+        old = dict(s.get(db.Tenant, stack.tenant["id"]).policy or {})
+    _policy_patch(stack, learning={"enabled": True}, permittedFactors=["OTP", "DEVICE", "UEBA", "FACE", "VOICE"])
+    key, jwk = _device_pair()
+    cid = stack.bank.CUSTOMERS[app.user]["amfaUser"]
+    with db.session() as s:
+        for f in ("FACE", "VOICE", "UEBA"):                      # the `app` fixture enrols everything; a new customer has none yet
+            for e in s.execute(select(db.Enrollment).where(db.Enrollment.customer_id == cid, db.Enrollment.factor == f)).scalars():
+                s.delete(e)
+        s.add(db.Device(customer_id=cid, device_key=context_device_key(stack, PHONE_DEVICE), public_jwk=jwk, verified_count=1, platform="web"))
+    app.key = key
+    yield app
+    _policy_patch(stack, **{k: old[k] for k in ("learning", "permittedFactors") if k in old}) if old else None
+    with db.session() as s:
+        t = s.get(db.Tenant, stack.tenant["id"])
+        p = dict(t.policy)
+        p.pop("learning", None)
+        p.pop("permittedFactors", None)
+        t.policy = p
+
+
+def context_device_key(stack, device):
+    from amfa.core.context_builder import device_key
+    return device_key(stack.tenant["id"], device)
+
+
+def _run(stack, app, started, wrong=False):
+    """Answer every check the way a phone would: the key signs the device challenge, codes are read from the delivery."""
+    token = started["challengeUrl"].split("#token=", 1)[1]
+    auth = {"authorization": f"Bearer {token}"}
+    results = []
+    for _ in range(6):
+        ch = stack.core.get("/c/v1/session", headers=auth).json()["challenge"]
+        if ch is None:
+            break
+        if ch["factor"] == "DEVICE":
+            payload = {"signature": _sign(app.key, ch["params"]["message"], wrong)}
+        elif ch["factor"] == "OTP":
+            payload = {"code": re.match(r"(\d+)", SENT[-1]).group(1)}
+        else:
+            payload = {}
+        r = stack.core.post(f"/c/v1/session/factors/{ch['factor']}", headers=auth,
+                            json={"challengeId": ch["challengeId"], "payload": payload})
+        results.append((ch["factor"], r.status_code, r.json().get("result", {}).get("status")))
+        if r.status_code != 200:
+            break
+    return results
+
+
+def test_a_new_customer_pays_with_only_the_phones_fingerprint(stack, learning):
+    app = learning
+    before = balance(app)
+    started = act(app, "transfer", payeeRef="BEN-42", amountRupees=1500).json()
+    assert started["action"]["checks"] == ["fingerprint or screen lock"]        # no face, no voice, no typing, not even a code
+    assert _run(stack, app, started) == [("DEVICE", 200, "PASSED")]
+    done = app.post(f"/api/actions/{started['action']['id']}/complete").json()
+    assert done["action"]["status"] == "DONE" and done["balance"] == before - 1500_00
+    assert "Fingerprint or screen lock" in done["action"]["confirmedWith"]
+
+
+def test_a_wrong_signature_does_not_pass_and_three_of_them_end_the_attempt(stack, learning):
+    app = learning
+    before = balance(app)
+    started = act(app, "transfer", payeeRef="BEN-42", amountRupees=1500).json()
+    results = _run(stack, app, started, wrong=True)
+    assert len(results) == 2 and results[-1][2] == "FAILED" and "PASSED" not in [r[2] for r in results]   # one retry, then it ends
+    out = app.post(f"/api/actions/{started['action']['id']}/complete").json()
+    assert out["action"]["status"] != "DONE" and balance(app) == before
+
+
+def test_a_payment_beyond_the_learning_limits_also_needs_a_code(stack, learning):
+    app = learning
+    started = act(app, "transfer", payeeRef="BEN-42", amountRupees=30_000).json()
+    assert set(started["action"]["checks"]) == {"fingerprint or screen lock", "one-time code"}
+    assert [r[2] for r in _run(stack, app, started)] == ["PASSED", "PASSED"]
+    assert app.post(f"/api/actions/{started['action']['id']}/complete").json()["action"]["status"] == "DONE"
+
+
+def test_while_learning_no_face_or_voice_is_asked_even_when_the_model_is_wary(stack, learning):
+    app = learning
+    for amount in (1500, 12_000, 30_000):
+        a = act(app, "transfer", payeeRef="BEN-42", amountRupees=amount).json()["action"]
+        assert "face check" not in a["checks"] and "voice check" not in a["checks"], (amount, a["checks"])
+
+
+def test_a_payment_the_model_is_nearly_sure_is_fraud_is_held_for_a_person(stack, learning):
+    app = learning
+    SCORE["now"] = 0.8
+    a = act(app, "transfer", payeeRef="BEN-42", amountRupees=1500).json()["action"]
+    assert a["reviewAfter"]
+
+
+def test_a_fraud_report_sends_the_customer_back_to_the_start(stack, learning):
+    from amfa.core import phase
+    cid = stack.bank.CUSTOMERS[learning.user]["amfaUser"]
+    with db.session() as s:
+        row = phase.ensure(s, s.get(db.Customer, cid))
+        row.phase, row.ready_since, row.verified_payments = "READY", time.time(), 30
+    LEVEL["now"] = "T1"
+    started = act(learning, "transfer", payeeRef="BEN-42", amountRupees=1500).json()
+    assert "one-time code" in started["action"]["checks"]                       # ready: the model decides, no longer the light plan
+    _run(stack, learning, started)
+    learning.post(f"/api/actions/{started['action']['id']}/complete").raise_for_status()
+    learning.post(f"/api/actions/{started['action']['id']}/report", json={"reason": "not me"}).raise_for_status()
+    with db.session() as s:
+        assert s.get(db.CustomerPhase, cid).phase == "LEARNING"
+
+
+def test_the_customer_learns_from_each_verified_payment(stack, learning):
+    cid = stack.bank.CUSTOMERS[learning.user]["amfaUser"]
+    for _ in range(2):
+        started = act(learning, "transfer", payeeRef="BEN-42", amountRupees=1500).json()
+        _run(stack, learning, started)
+        learning.post(f"/api/actions/{started['action']['id']}/complete").raise_for_status()
+    with db.session() as s:
+        row = s.get(db.CustomerPhase, cid)
+        assert row.verified_payments == 2 and row.phase == "LEARNING" and len(row.evidence["logs"]) == 2
+
+
+def test_the_bank_can_show_how_far_the_model_is_from_knowing_the_customer(stack, learning):
+    me = learning.get("/api/me", params={"deviceId": PHONE_DEVICE}).json()
+    assert me["learning"]["phase"] == "LEARNING" and me["learning"]["progress"]["moreAtLeast"] > 0
+    assert me["learning"]["offerBiometrics"] is False
+    started = act(learning, "transfer", payeeRef="BEN-42", amountRupees=1500).json()
+    _run(stack, learning, started)
+    learning.post(f"/api/actions/{started['action']['id']}/complete").raise_for_status()
+    after = learning.get("/api/me", params={"deviceId": PHONE_DEVICE}).json()["learning"]
+    assert after["verifiedPayments"] == 1 and after["progress"]["payments"] == 1
+
+
+def test_the_phones_own_key_is_listed_among_the_ways_the_customer_can_confirm(stack, learning):
+    me = learning.get("/api/me", params={"deviceId": PHONE_DEVICE}).json()
+    assert "Fingerprint or screen lock" in me["protection"]["have"] and "Fingerprint or screen lock" not in me["protection"]["canAdd"]

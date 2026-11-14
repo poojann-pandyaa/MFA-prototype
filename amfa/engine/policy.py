@@ -84,6 +84,18 @@ class CustomerBypass(BaseModel):
     coolingOffHours: int = Field(default=24, ge=0, le=168)
 
 
+class LearningPolicy(BaseModel):
+    """New customers: until the model knows them (see engine/risk/readiness.py) they confirm payments with the phone's own
+    fingerprint or screen lock, not a face or voice check, and these limits and the hard warning signs are the safety net."""
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = False
+    dailyLimitMinor: int = Field(default=25_000_00, ge=1)        # everything sent in 24 h, this payment included
+    newPayeeLimitMinor: int = Field(default=10_000_00, ge=1)     # a first payment to a payee
+    # a fingerprint-unlocked device key is the phone plus the person: count it as two of the two-factor minimum
+    deviceCountsAsTwoFactors: bool = True
+    offerBiometricsAfter: int = Field(default=5, ge=1, le=100)   # verified payments before face/voice setup is offered, optionally
+
+
 class TxnRule(BaseModel):
     model_config = ConfigDict(extra="forbid")
     type: TxnType
@@ -193,9 +205,13 @@ class TenantPolicy(BaseModel):
     # small payments within a customer's usual never go above the lightest extra check, unless a hard
     # warning sign is present; "small" is the LOW amount band above
     smallPaymentCap: bool = True
+    # a payment that is routine for this customer (see threat.is_routine) is not treated as high-value for the bank's high-value
+    # floor, so a weekly lakh to the same wholesaler does not need three factors every week; the legal minimum still applies
+    routineEasesHighValue: bool = True
     # strongest automated checks instead of a person, except for hard-hold signs; False restores "high risk -> review"
     lowTouch: bool = True
     customerBypass: CustomerBypass = Field(default_factory=CustomerBypass)
+    learning: LearningPolicy = Field(default_factory=LearningPolicy)
     deviceTrustDays: int = Field(default=0, ge=0, le=90)
     dormancyDays: int = Field(default=180, ge=30, le=1095)
     quietHours: QuietHours = Field(default_factory=QuietHours)
@@ -210,7 +226,7 @@ class TenantPolicy(BaseModel):
     @classmethod
     def dynamic_required(cls, v):
         v = list(dict.fromkeys(v))
-        if Factor.OTP not in v and not (Factor.FACE in v or Factor.VOICE in v):
+        if Factor.OTP not in v and not (Factor.FACE in v or Factor.VOICE in v or Factor.DEVICE in v):
             raise ValueError("without OTP, FACE or VOICE must be permitted as the dynamic factor")
         return v
 
@@ -328,5 +344,6 @@ class TenantPolicy(BaseModel):
                      required=[f for f in dict.fromkeys(required) if f in permitted],
                      agentMaxAdditions=self.agent.maxAdditions if self.agent.enabled else 0,
                      reviewOnAnyUnmet=self.reviewOnAnyUnmet, lowValueExempt=exempt and floor is ActionFloor.L1,
-                     neverReview=never_review)
+                     neverReview=never_review,
+                     deviceCountsTwo=self.learning.deviceCountsAsTwoFactors and Factor.DEVICE in permitted)
         return floor, org

@@ -53,6 +53,9 @@ store = store_for("ueba")
 guard = ReplayGuard(store, same=lambda a, b: float(np.mean(np.abs(a - b))) < REPLAY_MEAN_ABS_MS)
 _state: dict[str, Any] = {}
 
+# behaviour history older than the bank's retention window (90 days) is neither read nor kept
+RETENTION_S = config.get().retention_days * 86_400.0
+
 _md = MetaData()
 events_t = Table(
     "ueba_event", _md,
@@ -448,7 +451,8 @@ def _history(tenant: str, user: str) -> tuple[list[dict], list[dict]]:
     import json as _json
     with store.engine.connect() as c:
         ev = c.execute(select(events_t).where(events_t.c.tenant_id == tenant,
-                                              events_t.c.user_id == user)
+                                              events_t.c.user_id == user,
+                                              events_t.c.occurred_at >= time.time() - RETENTION_S)
                        .order_by(events_t.c.occurred_at).limit(2000)).mappings().all()
         ss = c.execute(select(sessions_t.c.features).where(sessions_t.c.tenant_id == tenant,
                                                            sessions_t.c.user_id == user)
@@ -525,7 +529,12 @@ def risk_preview(req: TxnFacts) -> dict:
 def record(req: TxnFacts) -> dict:
     import json as _json
     occurred = (req.occurredAt or datetime.now(timezone.utc)).timestamp()
+    oldest = time.time() - RETENTION_S
     with store.engine.begin() as c:
+        c.execute(delete(events_t).where(events_t.c.tenant_id == req.tenantId, events_t.c.user_id == req.userId,
+                                         events_t.c.occurred_at < oldest))
+        c.execute(delete(sessions_t).where(sessions_t.c.tenant_id == req.tenantId, sessions_t.c.user_id == req.userId,
+                                           sessions_t.c.at < oldest))
         c.execute(insert(events_t).values(
             tenant_id=req.tenantId, user_id=req.userId, action=req.action.value,
             amount=req.amount, payee_key=req.payeeKey, device_key=req.deviceKey,

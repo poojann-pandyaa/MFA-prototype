@@ -53,6 +53,8 @@ class Settings:
     voice_url: str = "http://127.0.0.1:8102"
     ueba_url: str = "http://127.0.0.1:8103"
     factor_timeout_s: float = 20.0
+    # transactions (and what is derived from them) older than this are deleted; the risk model reads at most 90 days anyway
+    retention_days: int = 90
 
     agent_backend: str = "local"
     local_model: Path = ROOT / "models" / "llm" / "qwen2.5-3b-instruct-q4_k_m.gguf"
@@ -186,6 +188,7 @@ def load() -> Settings:
         voice_url=_env("AMFA_VOICE_URL", "http://127.0.0.1:8102"),
         ueba_url=_env("AMFA_UEBA_URL", "http://127.0.0.1:8103"),
         factor_timeout_s=float(_env("AMFA_FACTOR_TIMEOUT_S", "20")),
+        retention_days=max(1, int(_env("AMFA_RETENTION_DAYS", "90"))),
         agent_backend=(_env("AMFA_AGENT_BACKEND", "local") or "local").lower(),
         local_model=Path(_env("AMFA_LOCAL_MODEL",
                               str(models_dir / "llm" / "qwen2.5-3b-instruct-q4_k_m.gguf"))),

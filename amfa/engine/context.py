@@ -22,6 +22,9 @@ class Factor(str, Enum):
     UEBA = "UEBA"
     FACE = "FACE"
     VOICE = "VOICE"
+    # the phone proves itself: a key in its secure hardware, unlocked by the phone's own fingerprint or screen lock, signs a fresh
+    # challenge. Possession plus the person who unlocked it, with nothing to set up beyond the phone itself.
+    DEVICE = "DEVICE"
 
 
 class ActionFloor(str, Enum):
@@ -39,7 +42,7 @@ def max_floor(*floors: Optional[ActionFloor]) -> ActionFloor:
     return max(present, key=FLOOR_ORDER.index) if present else ActionFloor.L2
 
 
-FRICTION_ORDER = [Factor.OTP, Factor.UEBA, Factor.FACE, Factor.VOICE]
+FRICTION_ORDER = [Factor.OTP, Factor.DEVICE, Factor.UEBA, Factor.FACE, Factor.VOICE]
 
 FLOOR_MINIMUM = {ActionFloor.L1: 1, ActionFloor.L2: 2, ActionFloor.L3: 3, ActionFloor.L4: 99}
 
@@ -49,7 +52,15 @@ CHALLENGE_BIOMETRICS = [Factor.FACE, Factor.VOICE]
 
 
 def dynamic_factors(permitted) -> list:
-    return [Factor.OTP] if Factor.OTP in permitted else [f for f in CHALLENGE_BIOMETRICS if f in permitted]
+    """The factors that answer a fresh challenge, so a replayed answer proves nothing."""
+    own = [f for f in (Factor.OTP, Factor.DEVICE) if f in permitted]
+    return own or [f for f in CHALLENGE_BIOMETRICS if f in permitted]
+
+
+def strength(required, org) -> int:
+    """How many factors a set of checks counts as. A fingerprint-unlocked device key is the phone (possession) plus the person
+    (inherence), so a bank may count it as two."""
+    return sum(2 if (f is Factor.DEVICE and getattr(org, "deviceCountsTwo", False)) else 1 for f in required)
 
 
 class TxnType(str, Enum):
@@ -119,6 +130,7 @@ class Enrollment(BaseModel):
     shape: bool = True
     keystrokeTouch: bool = False    # and for a touchscreen; a separate set, enrolled on a phone
     shapeTouch: bool = False
+    deviceKey: bool = False         # the phone making this request holds a bound key in its secure hardware
 
 
 class Capability(BaseModel):
@@ -143,6 +155,7 @@ class OrgCtx(BaseModel):
     reviewOnAnyUnmet: bool = False
     lowValueExempt: bool = False
     neverReview: bool = False
+    deviceCountsTwo: bool = False   # a device key counts as two factors towards the minimum (the bank's choice)
 
 
 class Policy(BaseModel):
@@ -152,6 +165,10 @@ class Policy(BaseModel):
     smallPaymentCap: bool = True
     # the strongest automated checks replace a person unless a hard-hold sign is present (see adjudicate.py)
     lowTouch: bool = True
+    # LEARNING while the model does not yet know this customer: light checks, set by learning_plan; READY once it does
+    phase: str = "READY"
+    learningDailyMinor: Optional[int] = None
+    learningNewPayeeMinor: Optional[int] = None
     # the customer's own no-extra-check limit in force right now, in minor units (None = they set none)
     customerBypassMinor: Optional[int] = None
 
@@ -200,6 +217,9 @@ class Plan(BaseModel):
     riskScore: Optional[float] = None
     threatLevel: Optional[str] = None
     modelLevel: Optional[str] = None
+    habitLevel: Optional[str] = None       # what the customer's own habit alone asked for
+    shadowLevel: Optional[str] = None      # while LEARNING: the level a ready customer would have got (how readiness is judged)
+    phase: Optional[str] = None            # LEARNING or READY
     capReason: Optional[str] = None
     riskReasons: list[tuple[str, float]] = Field(default_factory=list)
     modelVersion: str = ""

@@ -110,3 +110,41 @@ def customer_bypass(level: str, f: dict, *, limit_minor: Optional[int], exposure
     if exposure_minor > limit_minor:
         return level, None
     return BYPASS_LEVEL, f"within the no-extra-check limit the customer chose ({limit_minor / 100:,.0f}), kept at {BYPASS_LEVEL}"
+
+
+# ---------- the customer's own habit: bigger than their usual raises friction, routine relaxes it ----------
+
+# Share of GENUINE payments allowed at or above each level because of habit alone. Training turns these into cut-offs on the
+# habit_surprise feature, so "unusual" is a percentile of real-looking customers, not a number someone picked.
+HABIT_SHARE_AT_OR_ABOVE = {"T2": .025, "T3": .006}
+ROUTINE_SURPRISE = 1.5          # under this many spreads above the payee's usual amount, the payment is routine
+
+
+def habit_level(surprise: Optional[float], cutoffs: Optional[list[float]]) -> str:
+    """T0 (no opinion), T2 or T3, from how far above this customer's own habit the payment is."""
+    if surprise is None or not cutoffs:
+        return "T0"
+    return "T3" if surprise >= cutoffs[1] else "T2" if surprise >= cutoffs[0] else "T0"
+
+
+def raise_for_habit(level: str, habit: str) -> tuple[str, Optional[str]]:
+    if LEVELS.index(habit) > LEVELS.index(level):
+        return habit, f"far above this customer's own usual payments, raised to {habit}"
+    return level, None
+
+
+def is_routine(f: dict) -> bool:
+    """A payee the customer has paid several times over weeks, at about the amount they usually pay it, from a phone they use,
+    with no warning sign."""
+    s = f.get("habit_surprise")
+    return not (s is None or s >= ROUTINE_SURPRISE or (f.get("payee_seen") or 0) < REGULAR_MIN_PAYMENTS
+                or (f.get("payee_age_days") or 0) < REGULAR_MIN_AGE_DAYS or (f.get("device_seen") or 0) <= 0
+                or hard_signals(f))
+
+
+def routine_relief(level: str, f: dict) -> tuple[str, Optional[str]]:
+    """A payment of any size that is routine for this customer is kept light, so a weekly large payment is not an event. Same
+    shape as small_payment_cap; the bank's own floors and the legal minimum still apply afterwards."""
+    if LEVELS.index(level) <= LEVELS.index(CAP_LEVEL) or not is_routine(f):
+        return level, None
+    return CAP_LEVEL, f"routine for this customer (usual payee, usual amount), kept at {CAP_LEVEL}"

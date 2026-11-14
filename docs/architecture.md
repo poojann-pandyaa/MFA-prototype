@@ -133,3 +133,8 @@ the phone's result only to skip a check at the lowest risk levels. That needs at
 3. Timeouts, fallbacks and p95 metrics on the factor calls; autoscale on them.
 4. Shadow mode and percentage rollout for model switches.
 5. Device attestation, then (only if measured latency still needs it) the advisory fast path in section 4.
+
+## 6. Data kept: 90 days
+
+Transactions and everything derived from them are deleted after 90 days (`amfa/core/retention.py`, `AMFA_RETENTION_DAYS`), and the risk model reads no more
+than that. See [customer-limit.md](customer-limit.md) for what goes and what stays, and what the shorter memory costs.

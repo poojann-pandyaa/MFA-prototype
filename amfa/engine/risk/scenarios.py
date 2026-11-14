@@ -33,7 +33,7 @@ from typing import Callable, Iterator, NamedTuple, Optional
 from .features import DAY, H, HISTORY_DAYS, Event, Profile, build, exposure_24h
 
 START = 1_767_225_600.0  # 2026-01-01T00:00Z; rows are only taken from START on
-WARMUP_DAYS = 365        # established customers already have a year of history at START: all the model remembers
+WARMUP_DAYS = HISTORY_DAYS   # established customers already have a full window of history at START: all the model remembers
 CITIES = [("IN", c) for c in (
     "Mumbai", "Delhi", "Bengaluru", "Chennai", "Hyderabad", "Pune", "Kolkata", "Jaipur", "Ahmedabad",
     "Lucknow", "Surat", "Kochi", "Indore", "Bhopal", "Patna", "Chandigarh", "Nagpur", "Coimbatore",

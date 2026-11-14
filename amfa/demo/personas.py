@@ -17,7 +17,7 @@ import random
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
 
@@ -57,6 +57,7 @@ class Persona:
     hours: tuple[int, int]        # usual hours, local time, [start, end)
     history_days: int = 90
     recurring: tuple[tuple[str, float, int], ...] = ()       # (payee ref, rupees, day of the month)
+    weekly: tuple[tuple[str, float, int], ...] = ()          # (payee ref, rupees, weekday 0=Monday): a big payment every week
     balance: float = 500_000.0
     typing: bool = False          # has a typing template (the demo can also enrol one live)
     authenticator: bool = False
@@ -103,6 +104,14 @@ PERSONAS: tuple[Persona, ...] = (
             "PREMIUM", 2500,
             (_p("BEN-VIKRAM1", "Malhotra Family Trust", "1001", 1500, 2), _p("BEN-VIKRAM2", "Wealth Advisors", "2002", 1200, 1)),
             ("android_vikram_phone",), 1, 150_000, 0.6, (10, 19), balance=5_000_000, typing=True, authenticator=True, face=True, voice=True),
+    Persona("kiran", "Kiran Shah", "Pays about a thousand or two almost every day to the same few people. A payment of ten thousand "
+            "or a lakh would be a big event for Kiran.", "STANDARD", 700,
+            (_p("BEN-KIRAN1", "Tiffin Centre", "5101", 500, 4), _p("BEN-KIRAN2", "Auto Stand", "5102", 450, 3), _p("BEN-KIRAN3", "Mother", "5103", 600, 2)),
+            ("android_kiran_phone",), 7, 1500, 0.25, (17, 21), balance=300_000, typing=True, face=True),
+    Persona("anil", "Anil Kapoor", "Runs a trading business: a few thousand a day to many small suppliers, and about a lakh "
+            "every Monday to the same wholesaler. A lakh is a normal Monday for Anil; five lakh would not be.", "STANDARD", 1100,
+            (_p("BEN-ANIL1", "Kapoor Wholesale", "6101", 800, 0), _p("BEN-ANIL2", "Corner Supplies", "6102", 700, 3), _p("BEN-ANIL3", "Gupta Traders", "6103", 650, 3)),
+            ("android_anil_phone",), 8, 3000, 0.35, (10, 19), weekly=(("BEN-ANIL1", 100_000, 0),), balance=2_500_000, typing=True, face=True, voice=True),
     Persona("dev", "Dev Anand", "Brand-new customer: opened this week, no past to learn from.",
             "STANDARD", 5, (), ("android_dev_phone",), 0, 0, 0, (10, 20), history_days=5, balance=25_000),
 )
@@ -138,6 +147,13 @@ def history(p: Persona, now: float, seed: str = "") -> list[Txn]:
         amount = max(20.0, round(rng.lognormvariate(math.log(p.median), p.sigma), 0))
         out.append(Txn(at, payee.ref, amount, "TRANSFER", p.devices[0] if rng.random() < 0.9 else p.devices[-1]))
     local_now = datetime.fromtimestamp(now, TZ)
+    for ref, amount, weekday in p.weekly:
+        day = local_now.replace(hour=11, minute=5, second=0, microsecond=0)
+        day -= timedelta(days=(day.weekday() - weekday) % 7)
+        for w in range(int(p.history_days // 7) + 1):
+            when = (day - timedelta(days=7 * w)).timestamp()
+            if now - p.history_days * DAY <= when < now - 3600:
+                out.append(Txn(when, ref, round(amount * rng.uniform(.85, 1.15), -2), "TRANSFER", p.devices[0]))
     for ref, amount, dom in p.recurring:
         for m in range(int(p.history_days // 30) + 2):
             year, month = local_now.year, local_now.month - m
@@ -155,6 +171,12 @@ def seed_amfa(s, tenant: db.Tenant, p: Persona, *, now: Optional[float] = None, 
     now = now or time.time()
     cid = f"cu_demo_{p.username}"
     # everything that hangs off the customer, children first (sessions, decisions, an authenticator from an earlier run...)
+    sessions = select(db.AuthSession.id).where(db.AuthSession.customer_id == cid)
+    txns = select(db.Transaction.id).where(db.Transaction.customer_id == cid)
+    for model in (db.Challenge, db.OtpCode, db.Attempt):          # what hangs off a session or a transaction has no customer id
+        s.execute(delete(model).where(model.session_id.in_(sessions)))
+    for model in (db.Proof, db.ReviewCase, db.RiskLabel):
+        s.execute(delete(model).where(model.transaction_id.in_(txns)))
     for table in reversed(db.Base.metadata.sorted_tables):
         if table.name != "customer" and "customer_id" in table.c:
             s.execute(delete(table).where(table.c.customer_id == cid))

@@ -126,10 +126,10 @@ def test_a_model_trained_on_a_different_history_window_is_refused(model_dir, tmp
     other = tmp_path / model_dir.name
     shutil.copytree(model_dir, other)
     card = json.loads((other / "card.json").read_text())
-    card["historyDays"] = 90
+    card["historyDays"] = 365
     (other / "card.json").write_text(json.dumps(card))
     manifest = json.loads((other / MANIFEST).read_text())
     manifest["files"]["card.json"] = sha256(other / "card.json")      # a legitimate, re-signed card
     (other / MANIFEST).write_text(json.dumps(manifest))
-    with pytest.raises(scorer.RiskModelError, match="90-day history window"):
+    with pytest.raises(scorer.RiskModelError, match="365-day history window"):
         scorer.RiskModel(other)

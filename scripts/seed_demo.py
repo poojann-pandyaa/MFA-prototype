@@ -38,6 +38,7 @@ PASSWORD = "DemoPass#2026"
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--tenant", default="demo-bank", help="the bank's slug")
+    ap.add_argument("--learning", action="store_true", help="turn on the learning phase: new customers use the phone's fingerprint or screen lock")
     ap.add_argument("--bank-state", help="the demo bank's state file (BANK_STATE_FILE)")
     ap.add_argument("--home-ip", action="append", default=None, help="an address the customers usually bank from (repeatable)")
     ap.add_argument("--only", action="append", help="seed only these usernames")
@@ -51,6 +52,9 @@ def main() -> int:
         # let customers choose their own no-extra-check limit; no waiting period here so a presenter can show it
         pol = dict(tenant.policy)
         pol["customerBypass"] = {"enabled": True, "maxMinor": 5_000_000, "coolingOffHours": 0}
+        if a.learning:   # new sign-ups confirm with the phone's fingerprint or screen lock until the model knows them (needs app 1.0.3+)
+            pol["learning"] = {"enabled": True}
+            pol["permittedFactors"] = ["OTP", "DEVICE", "UEBA", "FACE", "VOICE"]
         tenant.policy = pol
         flag_modified(tenant, "policy")
     chosen = [p for p in P.PERSONAS if not a.only or p.username in a.only]

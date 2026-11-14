@@ -15,7 +15,7 @@ from amfa import config
 from amfa.common import crypto
 from amfa.common.contract import ID_PATTERN
 from amfa.common.web import ApiError
-from amfa.core import audit, bypass, db, factors, orchestrator, proofs, webhooks
+from amfa.core import audit, bypass, db, factors, orchestrator, phase, proofs, webhooks
 from amfa.core.auth import TenantCaller, require_scope
 from amfa.core.context_builder import TxnInput, assemble, device_key
 from amfa.engine.agent import build_agent
@@ -71,10 +71,11 @@ def _ueba_inputs(rows) -> list[str]:
 def _user_view(s, c: db.Customer) -> dict:
     rows = s.execute(select(db.Enrollment).where(db.Enrollment.customer_id == c.id)).scalars().all()
     totp = s.get(db.TotpCredential, c.id)
+    keyed = s.execute(select(db.Device.id).where(db.Device.customer_id == c.id, db.Device.public_jwk.is_not(None))).first() is not None
     return {"id": c.id, "externalRef": c.external_ref, "status": c.status, "segment": c.segment,
             "lockedReason": c.locked_reason, "createdAt": int(c.created_at),
             "enrollment": {e.factor: e.status for e in rows}
-                          | {"OTP_DELIVERY": bool(c.contact_sealed), "OTP_TOTP": bool(totp and totp.confirmed),
+                          | {"OTP_DELIVERY": bool(c.contact_sealed), "OTP_TOTP": bool(totp and totp.confirmed), "DEVICE_KEY": keyed,
                              "UEBA_INPUTS": _ueba_inputs(rows)},
             "verifiedTransactions": c.verified_count}
 
@@ -147,6 +148,15 @@ def patch_user(user_id: str, body: PatchUser, caller: TenantCaller = Depends(req
 class SetBypass(Strict):
     amountMinor: int = Field(ge=1)
     transactionId: str = Field(max_length=40)
+
+
+@router.get("/users/{user_id}/phase")
+def get_phase(user_id: str, caller: TenantCaller = Depends(require_scope("users:read"))):
+    """Is the model still learning this customer? While it is, the customer confirms payments with the phone's fingerprint or screen
+    lock and `progress` says what is left, in payments, for a progress bar. See amfa/core/phase.py."""
+    policy = TenantPolicy.model_validate(caller.tenant.policy)
+    with db.session() as s:
+        return phase.view(s, _customer(s, caller.tenant.id, user_id), policy)
 
 
 @router.get("/users/{user_id}/bypass-limit")
@@ -477,6 +487,8 @@ def feedback(txn_id: str, body: Feedback, caller: TenantCaller = Depends(require
                            source=body.source, reason=body.reason)
         s.add(row)
         if body.label == "FRAUD":
+            from amfa.core import phase
+            phase.reset(s, txn.customer_id)
             s.add(db.SecurityEvent(tenant_id=txn.tenant_id, customer_id=txn.customer_id,
                                    session_id=txn.session_id, severity="HIGH", kind="FRAUD_REPORTED",
                                    message=f"{body.source}: transaction {txn.external_id} reported as fraud"))

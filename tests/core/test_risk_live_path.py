@@ -56,18 +56,18 @@ def txn(amount, payee="landlord", **kw):
                     channel="MOBILE", device_id="dev-phone", ip="203.0.113.7", at=NOW, **kw)
 
 
-def test_features_come_from_the_stored_year(tenant, customer):
+def test_features_come_from_the_stored_ninety_days(tenant, customer):
     with db.session() as s:
-        for ago in (363, 182):                                    # half-yearly rent, same amount
+        for ago in (60, 30):                                      # monthly rent, same amount
             pay(s, tenant, customer, ago_days=ago, amount=30_000, payee="landlord")
-        pay(s, tenant, customer, ago_days=400, amount=30_000, payee="landlord")       # beyond the memory
+        pay(s, tenant, customer, ago_days=100, amount=30_000, payee="landlord")       # beyond the memory
         pay(s, tenant, customer, ago_days=5, amount=1_500, payee="pharmacy", status="DENIED")
         s.flush()
         a = context_builder.assemble(s, tenant, customer, "txn_new", txn(30_000))
     f = a.features
-    assert f["payee_seen"] == 2 and f["days_since_payee_last_paid"] == pytest.approx(182, abs=.01)
+    assert f["payee_seen"] == 2 and f["days_since_payee_last_paid"] == pytest.approx(30, abs=.01)
     assert f["amount_vs_payee_avg"] == pytest.approx(1.0) and f["payee_cycle_error"] < .01
-    assert f["history_count"] == 2                                # the 400-day-old and the denied ones do not count
+    assert f["history_count"] == 2                                # the 100-day-old and the denied ones do not count
     assert f["segment"] == 2 and f["account_age_days"] == pytest.approx(800, abs=.1)
     assert f["ueba_risk"] == 0.2 and f["sim_changed_hours"] is None
 
@@ -105,3 +105,15 @@ def test_factors_enrolled_counts_one_per_factor():
     assert context_builder._factors_enrolled(Enrollment()) == 4
     assert context_builder._factors_enrolled(Enrollment(**none | {"otp": True, "shape": True})) == 2
     assert context_builder._factors_enrolled(Enrollment(**none)) == 0
+
+
+def test_a_payment_the_bank_has_completed_still_counts_as_the_customers_history(tenant, customer):
+    """Completing a payment consumes its proof (status CONSUMED). It must still teach the model the customer's habits, or a new
+    customer's own payments would never become their history."""
+    with db.session() as s:
+        for ago in (20, 10):
+            pay(s, tenant, customer, ago_days=ago, amount=2_000, payee="grocer-c", status="CONSUMED")
+        s.flush()
+        f = context_builder.assemble(s, tenant, customer, "txn_c", txn(2_000, "grocer-c")).features
+        s.rollback()
+    assert f["payee_seen"] == 2

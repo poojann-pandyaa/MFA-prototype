@@ -14,7 +14,7 @@ import numpy as np
 from amfa import config
 
 from .features import FEATURES, HISTORY_DAYS, vector
-from .threat import level
+from .threat import habit_level, level
 
 ACTIVE = "ACTIVE"
 MANIFEST = "manifest.json"
@@ -31,6 +31,7 @@ class Result:
     level: str
     reasons: list[tuple[str, float]]
     version: str
+    habit: str = "T0"      # the level the customer's own habit alone asks for (T0 = no opinion)
 
 
 def root() -> Path:
@@ -60,6 +61,7 @@ class RiskModel:
                                  f"this build uses {HISTORY_DAYS}")
         self.version = self.card["version"]
         self.cutoffs = self.card["cutoffs"]
+        self.habit_cutoffs = self.card.get("habit", {}).get("cutoffs")
         cal = json.loads((path / "calibration.json").read_text())
         self.iso_x, self.iso_y = np.array(cal["x"]), np.array(cal["y"])
         self.boosters = [lgb.Booster(model_file=str(path / n)) for n in self.card["boosters"]]
@@ -78,7 +80,7 @@ class RiskModel:
                      key=lambda kv: -kv[1])[:3]
         return Result(score=round(float(self.calibrate(np.array([raw]))[0]), 4), raw=raw,
                       level=level(raw, self.cutoffs), reasons=[(k, round(v, 3)) for k, v in top],
-                      version=self.version)
+                      version=self.version, habit=habit_level(features.get("habit_surprise"), self.habit_cutoffs))
 
 
 @lru_cache(maxsize=4)

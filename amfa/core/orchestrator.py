@@ -152,6 +152,9 @@ def issue_challenge(s, sess: db.AuthSession, customer: db.Customer, txn: db.Tran
                              expires_at=now + otp.DELIVERED_TTL_S))
             params = {"mode": "delivered", "sentTo": otp.mask_contact(contact.get("to", "")),
                       "digits": otp.DIGITS}
+    elif factor == "DEVICE":
+        # the phone signs this text with the key in its secure hardware, which opens only to the phone's fingerprint or screen lock
+        params = {"message": f"amfa-device|{sess.id}|{device_nonce(sess.id)}", "alg": "ES256"}
     elif factor == "FACE":
         params = {"action": secrets.choice(["TURN_LEFT", "TURN_RIGHT"]), "frames": FACE_FRAMES,
                   "intervalMs": 150}
@@ -257,7 +260,8 @@ def submit(s, *, sess: db.AuthSession, customer: db.Customer, txn: db.Transactio
     ctx = _ctx(sess)
     signals: list[str] = []
     device_unproven = False
-    if not sess.device_checked:
+    if not sess.device_checked and not any(i["factor"] == "DEVICE" for i in sess.checklist):
+        # (when the plan itself asks the phone to sign, that is the proof of its key; this step is for plans that do not)
         sess.device_checked = True
         if not sess.device_bound and ctx.device.deviceKnown and _has_device_key(s, customer, txn):
             device_unproven = True
@@ -285,6 +289,8 @@ def submit(s, *, sess: db.AuthSession, customer: db.Customer, txn: db.Transactio
 
     if factor == "OTP":
         res = _verify_otp(s, sess, customer, ch, payload)
+    elif factor == "DEVICE":
+        res = _verify_device(s, sess, customer, txn, policy, payload)
     else:
         pad_mode = policy.padModes.get(factor, "advisory") if factor in ("FACE", "VOICE") else "advisory"
         res = factors.verify(factor, tenant=tenant.id, user=customer.id, session=sess.id,
@@ -437,6 +443,16 @@ def _verify_otp(s, sess: db.AuthSession, customer: db.Customer, ch: db.Challenge
     return {**base, "status": PASSED, "score": 1.0}
 
 
+def _verify_device(s, sess, customer, txn, policy: TenantPolicy, payload: dict) -> dict:
+    """The phone's key signed this session's challenge. Possession of the key is proved here; that only the person could unlock it
+    is the phone's own fingerprint or screen lock, which the key is bound to in the secure hardware."""
+    key = (txn.facts or {}).get("deviceKey")
+    ok = bool(key) and bind_device(s, sess, customer, key, signature=payload.get("signature"), assertion=payload.get("assertion"),
+                                   integrity_token=payload.get("integrityToken"), policy=policy)
+    return {"factor": "DEVICE", "status": PASSED if ok else FAILED, "score": 1.0 if ok else 0.0, "threshold": 1.0,
+            "modelVersion": "device-key-ecdsa-p256", "latencyMs": 0, "failureReason": None if ok else "SIGNATURE_INVALID"}
+
+
 def _has_device_key(s, customer: db.Customer, txn: db.Transaction) -> bool:
     return s.execute(select(func.count()).select_from(db.Device).where(
         db.Device.customer_id == customer.id, db.Device.device_key == (txn.facts or {}).get("deviceKey"),
@@ -459,6 +475,7 @@ def _resolve(s, sess, txn, customer, tenant, policy: TenantPolicy, verdict: str)
                              risk_band=sess.risk_band, floor=_ctx(sess).policy.actionFloor.value,
                              ttl_s=policy.proofTtlSeconds, s=s)
         _learn(s, sess, txn, customer, tenant)
+        _teach_phase(s, txn, customer, policy)
         webhooks.emit(s, tenant.id, "transaction.authorized", {
             "transactionId": txn.id, "externalId": txn.external_id, "sessionId": sess.id,
             "proof": proof["token"], "factors": passed, "expiresAt": proof["expiresAt"]})
@@ -478,6 +495,18 @@ def _resolve(s, sess, txn, customer, tenant, policy: TenantPolicy, verdict: str)
         txn.status, txn.updated_at = "REVIEW", now
         sess.resolution = "UNMET_WITHOUT_SUBSTITUTE"
         _open_review(s, sess, txn, "a required factor could not be assessed and nothing could stand in")
+
+
+def _teach_phase(s, txn, customer, policy: TenantPolicy) -> None:
+    """A verified payment teaches the model this customer: would it, knowing them as well as it does now, have asked for a face check?"""
+    if not policy.learning.enabled:
+        return
+    from amfa.core import phase
+    d = s.execute(select(db.Decision).where(db.Decision.transaction_id == txn.id)
+                  .order_by(db.Decision.id.desc())).scalars().first()
+    plan = (d.plan if d else {}) or {}
+    level = plan.get("shadowLevel") or plan.get("threatLevel") or "T1"
+    phase.observe(s, customer, txn, level in ("T2", "T3", "T4"))
 
 
 def _learn(s, sess, txn, customer, tenant) -> None:

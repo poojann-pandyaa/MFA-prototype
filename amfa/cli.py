@@ -62,6 +62,8 @@ def main(argv: list[str] | None = None) -> None:
     cal.add_argument("--tenant", default=None)
     cal.add_argument("--target-frr", type=float, default=0.01)
 
+    sub.add_parser("purge", help="delete transactions and what derives from them older than AMFA_RETENTION_DAYS (90)")
+
     rs = sub.add_parser("reseal")
     rs.add_argument("--factor", choices=["face", "voice", "ueba"], default=None,
                     help="re-seal a factor service's template store (run in that service's container)")
@@ -154,6 +156,10 @@ def main(argv: list[str] | None = None) -> None:
         audit.record("cli", "operator.create", oid, {"role": "platform_admin"})
         print(json.dumps({"initialised": True, "platformAdmin": a.admin_email.lower(),
                           "next": "sign in at /admin and enrol an authenticator"}))
+    elif a.cmd == "purge":
+        from amfa.core import retention
+        with db.session() as s:
+            print(json.dumps(retention.purge(s), indent=2))
     elif a.cmd == "tenant":
         print(json.dumps(create_tenant(a.name, a.slug, "cli"), indent=2))
     elif a.cmd == "operator":

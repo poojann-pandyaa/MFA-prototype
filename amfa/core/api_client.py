@@ -99,7 +99,7 @@ def _open(payload: dict, aad: str, *, policy, factor: str) -> dict:
             return e2e.decrypt(payload["e2e"], aad)
         except crypto.DecryptionError:
             raise ApiError(400, "E2E_INVALID", "the encrypted submission could not be opened") from None
-    if policy.requireE2E and factor != "OTP":
+    if policy.requireE2E and factor not in ("OTP", "DEVICE"):
         raise ApiError(400, "E2E_REQUIRED", "this bank requires biometric data to be end-to-end encrypted")
     return payload
 
@@ -520,7 +520,7 @@ class FactorSubmission(Strict):
 
 
 @router.post("/session/factors/{factor}")
-def submit_factor(factor: Literal["OTP", "FACE", "VOICE", "UEBA"], body: FactorSubmission,
+def submit_factor(factor: Literal["OTP", "DEVICE", "FACE", "VOICE", "UEBA"], body: FactorSubmission,
                   caller: ClientCaller = Depends(session_caller)):
     rate_limit(f"sess:{caller.session_id}:submit", 30, 600)
     with db.session() as s:

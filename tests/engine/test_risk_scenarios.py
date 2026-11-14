@@ -162,21 +162,20 @@ def test_an_attack_never_predates_the_account_it_uses():
             assert a.at >= c.created, (kind, seed)
 
 
-def test_memory_never_goes_beyond_a_year():
+def test_memory_never_goes_beyond_ninety_days():
     from amfa.engine.risk import features, scenarios
-    assert features.HISTORY_DAYS == scenarios.WARMUP_DAYS == 365
+    assert features.HISTORY_DAYS == scenarios.WARMUP_DAYS == 90
 
 
-def test_repeating_payments_are_in_the_data_and_recognised(rows):
-    for tag, floor in (("recurring", .6), ("recurring_quarterly", .6), ("recurring_half_yearly", .6),
-                       ("recurring_yearly", .3)):   # a yearly payment is often 366 days after the last: just outside
+def test_monthly_payments_are_recognised_and_longer_cycles_look_like_first_payments(rows):
+    """Within 90 days a monthly payment is seen and recognised. A quarterly, half-yearly or yearly one is not seen at all
+    (that is the price of keeping nothing older), so it looks like a first payment: a genuine hard case the model must learn."""
+    monthly = [r.features for r in rows if r.scenario == "recurring"]
+    known = [f for f in monthly if f["payee_seen"] > 0]
+    assert monthly and len(known) / len(monthly) > .6 and all(f["payee_cycle_error"] is not None for f in known)
+    for tag in ("recurring_quarterly", "recurring_half_yearly", "recurring_yearly"):
         fs = [r.features for r in rows if r.scenario == tag]
-        assert fs, tag
-        known = [f for f in fs if f["payee_seen"] > 0]
-        assert len(known) / len(fs) > floor, (tag, len(known), len(fs))
-        assert all(f["payee_cycle_error"] is not None for f in known)
-    yearly = [r.features for r in rows if r.scenario == "recurring_yearly" and r.features["payee_seen"] > 0]
-    assert any(f["payee_cycle_error"] < .02 and .8 < f["amount_vs_payee_avg"] < 1.2 for f in yearly)
+        assert fs and sum(f["payee_seen"] > 0 for f in fs) / len(fs) < .3, tag
 
 
 def test_the_look_alikes_of_repeating_payments_exist(rows):

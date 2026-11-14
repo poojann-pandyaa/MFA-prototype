@@ -96,6 +96,13 @@ def customer_notice(plan: Plan, txn_type: TxnType, features: Optional[dict] = No
     warning. Never the score, the threat level or the thresholds."""
     # The model names its strongest contributions even for a routine payment, and "strongest" is relative: a payee paid
     # for two years can still top the list. Say a reason only if the customer's own numbers support it.
+    if plan.source == "learning":
+        # while the model is learning a customer everything about them is new, so the model's reasons would only confuse: say what is happening
+        extra = len(plan.required) > 1
+        reason = ("We're getting to know how you pay, so we confirm each payment with your phone's fingerprint or screen lock"
+                  + (" and a one-time code, because it is more than usual while we do" if extra else "") + ".")
+        warn = txn_type in MONEY_TYPES and (plan.scamRisk or extra)
+        return {"reason": reason, "scamWarning": warn, "underReview": plan.escalate == "MANUAL_REVIEW"}
     why = list(dict.fromkeys(CUSTOMER_REASONS[k] for k, _ in plan.riskReasons
                              if k in CUSTOMER_REASONS and (features is None or _holds(k, features))))
     reason = ("We need a quick extra check because " + " and ".join(why[:2]) + "." if why
@@ -109,6 +116,9 @@ def model_summary(plan: Plan) -> str:
     if plan.modelError:
         return f"risk model unavailable, failed closed to {plan.threatLevel}"
     why = ", ".join(REASON_TEXT.get(k, k) for k, _ in plan.riskReasons)
+    if plan.source == "learning":
+        seen = f"; the model, if it knew this customer, would have said {plan.shadowLevel}" if plan.shadowLevel else ""
+        return f"learning phase ({plan.capReason or 'light checks'}){seen}"
     text = f"threat {plan.threatLevel} (risk {plan.riskScore:.2f})" + (f": {why}" if why else "")
     return text + (f". Model said {plan.modelLevel}; {plan.capReason}" if plan.capReason else "")
 

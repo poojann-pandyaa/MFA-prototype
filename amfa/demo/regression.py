@@ -56,6 +56,11 @@ def scenarios_for(p: P.Persona) -> list[P.Scenario]:
                               note="a senior, on the phone with a 'bank officer', sends a lakh and a half to a first-time payee by day on their own phone")],
         "priya": [P.Scenario("priya", "routine bulk order", 20_000, payee="BEN-PRIYA1", note="a normal large order to the main supplier")],
         "vikram": [P.Scenario("vikram", "routine large transfer", 150_000, payee="BEN-VIKRAM1", note="the usual family transfer")],
+        "kiran": [P.Scenario("kiran", "ten thousand to a regular payee", 10_000, payee="BEN-KIRAN1", note="seven times what Kiran ever pays"),
+                  P.Scenario("kiran", "a lakh to a regular payee", 100_000, payee="BEN-KIRAN1", note="far beyond anything Kiran has paid")],
+        "anil": [P.Scenario("anil", "the usual Monday payment", 100_000, payee="BEN-ANIL1", note="a lakh to the wholesaler, as every week"),
+                 P.Scenario("anil", "a lakh to a small supplier", 100_000, payee="BEN-ANIL2", note="a lakh to someone Anil pays a few thousand"),
+                 P.Scenario("anil", "five lakh to the wholesaler", 500_000, payee="BEN-ANIL1", note="five times the weekly payment")],
         "dev": [P.Scenario("dev", "first payment, small", 500, payee="new", note="a new customer's first payment"),
                 P.Scenario("dev", "first payment, large", 50_000, payee="new", fraud=True, note="a new account moving a lot on day one")],
     }
@@ -75,7 +80,9 @@ def _routine(rows: list[Row], persona: str) -> Optional[Row]:
     return next((r for r in rows if r.persona == persona and r.scenario.name == "routine"), None)
 
 
-ROUTINE = {"routine", "tiny to usual payee", "rent as usual", "routine bulk order", "routine large transfer"}
+ROUTINE = {"routine", "tiny to usual payee", "rent as usual", "routine bulk order", "routine large transfer", "the usual Monday payment"}
+# not fraud, but far beyond this customer's own habit: it must cost more than paying as usual
+JUMPS = {"ten thousand to a regular payee", "a lakh to a regular payee", "a lakh to a small supplier", "five lakh to the wholesaler"}
 
 
 def enrolled_factors(p: P.Persona, biometrics: bool = True) -> int:
@@ -102,6 +109,10 @@ def problems(rows: list[Row]) -> list[str]:
         # 2. a customer below the floor is never approved with fewer checks than the rule demands: a person looks
         if n < 2 and not res.review:
             out.append(f"{who}: only {n} factor enrolled, yet approved with {res.checks} and no review")
+        if sc.name in JUMPS:
+            base = _routine(rows, r.persona)
+            if base and res.friction <= base.result.friction:
+                out.append(f"{who}: far beyond this customer's own habit yet costs {res.friction}, no more than paying as usual ({base.result.friction})")
         if sc.fraud:
             base = _routine(rows, r.persona)
             # 3. what looks like fraud never costs less than the same customer paying as usual

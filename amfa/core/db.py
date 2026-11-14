@@ -146,6 +146,18 @@ class BypassLimit(Base):
     updated_at: Mapped[float] = mapped_column(Float, default=now)
 
 
+class CustomerPhase(Base):
+    """Whether the model knows this customer yet. `evidence` is derived marks only (see engine/risk/readiness.Tracker), never
+    transactions. Trimmed with the retention window."""
+    __tablename__ = "customer_phase"
+    customer_id: Mapped[str] = mapped_column(ForeignKey("customer.id"), primary_key=True)
+    phase: Mapped[str] = mapped_column(String(10), default="LEARNING")
+    ready_since: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    evidence: Mapped[dict] = mapped_column(JSON, default=dict)
+    verified_payments: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[float] = mapped_column(Float, default=now)
+
+
 class Enrollment(Base):
     __tablename__ = "enrollment"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

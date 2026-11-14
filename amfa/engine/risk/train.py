@@ -18,7 +18,8 @@ import numpy as np
 from .features import CATEGORICAL, FEATURES, HISTORY_DAYS, MONOTONE, vector
 from .scenarios import ATTACKS, FEEDS, START, amount_band, dataset, AMOUNT_BANDS
 from .scorer import ACTIVE, MANIFEST, RiskModel, root, sha256
-from .threat import GENUINE_SHARE_AT_OR_ABOVE, LEVELS, level, small_payment_cap
+from .threat import (GENUINE_SHARE_AT_OR_ABOVE, HABIT_SHARE_AT_OR_ABOVE, LEVELS, habit_level, level, raise_for_habit,
+                     routine_relief, small_payment_cap)
 
 DAY = 86400.0
 TRAIN_END, VALID_END = 105, 128   # days after START; the rest of the simulation is the test set
@@ -170,11 +171,24 @@ def run(customers: int = 20000, days: int = 150, seed: int = 7, activate: bool =
     gv = y[va] == 0
     cutoffs = [wquantile(raw_of(va)[gv], w[va][gv], 1 - GENUINE_SHARE_AT_OR_ABOVE[l]) for l in LEVELS[1:]]
 
+    # the customer's own habit: cut-offs on how far above their usual a payment is, set so that only a small share of GENUINE
+    # payments is raised by habit alone (a percentile, not a number someone picked)
+    hcol = FEATURES.index("habit_surprise")
+    hs_va = np.nan_to_num(X[va, hcol], nan=-1.0)
+    habit_cutoffs = [wquantile(hs_va[gv], w[va][gv], 1 - HABIT_SHARE_AT_OR_ABOVE[l]) for l in ("T2", "T3")]
+
     raw_te = raw_of(te)
     model_rank = np.array([LEVELS.index(level(r, cutoffs)) for r in raw_te])
-    # the system's real behaviour: a small, usual payment without a hard warning sign is held at T1
-    rank = np.array([LEVELS.index(small_payment_cap(LEVELS[m], r.features)[0]) if r.exposure < LOW_LINE_RUPEES else m
-                     for m, r in zip(model_rank, (rows[i] for i in np.flatnonzero(te)))])
+    # the system's real behaviour: a small usual payment is held at T1, a routine large one too, and a payment far above the
+    # customer's own habit is raised, whatever the model said
+    te_rows = [rows[i] for i in np.flatnonzero(te)]
+    rank = []
+    for m, r in zip(model_rank, te_rows):
+        lvl = LEVELS[m]
+        lvl = small_payment_cap(lvl, r.features)[0] if r.exposure < LOW_LINE_RUPEES else routine_relief(lvl, r.features)[0]
+        lvl = raise_for_habit(lvl, habit_level(r.features.get("habit_surprise"), habit_cutoffs))[0]
+        rank.append(LEVELS.index(lvl))
+    rank = np.array(rank)
     metrics = evaluate(raw_te, iso.predict(raw_te), y[te], w[te], scenario[te], segment[te], feed[te], rank,
                        {k: v[te] for k, v in groups.items()} | {"rank_uncapped": model_rank})
     metrics["baseline_logistic_pr_auc"] = round(_baseline_ap(X[tr], y[tr], w[tr], X[te], y[te], w[te]), 4)
@@ -198,6 +212,7 @@ def run(customers: int = 20000, days: int = 150, seed: int = 7, activate: bool =
         "historyDays": HISTORY_DAYS,
         "boosters": names, "params": params, "trees": [b.best_iteration for b in boosters],
         "cutoffs": cutoffs, "frictionTargets": GENUINE_SHARE_AT_OR_ABOVE,
+        "habit": {"cutoffs": habit_cutoffs, "genuineShare": HABIT_SHARE_AT_OR_ABOVE},
         "data": {"source": "synthetic (amfa.engine.risk.scenarios)", "customers": customers, "days": days,
                  "seed": seed, "rows": len(rows), "fraudRows": int(y.sum()),
                  "scenarioRows": dict(sorted(Counter(scenario).items())),

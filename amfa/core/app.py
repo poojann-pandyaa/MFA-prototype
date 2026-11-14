@@ -14,7 +14,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from amfa import config
 from amfa.common import logs, web
-from amfa.core import api_admin, api_client, api_tenant, db, factors, orchestrator, proofs, webhooks
+from amfa.core import api_admin, api_client, api_tenant, db, factors, orchestrator, proofs, retention, webhooks
 from amfa.engine.agent import backend_status, build_agent
 
 log = logging.getLogger("amfa.core")
@@ -94,12 +94,20 @@ class Sweeper(threading.Thread):
         self._stop = threading.Event()
 
     def run(self) -> None:
+        last_purge = 0.0
         while not self._stop.wait(15):
             try:
                 with db.session() as s:
                     orchestrator.expire_stale(s)
             except Exception:
                 log.exception("session sweep failed")
+            if time.time() - last_purge > 3600:      # nothing older than the retention window is kept
+                last_purge = time.time()
+                try:
+                    with db.session() as s:
+                        retention.purge(s)
+                except Exception:
+                    log.exception("retention purge failed")
 
     def stop(self) -> None:
         self._stop.set()

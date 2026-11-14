@@ -17,7 +17,7 @@ tricked into paying, so large first payments also carry the scam warning and a s
 from __future__ import annotations
 
 from .availability import available
-from .context import FLOOR_MINIMUM, Band, Context, Factor, Plan, Segment, TxnType, dynamic_factors
+from .context import FLOOR_MINIMUM, Band, Context, Factor, Plan, Segment, TxnType, dynamic_factors, strength
 from .policy import REGULATORY
 
 MONEY = {TxnType.TRANSFER, TxnType.PAYMENT, TxnType.CARD_NOT_PRESENT}
@@ -70,7 +70,7 @@ def resolve(plan: Plan, ctx: Context, features: dict | None) -> Plan:
     if plan.escalate == "MANUAL_REVIEW" and plan.escalateKind in SOFT | {"FLOOR"}:
         # the regulation's minimum is what can't be given up; the bank's own higher preference bends to what
         # the customer has set up (every available check is already in the plan by now)
-        have = len(plan.required)
+        have = strength(plan.required, ctx.org)
         if have >= REGULATORY_MINIMUM(ctx) and any(f in plan.required for f in dynamic_factors(ctx.org.permitted)):
             plan.autoHandled = (f"{plan.escalateReason}: handled with the strongest automated checks "
                                 f"instead of a person (all {have} the customer can do)")

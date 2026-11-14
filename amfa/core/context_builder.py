@@ -13,11 +13,12 @@ from sqlalchemy import select
 from amfa.common import crypto, geo
 from amfa.common.contract import FAILED, SPOOF_DETECTED
 from amfa.common.crypto import keyed_hash
-from amfa.core import bypass, db, factors
+from amfa.core import bypass, db, factors, phase
 from amfa.engine.context import (Band, BehaviouralCtx, Capability, Context, DeviceCtx, Enrollment,
                                  Policy, Segment, TransactionCtx, TxnType)
 from amfa.engine.policy import TenantPolicy
 from amfa.engine.risk import features as risk_features
+from amfa.engine.risk.threat import is_routine
 
 HOUR_HISTORY_MIN = 8
 HOUR_DEVIATION_UNUSUAL = 3.0
@@ -208,10 +209,13 @@ def assemble(s, tenant: db.Tenant, customer: db.Customer, txn_id: str, t: TxnInp
         device=DeviceCtx(deviceKnown=device_known, locationKnown=location_known,
                          hourUnusual=hour_unusual, channel=t.channel),
         behavioural=behavioural,
-        enrollment=enrollment_of(s, customer, policy),
+        enrollment=enrollment_of(s, customer, policy).model_copy(update={"deviceKey": bool(dev and dev.public_jwk)}),
         capability=capability,
         policy=Policy(actionFloor=floor, guidance=policy.agent.guidance if policy.agent.enabled else None,
-                      smallPaymentCap=policy.smallPaymentCap, lowTouch=policy.lowTouch),
+                      smallPaymentCap=policy.smallPaymentCap, lowTouch=policy.lowTouch,
+                      phase=phase.current(s, customer, policy, now),
+                      learningDailyMinor=policy.learning.dailyLimitMinor if policy.learning.enabled else None,
+                      learningNewPayeeMinor=policy.learning.newPayeeLimitMinor if policy.learning.enabled else None),
         org=org,
     )
     facts["network"] = place.network
@@ -230,6 +234,10 @@ def assemble(s, tenant: db.Tenant, customer: db.Customer, txn_id: str, t: TxnInp
         password_reset_at=ev.get("passwordResetAt"), payee_risk_flag=bool(ev.get("payeeRiskFlag")))
     history = risk_history(s, customer, now, ZoneInfo(policy.timezone))
     features = risk_features.build(cur, history, profile)
+    if policy.routineEasesHighValue and band is Band.HIGH and not new_payee and is_routine(features):
+        floor, org = policy.derive(t.type, Band.MEDIUM, t.amount_minor, t.currency, segment, new_payee)
+        ctx.policy.actionFloor, ctx.org = floor, org
+        derived["routine"] = True
     exposure = risk_features.exposure_24h(cur, history)
     ctx.transaction.exposureBand = policy.band_for(int(round(exposure * 100)), t.currency)
     ctx.transaction.exposureMinor = int(round(exposure * 100))
@@ -241,6 +249,10 @@ def assemble(s, tenant: db.Tenant, customer: db.Customer, txn_id: str, t: TxnInp
 def _factors_enrolled(e: Enrollment) -> int:
     """OTP, face, voice and behaviour (typing or shape) count as one factor each, as in the training data."""
     return int(e.otp) + int(e.face) + int(e.voice) + int(e.keystroke or e.shape)
+
+
+# a payment whose checks passed: AUTHORIZED until the bank consumes the proof, CONSUMED once it has applied it
+VERIFIED = ("AUTHORIZED", "CONSUMED")
 
 
 def risk_history(s, customer: db.Customer, now: float, tz: ZoneInfo) -> list[risk_features.Event]:
@@ -267,7 +279,7 @@ def risk_history(s, customer: db.Customer, now: float, tz: ZoneInfo) -> list[ris
             at=t.created_at, hour=datetime.fromtimestamp(t.created_at, tz=timezone.utc).astimezone(tz).hour,
             amount=t.amount_minor / 100.0, type=t.type, channel=t.channel, payee=f.get("payeeKey", ""),
             device=f.get("deviceKey", ""), network=f.get("network", ""), place=place,
-            country=place.split(":")[0] if place else None, authorized=t.status == "AUTHORIZED",
+            country=place.split(":")[0] if place else None, authorized=t.status in VERIFIED,
             failed_factors=failed.get(t.session_id, 0), spoof=t.session_id in spoofed))
     return out
 

@@ -28,7 +28,7 @@ def test_known_things_come_only_from_authorized_history():
 
 
 def test_velocity_counts_every_attempt_and_window_limits_history():
-    # too old (the window is 365 days), a recent failure, recent, in the future
+    # too old (the window is 90 days), a recent failure, recent, in the future
     hist = [ev(24 * 400), ev(0.5, ok=False), ev(2), ev(-1)]
     f = build(ev(0), hist, Profile())
     assert f["velocity_1h"] == 1 and f["velocity_24h"] == 2
@@ -102,14 +102,14 @@ def test_hour_deviation_reads_the_customers_usual_time():
     assert hour_deviation(8, usual[:3]) is None                        # too little history to say
 
 
-def test_repeat_payments_are_recognised_within_the_year():
-    """Half-yearly rent: paid 363 and 182 days ago, same amount, now due again."""
-    hist = [ev(24 * 363, payee="landlord", amount=30000.0), ev(24 * 182, payee="landlord", amount=30000.0),
+def test_repeat_payments_are_recognised_within_the_window():
+    """Monthly rent: paid 60 and 30 days ago, same amount, now due again."""
+    hist = [ev(24 * 60, payee="landlord", amount=30000.0), ev(24 * 30, payee="landlord", amount=30000.0),
             ev(24 * 50, payee="other")]
     f = build(ev(0, payee="landlord", amount=30000.0), hist, Profile())
-    assert f["payee_seen"] == 2 and math.isclose(f["days_since_payee_last_paid"], 182)
+    assert f["payee_seen"] == 2 and math.isclose(f["days_since_payee_last_paid"], 30)
     assert f["amount_vs_payee_avg"] == 1.0 and math.isclose(f["payee_gap_ratio"], 1.0, abs_tol=.01)
-    assert f["payee_cycle_error"] < .01                 # 182 days is exactly a half-yearly cycle
+    assert f["payee_cycle_error"] < .01                 # 30 days is exactly a monthly cycle
 
 
 def test_the_same_payee_at_a_far_bigger_amount_stands_out():
@@ -117,14 +117,44 @@ def test_the_same_payee_at_a_far_bigger_amount_stands_out():
     assert build(ev(0, payee="landlord", amount=900000.0), hist, Profile())["amount_vs_payee_avg"] == 30.0
 
 
-def test_memory_stops_at_365_days():
+def test_memory_stops_at_90_days():
+    """The bank may keep transactions for 90 days at most, so the model never reads further back."""
     from amfa.engine.risk.features import HISTORY_DAYS
-    assert HISTORY_DAYS == 365
-    f = build(ev(0, payee="landlord"), [ev(24 * 366, payee="landlord")], Profile())   # a year and a day ago
+    assert HISTORY_DAYS == 90
+    f = build(ev(0, payee="landlord"), [ev(24 * 91, payee="landlord")], Profile())   # a day too old
     assert f["payee_seen"] == 0 and f["days_since_payee_last_paid"] is None and f["payee_cycle_error"] is None
-    assert build(ev(0, payee="landlord"), [ev(24 * 364, payee="landlord")], Profile())["payee_seen"] == 1
+    assert build(ev(0, payee="landlord"), [ev(24 * 89, payee="landlord")], Profile())["payee_seen"] == 1
 
 
 def test_a_new_payee_has_no_repeat_signals():
     f = build(ev(0, payee="stranger"), [ev(24 * 10, payee="other")], Profile())
     assert f["payee_seen"] == 0 and f["amount_vs_payee_avg"] is None and f["payee_gap_ratio"] is None
+
+
+# ---- the customer's own habit
+
+def spender(amounts, payee="p1"):
+    return [ev(24 * (len(amounts) - i), payee=payee, amount=a) for i, a in enumerate(amounts)]
+
+
+def test_the_same_rupees_are_a_big_jump_for_one_customer_and_routine_for_another():
+    small = spender([1200, 1500, 1500, 2000, 1000, 1500] * 5)
+    weekly = spender([100000, 90000, 110000, 100000], payee="rent") + spender([2500, 3000, 2000, 3500] * 7, payee="shop")
+    jump = build(ev(0, payee="p1", amount=100000.0), small, Profile())
+    routine = build(ev(0, payee="rent", amount=100000.0), weekly, Profile())
+    assert jump["habit_surprise"] > 8 and routine["habit_surprise"] < 1.0
+    assert build(ev(0, payee="shop", amount=100000.0), weekly, Profile())["habit_surprise"] > 5   # not what they pay a shop
+
+
+def test_habit_is_unknown_until_there_is_something_to_compare_with_and_is_never_negative():
+    assert build(ev(0, payee="x", amount=500.0), spender([1000, 1000]), Profile())["habit_surprise"] is None
+    f = build(ev(0, amount=10.0), spender([1000] * 10), Profile())
+    assert f["amount_z_self"] < 0 and f["habit_surprise"] == 0.0          # smaller than usual is not a surprise
+    limit_change = Event(at=NOW, hour=14, amount=0.0, type="CHANGE_LIMIT", channel="MOBILE", payee="x", device="d1", network="n1")
+    assert build(limit_change, spender([1000] * 10), Profile())["habit_surprise"] is None
+
+
+def test_a_customer_with_little_history_is_not_judged_on_a_spread_learned_from_three_payments():
+    few = build(ev(0, amount=6000.0), spender([1000, 1000, 1000]), Profile())["habit_surprise"]
+    many = build(ev(0, amount=6000.0), spender([1000] * 40), Profile())["habit_surprise"]
+    assert 0 < few < many

@@ -44,7 +44,7 @@ MAX_DAILY_LIMIT = 10_00_000_00
 BILLERS = {"BILL-ELEC": "City Electricity", "BILL-MOBILE": "Mobile postpaid", "BILL-GAS": "Piped gas"}
 BILLERS_SINCE = 1_600_000_000.0   # long-standing billers, not new payees
 FINAL = {"DONE", "DECLINED", "EXPIRED", "CANCELLED", "FAILED"}
-CHECK_NAMES = {"OTP": "one-time code", "UEBA": "typing check", "FACE": "face check", "VOICE": "voice check"}
+CHECK_NAMES = {"OTP": "one-time code", "DEVICE": "fingerprint or screen lock", "UEBA": "typing check", "FACE": "face check", "VOICE": "voice check"}
 
 _lock = threading.RLock()
 _ph = PasswordHasher()
@@ -211,6 +211,8 @@ METHODS = [("code", lambda e: bool(e.get("OTP_DELIVERY") or e.get("OTP_TOTP"))),
 
 def protection(enrolled: dict, code_name: str = "SMS code") -> dict:
     have = [code_name if name == "code" else name for name, on in METHODS if on(enrolled)]
+    if enrolled.get("DEVICE_KEY"):      # the phone's own key: nothing for the customer to add, so it is never offered as an addition
+        have.insert(1 if have else 0, "Fingerprint or screen lock")
     can_add = [name for name, on in METHODS[1:] if not on(enrolled)]
     if not enrolled.get("OTP_TOTP"):
         can_add.append("Authenticator app")
@@ -237,13 +239,14 @@ def _embed(url: str) -> str:
 @app.get("/api/me")
 def me(request: Request, deviceId: str = ""):
     c = customer(request)
-    enrolled = None
+    enrolled, learning = None, None
     if c["amfaUser"]:
         enrolled = AMFA.request("GET", f"/v1/users/{c['amfaUser']}")["enrollment"]
+        learning = AMFA.request("GET", f"/v1/users/{c['amfaUser']}/phase")
     return {"name": c["name"], "ref": c["ref"], "balance": c["balance"], "enrolled": enrolled,
             "protection": protection(enrolled or {}, code_label(c)), "frozen": c.get("frozen", False),
             "codeTo": code_to(c),
-            "dailyLimit": c["dailyLimit"], "sentToday": sent_today(c), "noCheck": c.get("noCheck"),
+            "dailyLimit": c["dailyLimit"], "sentToday": sent_today(c), "noCheck": c.get("noCheck"), "learning": learning,
             "phone": _mask(c["phone"]), "email": _mask(c["email"]),
             "deviceTrusted": deviceId in c["devices"], "devices": len(c["devices"]), "demoTools": DEMO_TOOLS,
             "payees": [{"ref": k, "display": p["display"], "initials": initials(p["display"]),
@@ -478,7 +481,7 @@ def public(a: dict) -> dict:
     return out
 
 
-AMR_NAMES = {"otp": "SMS code", "face": "Face", "voice": "Voice", "ueba": "Typing", "review": "Bank review"}
+AMR_NAMES = {"otp": "SMS code", "device": "Fingerprint or screen lock", "face": "Face", "voice": "Voice", "ueba": "Typing", "review": "Bank review"}
 
 
 def _decision(plan: dict) -> dict:
