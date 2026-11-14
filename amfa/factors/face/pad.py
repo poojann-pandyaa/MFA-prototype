@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import os
 import threading
 from dataclasses import dataclass
 from functools import lru_cache
@@ -13,6 +14,20 @@ from amfa.common import artifacts
 
 LIVE_CLASS = 1
 _MODELS = ("face/2.7_80x80_MiniFASNetV2.onnx", "face/4_0_0_80x80_MiniFASNetV1SE.onnx")
+
+# Custom MobileNetV3-Small (face-auth branch, ml/): one sigmoid live-probability from a 128 px crop.
+# It is a veto on top of MiniFASNet, not a replacement: a frame it scores below CUSTOM_THRESHOLD (the
+# point its own eval calibrated, APCER 8.7% / BPCER 12.7% per frame on LCC-FASD) has its live score
+# scaled down in proportion. Scores at or above it change nothing. AMFA_FACE_PAD_CUSTOM=0 turns it off.
+CUSTOM_MODEL = "face/pad_custom.onnx"
+CUSTOM_SIZE, CUSTOM_SCALE, CUSTOM_THRESHOLD = 128, 1.5, 0.5
+CUSTOM_ENABLED = os.getenv("AMFA_FACE_PAD_CUSTOM", "1") != "0"
+
+
+def veto(live_prob: float, custom_prob: Optional[float]) -> float:
+    if custom_prob is None or custom_prob >= CUSTOM_THRESHOLD:
+        return live_prob
+    return live_prob * custom_prob / CUSTOM_THRESHOLD
 
 
 def _parse_model_name(filename: str) -> tuple[int, int, Optional[float]]:
@@ -72,6 +87,7 @@ class PadFrame:
     live_prob: float
     label: int
     bbox: Optional[list[int]]
+    custom_prob: Optional[float] = None
 
 
 class FacePAD:
@@ -92,7 +108,14 @@ class FacePAD:
             sess = ort.InferenceSession(str(path), sess_options=opts,
                                         providers=["CPUExecutionProvider"])
             self._models.append((sess, sess.get_inputs()[0].name, h, w, scale))
+        self._custom = None
         self.version = "minifasnet-v2+v1se-onnx"
+        if CUSTOM_ENABLED:
+            artifacts.verified(CUSTOM_MODEL + ".data")
+            path = artifacts.verified(CUSTOM_MODEL)
+            sess = ort.InferenceSession(str(path), sess_options=opts, providers=["CPUExecutionProvider"])
+            self._custom = (sess, sess.get_inputs()[0].name)
+            self.version += "+mobilenetv3-custom"
 
     def _bbox(self, img) -> Optional[list[int]]:
         height, width = img.shape[:2]
@@ -120,7 +143,14 @@ class FacePAD:
             e = np.exp(logits - logits.max())
             acc += e / e.sum()
         probs = acc / len(self._models)
-        return PadFrame(live_prob=float(probs[LIVE_CLASS]), label=int(np.argmax(probs)), bbox=bbox)
+        live, custom = float(probs[LIVE_CLASS]), None
+        if self._custom is not None:
+            sess, name = self._custom
+            crop = _crop(img_bgr, bbox, CUSTOM_SCALE, CUSTOM_SIZE, CUSTOM_SIZE)
+            x = np.ascontiguousarray((crop.astype(np.float32) / 255.0).transpose(2, 0, 1)[None])
+            custom = float(sess.run(None, {name: x})[0].reshape(-1)[0])
+        return PadFrame(live_prob=veto(live, custom), label=int(np.argmax(probs)), bbox=bbox,
+                        custom_prob=custom)
 
 
 @lru_cache(maxsize=1)
