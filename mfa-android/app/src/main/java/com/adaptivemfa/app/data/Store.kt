@@ -8,6 +8,8 @@ interface Settings {
     var username: String?
     var baseUrl: String
     val deviceId: String
+    /** "bank address|username" the phone's key was last handed to AMFA for. */
+    var deviceKeyFor: String?
 }
 
 /** Small on-device settings. No password, token or face data is stored on the phone. */
@@ -29,6 +31,10 @@ class Store(context: Context) : Settings, PinStore {
     override val deviceId: String
         get() = p.getString("deviceId", null)
             ?: ("android_" + UUID.randomUUID().toString().replace("-", "").take(12)).also { p.edit().putString("deviceId", it).apply() }
+
+    override var deviceKeyFor: String?
+        get() = p.getString("deviceKeyFor", null)
+        set(v) = p.edit().apply { if (v == null) remove("deviceKeyFor") else putString("deviceKeyFor", v) }.apply()
 
     /** The key fingerprint first seen for each AMFA address (see [PinStore]). */
     override fun pin(base: String): String? = p.getString("e2ePin:$base", null)

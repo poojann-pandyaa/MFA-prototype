@@ -48,7 +48,11 @@ data class Me(
     val noCheckMinor: Long = 0,
     val noCheckPendingMinor: Long? = null,
     val noCheckPendingFrom: Double? = null,
+    val learning: Learning? = null,
 )
+
+/** How far AMFA is from knowing this customer's habits. While [learning] they confirm payments with the phone's fingerprint or screen lock. */
+data class Learning(val learning: Boolean, val verifiedPayments: Int, val moreAtLeast: Int?, val offerBiometrics: Boolean)
 
 /** One payment or account change as the bank shows it to the customer (never the risk score or AMFA's decision). */
 data class ActivityItem(
@@ -147,6 +151,10 @@ class BankApi(
             noCheckMinor = j.optJSONObject("noCheck")?.optLong("limit") ?: 0,
             noCheckPendingMinor = j.optJSONObject("noCheck")?.let { if (it.isNull("pending")) null else it.optLong("pending") },
             noCheckPendingFrom = j.optJSONObject("noCheck")?.let { if (it.isNull("pendingFrom")) null else it.optDouble("pendingFrom") },
+            learning = j.optJSONObject("learning")?.takeIf { it.optBoolean("enabled", false) }?.let {
+                Learning(it.optString("phase") == "LEARNING", it.optInt("verifiedPayments"),
+                    it.optJSONObject("progress")?.let { p -> if (p.isNull("moreAtLeast")) null else p.optInt("moreAtLeast") }, it.optBoolean("offerBiometrics"))
+            },
         )
     }
 
@@ -232,6 +240,8 @@ data class AmfaChallenge(
     val id: String, val factor: String, val action: String?, val frames: Int, val intervalMs: Long, val mode: String?, val sentTo: String?,
     val prompt: String? = null, val minSeconds: Int = 3, val maxSeconds: Int = 10,
     val phrase: String? = null, val shape: List<Pair<Double, Double>>? = null, val input: String? = null,
+    /** For the device check: the text the phone's key signs. */
+    val message: String? = null,
 )
 
 data class SessionState(val status: String, val amount: String, val payee: String, val steps: List<String>, val challenge: AmfaChallenge?, val sessionId: String = "")
@@ -247,7 +257,11 @@ class AmfaApi(private val http: Http, private val link: AmfaLink, private val se
     private fun url(path: String) = link.base.trimEnd('/') + "/c/v1" + path
 
     private val serverKey: E2EKey by lazy {
-        val j = call(http, "GET", url("/e2e-key"))
+        val j = try { call(http, "GET", url("/e2e-key")) } catch (e: ApiException) {
+            // an older server has no such endpoint; say so instead of a bare "Not Found", and still send nothing
+            if (e.status == 404) throw ApiException(404, "This server is older than the app and cannot take encrypted uploads. Ask whoever runs it to update it.", "E2E_UNSUPPORTED")
+            throw e
+        }
         val k = E2EKey(j.getString("kid"), j.getString("publicKey"), j.getString("fingerprint"))
         if (!E2E.consistent(k)) throw ApiException(0, "The server's encryption key is not valid, so nothing was sent.", "E2E_KEY_INVALID")
         val pinned = pins?.pin(link.base)
@@ -311,6 +325,11 @@ class AmfaApi(private val http: Http, private val link: AmfaLink, private val se
     /** Sends a fresh emailed or texted code and returns the session with its new challenge. */
     fun resendCode(): SessionState = parseSession(call(http, "POST", url("/session/otp/resend"), JSONObject(), link.token))
 
+    /** Hands AMFA the public half of the phone's key, so later payments can be confirmed by its signature. */
+    fun enrollDevice(deviceId: String, publicJwk: JSONObject) {
+        call(http, "POST", url("/enrollment/device"), JSONObject().put("deviceId", deviceId).put("publicJwk", publicJwk), link.token)
+    }
+
     fun enrollComplete() {
         call(http, "POST", url("/enrollment/complete"), JSONObject(), link.token)
     }
@@ -320,8 +339,8 @@ class AmfaApi(private val http: Http, private val link: AmfaLink, private val se
     fun session(): SessionState = parseSession(call(http, "GET", url("/session"), token = link.token)).also { sessionId = it.sessionId }
 
     fun submit(factor: String, challengeId: String, payload: JSONObject): Submitted {
-        // one-time codes stay plain (they are not biometric); everything else goes as a box bound to this session and challenge
-        val body = if (factor == "OTP") payload else {
+        // one-time codes and the device signature stay plain (neither is biometric); everything else goes as a box bound to this session and challenge
+        val body = if (factor == "OTP" || factor == "DEVICE") payload else {
             if (secure && sessionId.isEmpty()) session()
             sealed(payload, "$sessionId|$factor|$challengeId")
         }
@@ -349,7 +368,8 @@ fun parseSession(j: JSONObject): SessionState {
                 p?.optInt("frames", 20) ?: 20, p?.optLong("intervalMs", 150) ?: 150, p?.optString("mode")?.ifEmpty { null },
                 p?.optString("sentTo")?.ifEmpty { null },
                 prompt = p?.optString("prompt")?.ifEmpty { null }, minSeconds = p?.optInt("minSeconds", 3) ?: 3, maxSeconds = p?.optInt("maxSeconds", 10) ?: 10,
-                phrase = p?.optString("phrase")?.ifEmpty { null }, shape = parseShape(p?.optJSONArray("shape")), input = p?.optString("input")?.ifEmpty { null })
+                phrase = p?.optString("phrase")?.ifEmpty { null }, shape = parseShape(p?.optJSONArray("shape")), input = p?.optString("input")?.ifEmpty { null },
+                message = p?.optString("message")?.ifEmpty { null })
         },
     )
 }

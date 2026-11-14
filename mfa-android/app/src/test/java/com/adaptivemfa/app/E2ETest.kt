@@ -5,6 +5,7 @@ import com.adaptivemfa.app.data.AmfaLink
 import com.adaptivemfa.app.data.ApiException
 import com.adaptivemfa.app.data.E2E
 import com.adaptivemfa.app.data.E2EKey
+import com.adaptivemfa.app.data.HttpResult
 import com.adaptivemfa.app.data.PinStore
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -113,6 +114,14 @@ class E2ETest {
 
         val lying = RoutedHttp("GET /c/v1/e2e-key" to ok("""{"kid":"k","alg":"x","publicKey":"${serverKey.publicKey}","fingerprint":"deadbeef"}"""), session, faceOk)
         try { AmfaApi(lying, link, secure = true).submit("FACE", "ch_x", JSONObject()); fail() } catch (e: ApiException) { assertEquals("E2E_KEY_INVALID", e.code) }
+    }
+
+    @Test fun anOlderServerIsExplainedAndNothingIsSent() {
+        val http = RoutedHttp("GET /c/v1/e2e-key" to HttpResult(404, """{"detail":"Not Found"}"""), "POST /c/v1/enrollment/face" to ok("""{"enrolled":true}"""))
+        try { AmfaApi(http, link, secure = true).enrollFace(listOf("x")); fail() } catch (e: ApiException) {
+            assertEquals("E2E_UNSUPPORTED", e.code); assertTrue(e.message.contains("older than the app"))
+        }
+        assertFalse(http.called("/enrollment/face"))
     }
 
     @Test fun withoutSecureTheOldPlainBodyIsUnchanged() {

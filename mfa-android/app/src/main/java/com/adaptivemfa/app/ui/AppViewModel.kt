@@ -7,6 +7,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.adaptivemfa.app.data.ActivityItem
 import com.adaptivemfa.app.data.AmfaApi
+import com.adaptivemfa.app.data.DeviceAuthRequired
+import com.adaptivemfa.app.data.DeviceKeyInvalid
+import com.adaptivemfa.app.data.DeviceSigner
+import com.adaptivemfa.app.data.NoDeviceSigner
 import com.adaptivemfa.app.data.AmfaLink
 import com.adaptivemfa.app.data.ApiException
 import com.adaptivemfa.app.data.BankApi
@@ -68,6 +72,7 @@ class AppViewModel(
     private val bank: BankApi,
     private val amfaFor: (AmfaLink) -> AmfaApi,
     private val io: CoroutineDispatcher = Dispatchers.IO,
+    private val signer: DeviceSigner = NoDeviceSigner,
 ) : ViewModel() {
 
     var screen by mutableStateOf<Screen>(Screen.Welcome)
@@ -150,6 +155,24 @@ class AppViewModel(
         username = user
         refresh()
         go(Screen.Home)
+        ensureDeviceKey()
+    }
+
+    /**
+     * Gives AMFA the public half of the phone's key, once per account, so a payment can be confirmed by the phone's fingerprint or
+     * screen lock instead of a code. Quiet and best effort: a phone with no screen lock, or a bank that does not use it, just keeps
+     * using codes.
+     */
+    private suspend fun ensureDeviceKey() {
+        val marker = "${store.baseUrl}|$username"
+        if (!signer.available() || (store.deviceKeyFor == marker && signer.hasKey())) return
+        try {
+            val jwk = (if (signer.hasKey()) signer.publicJwk() else null) ?: signer.createKey()
+            val api = amfaApi(withContext(io) { bank.startSetup("OTP") })
+            withContext(io) { api.enrollDevice(store.deviceId, jwk); api.enrollComplete() }
+            store.deviceKeyFor = marker
+        } catch (_: Exception) {
+        }
     }
 
     // ------------------------------------------------------------ account
@@ -166,7 +189,12 @@ class AppViewModel(
         store.username = u
         username = u
         refresh()
-        go(Screen.Setup)
+        // The bank knows the customer to AMFA only once the key is handed over, so do that first and then look again: a bank that
+        // learns its customers first (see Learning) asks nothing of a new customer beyond the phone's own lock screen, and the face
+        // is offered later from Home and Profile. A phone with no screen lock has no key, so it still gets the face and typing setup.
+        ensureDeviceKey()
+        try { refresh() } catch (_: ApiException) { }
+        go(if (me?.learning != null) Screen.Home else Screen.Setup)
     }
 
     fun logout() = run { withContext(io) { try { bank.logout() } catch (_: ApiException) { } }; signOut(null) }
@@ -298,6 +326,32 @@ class AppViewModel(
             else settle(started.actionId)
         }
     }
+
+    /** True while the screen must ask the phone to confirm its fingerprint or screen lock before the key will sign. */
+    var deviceUnlock by mutableStateOf(false)
+        private set
+
+    /** The device check: the phone's key signs AMFA's challenge. If the lock screen has not been confirmed, the screen is asked to do that. */
+    fun signDevice() {
+        val v = screen as? Screen.Verify ?: return
+        val ch = v.session.challenge?.takeIf { it.factor == "DEVICE" } ?: return
+        run {
+            val signature = try { signer.sign(ch.message ?: "") } catch (_: DeviceAuthRequired) {
+                deviceUnlock = true
+                return@run
+            } catch (_: DeviceKeyInvalid) {
+                throw ApiException(0, "This phone's key was reset, so it cannot confirm payments. Cancel and ask the bank to set up this phone again.")
+            }
+            deviceUnlock = false
+            val api = amfa ?: throw ApiException(0, "The approval session ended. Start the payment again.")
+            val out = withContext(io) { api.submit("DEVICE", ch.id, JSONObject().put("signature", signature)) }
+            advance(v.actionId, out)
+        }
+    }
+
+    fun deviceUnlocked() { deviceUnlock = false; signDevice() }
+
+    fun deviceUnlockCancelled() { deviceUnlock = false; error = "That wasn't confirmed. Try again when you're ready." }
 
     fun submitFace(frames: List<String>) = submit("FACE") { JSONObject().put("frames", JSONArray(frames)) }
 

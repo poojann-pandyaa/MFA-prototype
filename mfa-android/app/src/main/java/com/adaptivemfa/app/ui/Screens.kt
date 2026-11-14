@@ -1,5 +1,9 @@
 package com.adaptivemfa.app.ui
 
+import android.app.Activity
+import android.app.KeyguardManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -28,6 +32,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -244,6 +250,7 @@ fun VerifyScreen(vm: AppViewModel, s: Screen.Verify) {
         when (ch?.factor) {
             "FACE" -> FaceCheck(vm, ch)
             "OTP" -> CodeCheck(vm, ch)
+            "DEVICE" -> DeviceCheck(vm, ch, "${s.session.amount} to ${s.session.payee}")
             "VOICE" -> VoiceCheck(vm, ch)
             "UEBA" -> TypingCheck(vm, ch)
             else -> {
@@ -270,7 +277,8 @@ private fun CodeCheck(vm: AppViewModel, ch: AmfaChallenge) {
     CardBox {
         H3(if (ch.mode == "totp") "Enter your authenticator code" else "Enter the code we sent")
         Muted(if (ch.mode == "totp") "Open your authenticator app and enter the 6-digit code for this bank." else "We sent it to ${ch.sentTo ?: "you"}. The message names this amount and payee, so check they match.")
-        CodeBoxes(code, { code = it }, enabled = !vm.busy)
+        val keyboard = LocalSoftwareKeyboardController.current
+        CodeBoxes(code, { code = it; if (it.length == 6) keyboard?.hide() }, enabled = !vm.busy)   // the keyboard would cover Confirm
         if (ch.mode != "totp") LinkText("Send a new code", small = true, modifier = Modifier.align(Alignment.CenterHorizontally)) { vm.resendCode() }
         if (ch.mode != "totp" && vm.me?.demoTools == true) {
             vm.demoCode?.let { Note("brand", "info", "This is a demo server, so no email is sent. Your code is $it.") }
@@ -278,4 +286,31 @@ private fun CodeCheck(vm: AppViewModel, ch: AmfaChallenge) {
         }
     }
     Btn("Confirm", enabled = code.length == 6, busy = vm.busy) { vm.submitCode(code); code = "" }
+}
+
+
+/** The phone's own fingerprint or screen lock: the key in the secure hardware signs once it has been confirmed. */
+@Composable
+private fun DeviceCheck(vm: AppViewModel, ch: AmfaChallenge, what: String) {
+    val ctx = LocalContext.current
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
+        if (r.resultCode == Activity.RESULT_OK) vm.deviceUnlocked() else vm.deviceUnlockCancelled()
+    }
+    LaunchedEffect(ch.id) { vm.signDevice() }
+    LaunchedEffect(vm.deviceUnlock) {
+        if (vm.deviceUnlock) {
+            val intent = ctx.getSystemService(KeyguardManager::class.java)?.createConfirmDeviceCredentialIntent("Confirm payment", what)
+            if (intent == null) vm.deviceUnlockCancelled() else launcher.launch(intent)
+        }
+    }
+    CardBox {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Tile("lock")
+            Column(Modifier.weight(1f)) {
+                H3("Use your fingerprint or screen lock")
+                Muted("Your phone checks it's you, then confirms this payment. Nothing is sent from your fingerprint.", small = true)
+            }
+        }
+    }
+    Btn("Confirm", busy = vm.busy) { vm.signDevice() }
 }

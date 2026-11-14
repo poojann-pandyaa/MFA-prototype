@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -33,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.adaptivemfa.app.BuildConfig
 import com.adaptivemfa.app.data.ActivityItem
+import com.adaptivemfa.app.data.Learning
 import com.adaptivemfa.app.data.Me
 import androidx.compose.ui.text.input.KeyboardType
 import com.adaptivemfa.app.logic.NO_CHECK_MAX
@@ -77,6 +79,10 @@ fun HomeScreen(vm: AppViewModel) {
         }
         Messages(vm)
         BalanceCard(me, hidden) { hidden = !hidden }
+        if (me.learning?.offerBiometrics == true && !me.faceEnrolled) {
+            Note("brand", "shieldCheck", "Setting up a face check is optional. It lets us approve larger payments without extra steps.", "Want to do more with your account?")
+            SoftBtn("Set up a face check") { vm.startSetup("FACE") }
+        }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
             Quick("send", "Send") { vm.tab("pay") }
             Quick("bill", "Pay bills") { vm.go(Screen.Pay(bills = true)) }
@@ -325,6 +331,18 @@ fun ProfileScreen(vm: AppViewModel) {
             }
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { me.have.forEach { Chip(it, "ok") } }
         }
+        me.learning?.takeIf { it.learning }?.let { l ->
+            CardBox {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Tile("shieldCheck")
+                    Column(Modifier.weight(1f)) {
+                        H3("Getting to know how you pay")
+                        Muted(learningText(l), small = true)
+                    }
+                }
+                LinearProgressIndicator(progress = { learningProgress(l) }, modifier = Modifier.fillMaxWidth(), color = C.brand, trackColor = C.lineSoft, drawStopIndicator = {})
+            }
+        }
         ListCard(listOf(
             { Item({ Tile("face") }, "Face check", { SubText(if (me.faceEnrolled) "Set up" else "Not set up yet") }, if (me.faceEnrolled) ({ Chip("Ready", "ok") }) else ({ SoftBtn("Set up") { vm.startSetup("FACE") } })) },
             { Item({ Tile("phone") }, "Voice", { SubText(if (me.voiceEnrolled) "Set up" else "Read three sentences aloud") }, if (me.voiceEnrolled) ({ Chip("Ready", "ok") }) else ({ SoftBtn("Set up") { vm.startSetup("VOICE") } })) },
@@ -391,4 +409,16 @@ fun NoCheckScreen(vm: AppViewModel) {
         Btn(if (me.noCheckMinor > 0) "Change limit" else "Set limit", enabled = rupees != null, busy = vm.busy) { rupees?.let { vm.startNoCheck(it) } }
         if (me.noCheckMinor > 0 || me.noCheckPendingMinor != null) Btn("Turn off", BtnKind.Secondary) { vm.removeNoCheck() }
     }
+}
+
+
+/** What a customer reads while the model is still learning them (see [Learning]). */
+fun learningText(l: Learning): String =
+    (if (l.moreAtLeast != null && l.moreAtLeast > 0) "About ${l.moreAtLeast} more payments and we'll tailor your checks to how you pay. " else "Almost there. ") +
+        "Until then your phone's fingerprint or screen lock confirms each payment."
+
+fun learningProgress(l: Learning): Float {
+    val more = l.moreAtLeast ?: return 0f
+    val done = l.verifiedPayments
+    return if (done + more == 0) 1f else done.toFloat() / (done + more)
 }

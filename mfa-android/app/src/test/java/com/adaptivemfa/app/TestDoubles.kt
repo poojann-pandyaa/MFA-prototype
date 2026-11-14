@@ -9,6 +9,7 @@ class InMemorySettings(
     override var username: String? = null,
     override var baseUrl: String = "http://10.0.2.2:8050",
     override val deviceId: String = "android_test01",
+    override var deviceKeyFor: String? = null,
 ) : Settings
 
 data class Recorded(val method: String, val url: String, val headers: Map<String, String>, val body: String?)

@@ -9,6 +9,7 @@ import androidx.activity.viewModels
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.adaptivemfa.app.data.AmfaApi
+import com.adaptivemfa.app.data.KeystoreSigner
 import com.adaptivemfa.app.data.BankApi
 import com.adaptivemfa.app.data.Store
 import com.adaptivemfa.app.data.UrlConnectionHttp
@@ -25,7 +26,7 @@ class MainActivity : ComponentActivity() {
             initializer {
                 val store = Store(applicationContext)
                 val http = UrlConnectionHttp()
-                AppViewModel(store, BankApi(http, { store.baseUrl }, { store.deviceId }), { link -> AmfaApi(http, link, secure = true, pins = store) })
+                AppViewModel(store, BankApi(http, { store.baseUrl }, { store.deviceId }), { link -> AmfaApi(http, link, secure = true, pins = store) }, signer = KeystoreSigner(applicationContext))
             }
         }
     }
