@@ -5,6 +5,20 @@ payment approved by AMFA (`../amfa`). The app was written by Preet against the e
 to the bank and to AMFA's customer API (`/c/v1`) instead, with no WebView: the app keeps its own CameraX capture and
 sends frames to AMFA itself.
 
+## Get the app on any phone (from GitHub)
+
+1. Open the repository's **Releases** page and download `AdaptiveMFA-<version>.apk` from the newest `android-v*` release.
+   (Every push also leaves the APK as a workflow artifact under Actions.)
+2. Open the file on the phone and allow "install unknown apps" for the browser or file manager when asked.
+3. Start the app, open **Settings** and enter the address of an AMFA demo bank the phone can reach, then **Test connection**.
+   A phone on mobile data needs a public HTTPS address (for example a Cloudflare tunnel to the bank); a phone on the same
+   Wi-Fi can use `http://<computer's Wi-Fi IP>:8050`.
+
+To publish a build: `git tag android-v1.2.0 && git push origin android-v1.2.0` (the workflow `.github/workflows/android.yml`
+builds the `demo` variant, which is not debuggable, is signed with a debug key so any phone installs it, and may use plain
+http to a local demo server). To change the address the app starts with, run the workflow by hand and fill in `bank_url`, or
+set the repository variable `AMFA_BANK_URL`; locally pass `-PAMFA_BANK_URL=https://bank.example.com` to Gradle.
+
 ## Look and feel
 
 The screens follow the web bank (`examples/demo_bank/static`): the same colour tokens in light and dark (the phone's

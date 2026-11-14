@@ -1,0 +1,87 @@
+name: android
+
+# Builds the Android app so anyone can install it on a phone.
+#   - every push or pull request that touches mfa-android: build + unit tests, APK kept as a workflow artifact
+#   - a tag like android-v1.2.0: also publishes the APK on a GitHub Release (Releases > Assets > AdaptiveMFA-*.apk)
+#   - "Run workflow" by hand: choose the bank address the app starts with
+on:
+  push:
+    branches: [integration, main]
+    tags: ["android-v*"]
+    paths: ["mfa-android/**", ".github/workflows/android.yml"]
+  pull_request:
+    paths: ["mfa-android/**", ".github/workflows/android.yml"]
+  workflow_dispatch:
+    inputs:
+      bank_url:
+        description: "Bank address the app starts with (it can be changed in Settings)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write          # attach the APK to a release
+    defaults:
+      run:
+        working-directory: mfa-android
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: "platform-tools platforms;android-37.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Version and bank address
+        id: meta
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/android-v* ]]; then
+            name="${GITHUB_REF#refs/tags/android-v}"
+          else
+            name="0.0.${GITHUB_RUN_NUMBER}-dev"
+          fi
+          bank="${{ github.event.inputs.bank_url }}"
+          if [ -z "$bank" ]; then bank="${{ vars.AMFA_BANK_URL }}"; fi
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "code=${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "bank=${bank:-http://10.0.2.2:8050}" >> "$GITHUB_OUTPUT"
+
+      - name: Unit tests
+        run: ./gradlew :app:testDebugUnitTest --no-daemon --console=plain
+
+      - name: Build the demo APK
+        run: >
+          ./gradlew :app:assembleDemo --no-daemon --console=plain
+          -PAPP_VERSION_NAME=${{ steps.meta.outputs.name }}
+          -PAPP_VERSION_CODE=${{ steps.meta.outputs.code }}
+          -PAMFA_BANK_URL=${{ steps.meta.outputs.bank }}
+
+      - name: Name the file
+        run: cp app/build/outputs/apk/demo/app-demo.apk "AdaptiveMFA-${{ steps.meta.outputs.name }}.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AdaptiveMFA-${{ steps.meta.outputs.name }}
+          path: mfa-android/AdaptiveMFA-*.apk
+
+      - name: Publish on the release
+        if: startsWith(github.ref, 'refs/tags/android-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: mfa-android/AdaptiveMFA-*.apk
+          generate_release_notes: true
+          body: |
+            Install on any Android 8+ phone: download the APK, open it, and allow "install unknown apps" for your browser or file manager.
+            The app starts pointed at `${{ steps.meta.outputs.bank }}`; change it in Settings to the address of your AMFA demo bank.
+            This build is signed with a debug key, so installing a newer build over an older one may need an uninstall first.

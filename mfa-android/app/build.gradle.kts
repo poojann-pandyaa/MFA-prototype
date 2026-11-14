@@ -11,14 +11,25 @@ android {
         applicationId = "com.adaptivemfa.app"
         minSdk = 26          // Android 8.0
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0.0"
+        // CI sets these from the release tag: -PAPP_VERSION_NAME=1.2.0 -PAPP_VERSION_CODE=12
+        versionCode = (project.findProperty("APP_VERSION_CODE") as String?)?.toInt() ?: 1
+        versionName = (project.findProperty("APP_VERSION_NAME") as String?) ?: "1.0.0"
+        // The bank the app talks to until someone changes it in Settings: -PAMFA_BANK_URL=https://bank.example.com
+        val bank = (project.findProperty("AMFA_BANK_URL") as String?) ?: "http://10.0.2.2:8050"
+        buildConfigField("String", "DEFAULT_BANK_URL", "\"$bank\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
+        }
+        // What GitHub publishes for people to try: not debuggable, signed with the debug key so any phone can
+        // install it, and (src/demo manifest) allowed to talk to a plain-http demo server on a local network.
+        create("demo") {
+            initWith(getByName("release"))
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += "release"
         }
     }
     compileOptions {

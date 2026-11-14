@@ -31,6 +31,6 @@ class Store(context: Context) : Settings {
             ?: ("android_" + UUID.randomUUID().toString().replace("-", "").take(12)).also { p.edit().putString("deviceId", it).apply() }
 
     companion object {
-        const val DEFAULT_BASE_URL = "http://10.0.2.2:8050"
+        val DEFAULT_BASE_URL: String = com.adaptivemfa.app.BuildConfig.DEFAULT_BANK_URL
     }
 }
