@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -127,6 +128,13 @@ class QuietHours(BaseModel):
         return hour >= self.start or hour < self.end
 
 
+class OtpMethod(str, Enum):
+    """How a customer of this bank may receive or generate the one-time code."""
+    EMAIL = "email"
+    SMS = "sms"
+    AUTHENTICATOR = "authenticator"
+
+
 class TenantPolicy(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -152,6 +160,10 @@ class TenantPolicy(BaseModel):
     ], max_length=20)
     permittedFactors: list[Factor] = Field(
         default_factory=lambda: [Factor.OTP, Factor.UEBA, Factor.FACE, Factor.VOICE])
+    # the bank chooses how the one-time code reaches its customers: sent by email or text, or made by an
+    # authenticator app the customer sets up; any mix. A method left out is neither offered nor accepted.
+    otpMethods: list[OtpMethod] = Field(default_factory=lambda: [OtpMethod.EMAIL, OtpMethod.SMS, OtpMethod.AUTHENTICATOR],
+                                        min_length=1)
     padModes: dict[str, str] = Field(default_factory=lambda: {"FACE": "advisory", "VOICE": "advisory"})
     attemptBudget: dict[str, int] = Field(default_factory=lambda: {
         "OTP": 3, "UEBA": 2, "FACE": 2, "VOICE": 2})
@@ -180,6 +192,11 @@ class TenantPolicy(BaseModel):
         if Factor.OTP not in v and not (Factor.FACE in v or Factor.VOICE in v):
             raise ValueError("without OTP, FACE or VOICE must be permitted as the dynamic factor")
         return v
+
+    @field_validator("otpMethods")
+    @classmethod
+    def unique_methods(cls, v):
+        return list(dict.fromkeys(v))
 
     @field_validator("padModes")
     @classmethod

@@ -203,3 +203,37 @@ class BehaviourApiTest {
         assertEquals(null, noShape.shape)
     }
 }
+
+class AuthenticatorApiTest {
+    private val link = AmfaLink("http://amfa:8040", "tok-3")
+
+    @Test fun authenticatorSetupStartsWithASecretAndConfirmsWithACode() {
+        val http = RoutedHttp(
+            "POST /c/v1/enrollment/totp/start" to ok("""{"otpauthUri":"otpauth://totp/Bank:me?secret=ABCD2345EFGH6789&issuer=Bank","qrSvg":"<svg/>","secret":"ABCD2345EFGH6789"}"""),
+            "POST /c/v1/enrollment/totp/confirm" to ok("""{"enrolled":true,"factor":"OTP"}"""))
+        val api = AmfaApi(http, link)
+        val t = api.totpStart()
+        assertEquals("ABCD2345EFGH6789", t.secret)
+        assertTrue(t.otpauthUri.startsWith("otpauth://totp/"))
+        api.totpConfirm("123456")
+        assertEquals("123456", JSONObject(http.last("/totp/confirm").body!!).getString("code"))
+    }
+
+    @Test fun aBankThatDoesNotUseAuthenticatorsSaysSo() {
+        val http = RoutedHttp("POST /c/v1/enrollment/totp/start" to HttpResult(403, """{"error":{"code":"METHOD_NOT_ALLOWED","message":"this bank does not use an authenticator app"}}"""))
+        try { AmfaApi(http, link).totpStart(); fail() } catch (e: ApiException) {
+            assertEquals("METHOD_NOT_ALLOWED", e.code); assertTrue(e.message.contains("authenticator"))
+        }
+    }
+
+    @Test fun resendReturnsTheSessionWithTheNewChallenge() {
+        val http = RoutedHttp("POST /c/v1/session/otp/resend" to ok("""{"status":"PENDING","steps":[{"factor":"OTP","status":"PENDING"}],
+            "challenge":{"challengeId":"ch_99999999999999999999","factor":"OTP","params":{"mode":"delivered","sentTo":"a***@example.com"}}}"""))
+        assertEquals("ch_99999999999999999999", AmfaApi(http, link).resendCode().challenge!!.id)
+    }
+
+    @Test fun enrolmentStateListsTheMethodsTheBankAllows() {
+        val http = RoutedHttp("GET /c/v1/enrollment" to ok("""{"consent":{"required":false,"version":"v"},"enrolled":{"OTP":false},"otpMethods":["email","authenticator"]}"""))
+        assertEquals(listOf("email", "authenticator"), AmfaApi(http, link).enrollmentState().otpMethods)
+    }
+}

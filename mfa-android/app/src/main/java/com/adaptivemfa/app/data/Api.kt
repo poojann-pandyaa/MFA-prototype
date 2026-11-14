@@ -34,6 +34,7 @@ data class Me(
     val faceEnrolled: Boolean,
     val voiceEnrolled: Boolean,
     val typingEnrolled: Boolean,
+    val authenticatorEnrolled: Boolean,
     val protection: String,
     val have: List<String>,
     val canAdd: List<String>,
@@ -133,6 +134,7 @@ class BankApi(
             faceEnrolled = j.optJSONObject("enrolled")?.optString("FACE") == "ENROLLED",
             voiceEnrolled = j.optJSONObject("enrolled")?.optString("VOICE") == "ENROLLED",
             typingEnrolled = j.optJSONObject("enrolled")?.optString("UEBA") == "ENROLLED",
+            authenticatorEnrolled = j.optJSONObject("enrolled")?.optBoolean("OTP_TOTP", false) ?: false,
             protection = prot?.optString("level") ?: "", have = prot?.texts("have") ?: emptyList(), canAdd = prot?.texts("canAdd") ?: emptyList(),
             frozen = j.optBoolean("frozen", false), dailyLimitMinor = j.optLong("dailyLimit"), sentTodayMinor = j.optLong("sentToday"),
             codeTo = j.optString("codeTo"),
@@ -187,9 +189,13 @@ fun parseAmfaLink(url: String): AmfaLink {
 
 // ---------------------------------------------------------------- AMFA customer API (/c/v1)
 
+/** The secret of an authenticator setup, and the otpauth:// link that opens it in an authenticator app. */
+data class TotpSetup(val otpauthUri: String, val secret: String)
+
 /** What the customer still has to do for the factor this link asked for; [behaviour] is the typing phrase and trace. */
 data class EnrollState(
     val consentRequired: Boolean, val consentVersion: String, val enrolled: Map<String, Boolean>, val behaviour: Behaviour?,
+    val otpMethods: List<String> = emptyList(),
 ) {
     val faceEnrolled get() = enrolled["FACE"] == true
 }
@@ -222,8 +228,9 @@ class AmfaApi(private val http: Http, private val link: AmfaLink) {
         val done = j.optJSONObject("enrolled")
         val b = j.optJSONObject("behaviour")
         return EnrollState(consent?.optBoolean("required", true) ?: true, consent?.optString("version") ?: "",
-            listOf("FACE", "VOICE", "UEBA").associateWith { done?.optBoolean(it, false) ?: false },
-            b?.let { Behaviour(it.optString("phrase"), it.optInt("repetitions", 10), parseShape(it.optJSONArray("shape")) ?: emptyList(), it.optInt("shapeTracesRequired", 4)) })
+            listOf("FACE", "VOICE", "UEBA", "OTP").associateWith { done?.optBoolean(it, false) ?: false },
+            b?.let { Behaviour(it.optString("phrase"), it.optInt("repetitions", 10), parseShape(it.optJSONArray("shape")) ?: emptyList(), it.optInt("shapeTracesRequired", 4)) },
+            j.optJSONArray("otpMethods")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList())
     }
 
     fun consent(version: String) {
@@ -249,6 +256,20 @@ class AmfaApi(private val http: Http, private val link: AmfaLink) {
         val j = call(http, "POST", url("/enrollment/behaviour"), body, link.token)
         return if (j.optBoolean("enrolled", false)) null else j.optString("reason", "REJECTED")
     }
+
+    /** Starts an authenticator-app setup: the secret to type or open in the app. */
+    fun totpStart(): TotpSetup {
+        val j = call(http, "POST", url("/enrollment/totp/start"), JSONObject(), link.token)
+        return TotpSetup(j.getString("otpauthUri"), j.getString("secret"))
+    }
+
+    /** Confirms the app by the 6-digit code it shows. */
+    fun totpConfirm(code: String) {
+        call(http, "POST", url("/enrollment/totp/confirm"), JSONObject().put("code", code), link.token)
+    }
+
+    /** Sends a fresh emailed or texted code and returns the session with its new challenge. */
+    fun resendCode(): SessionState = parseSession(call(http, "POST", url("/session/otp/resend"), JSONObject(), link.token))
 
     fun enrollComplete() {
         call(http, "POST", url("/enrollment/complete"), JSONObject(), link.token)

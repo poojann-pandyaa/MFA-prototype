@@ -115,7 +115,10 @@ def deliver(contact: dict, message: str) -> str:
         msg["From"], msg["To"], msg["Subject"] = s.smtp_from, contact["to"], "Your approval code"
         msg.set_content(message)
         with smtplib.SMTP(s.smtp_host, s.smtp_port, timeout=10) as smtp:
-            smtp.starttls()
+            # Production always encrypts the connection. A local mail sink used while developing may not offer it.
+            smtp.ehlo()
+            if s.production or smtp.has_extn("starttls"):
+                smtp.starttls()
             if s.smtp_user:
                 smtp.login(s.smtp_user, s.smtp_password or "")
             smtp.send_message(msg)

@@ -334,4 +334,58 @@ class AppViewModelTest {
         vm.submitTyping(org.json.JSONArray(), null)
         assertFalse(JSONObject(http.last("/factors/UEBA").body!!).getJSONObject("payload").has("shapeTrace"))
     }
+
+    // ---- authenticator app and resend
+
+    @Test fun authenticatorSetupShowsTheSecretThenConfirmsAndCompletes() {
+        val http = setupHttp("otp", """{"consent":{"required":false,"version":"v1"},"enrolled":{"OTP":false},"otpMethods":["authenticator"]}""",
+            "POST /c/v1/enrollment/totp/start" to ok("""{"otpauthUri":"otpauth://totp/Bank:me?secret=ABCD2345","qrSvg":"","secret":"ABCD2345"}"""),
+            "POST /c/v1/enrollment/totp/confirm" to ok("""{"enrolled":true,"factor":"OTP"}"""))
+        val vm = signedIn(http)
+        vm.startSetup("OTP")
+        assertEquals("ABCD2345", (vm.screen as Screen.AuthenticatorSetup).secret)
+        assertEquals("OTP", JSONObject(http.last("/api/amfa/enrol").body!!).getJSONArray("factors").getString(0))
+        vm.confirmAuthenticator(" 123456 ")
+        assertEquals("123456", JSONObject(http.last("/totp/confirm").body!!).getString("code"))
+        assertTrue(http.called("/enrollment/complete"))
+        assertEquals(Screen.Home, vm.screen)
+        assertTrue(vm.notice!!.startsWith("Authenticator app set up"))
+    }
+
+    @Test fun aWrongAuthenticatorCodeStaysOnTheSetupScreen() {
+        val http = setupHttp("otp", """{"consent":{"required":false,"version":"v1"},"enrolled":{"OTP":false}}""",
+            "POST /c/v1/enrollment/totp/start" to ok("""{"otpauthUri":"otpauth://totp/x","qrSvg":"","secret":"ABCD2345"}"""),
+            "POST /c/v1/enrollment/totp/confirm" to HttpResult(400, """{"error":{"code":"OTP_INVALID","message":"that code is not valid"}}"""))
+        val vm = signedIn(http)
+        vm.startSetup("OTP")
+        vm.confirmAuthenticator("000000")
+        assertTrue(vm.screen is Screen.AuthenticatorSetup)
+        assertEquals("that code is not valid", vm.error)
+        assertFalse(http.called("/enrollment/complete"))
+    }
+
+    @Test fun resendingAnEmailedCodeSwapsInTheNewChallenge() {
+        val first = """{"challengeId":"ch_bbbbbbbbbbbbbbbbbbbb","factor":"OTP","params":{"mode":"delivered","sentTo":"a***@example.com"}}"""
+        val second = """{"challengeId":"ch_cccccccccccccccccccc","factor":"OTP","params":{"mode":"delivered","sentTo":"a***@example.com"}}"""
+        val http = RoutedHttp("POST /api/login" to LOGIN, "GET /api/me" to ME_FACE, "GET /api/activity" to ACTIVITY,
+            "POST /api/actions/transfer" to FACE_CHECK, "GET /c/v1/session" to ok(session("PENDING", first)),
+            "POST /c/v1/session/otp/resend" to ok(session("PENDING", second)))
+        val vm = signedIn(http)
+        vm.startPayment("transfer", "BEN-42", 5000.0); vm.confirmPayment()
+        vm.resendCode()
+        assertEquals("ch_cccccccccccccccccccc", (vm.screen as Screen.Verify).session.challenge!!.id)
+        assertEquals("We sent a new code.", vm.notice)
+    }
+
+    @Test fun resendingTooSoonShowsTheServersWaitMessage() {
+        val ch = """{"challengeId":"ch_bbbbbbbbbbbbbbbbbbbb","factor":"OTP","params":{"mode":"delivered","sentTo":"a***@example.com"}}"""
+        val http = RoutedHttp("POST /api/login" to LOGIN, "GET /api/me" to ME_FACE, "GET /api/activity" to ACTIVITY,
+            "POST /api/actions/transfer" to FACE_CHECK, "GET /c/v1/session" to ok(session("PENDING", ch)),
+            "POST /c/v1/session/otp/resend" to HttpResult(429, """{"error":{"code":"OTP_RESEND_WAIT","message":"wait a few seconds before asking for another code"}}"""))
+        val vm = signedIn(http)
+        vm.startPayment("transfer", "BEN-42", 5000.0); vm.confirmPayment()
+        vm.resendCode()
+        assertTrue(vm.screen is Screen.Verify)
+        assertEquals("wait a few seconds before asking for another code", vm.error)
+    }
 }

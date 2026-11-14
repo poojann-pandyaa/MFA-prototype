@@ -36,7 +36,7 @@ or password, the "Behind the scenes" demo drawer, and opening an activity item t
 | Face setup | `BankApi.startFaceSetup()` returns an AMFA link; then `AmfaApi` consents and sends 5 pictures | bank `/api/amfa/enrol`; AMFA `/c/v1/enrollment/{consent,face,complete}` |
 | Send money | `BankApi.startTransfer` declares what the phone can do (camera and touch, no microphone); AMFA plans the checks | bank `/api/actions/transfer` |
 | Face check | `AmfaApi.session()` gives the challenge (turn left or right); the app captures `params.frames` frames `params.intervalMs` apart and submits them | AMFA `/c/v1/session`, `/c/v1/session/factors/FACE` |
-| Code check | a 6-digit code (email or authenticator) | AMFA `/c/v1/session/factors/OTP` |
+| Code check | a 6-digit code: emailed or texted (with "Send a new code"), or from an authenticator app set up in Profile | AMFA `/c/v1/session/factors/OTP`, `/c/v1/session/otp/resend`; setup `/c/v1/enrollment/totp/{start,confirm}` |
 | Voice check | records 3 to 10 s of 16 kHz mono audio (`AudioRecord`), sends it as a base64 WAV | AMFA `/c/v1/session/factors/VOICE`; setup `/c/v1/enrollment/voice` (three sentences) |
 | Typing check | types the phrase in a text box (each key is recovered from the text change, as the web SDK does for phones) and, when asked, traces a line with a finger | AMFA `/c/v1/session/factors/UEBA`; setup `/c/v1/enrollment/behaviour` |
 | Settle | `BankApi.complete` | bank `/api/actions/{id}/complete`: the bank applies the payment only against AMFA's verified proof |

@@ -48,6 +48,7 @@ class MainActivity : ComponentActivity() {
                             is Screen.FaceSetup -> FaceSetupScreen(vm, screen)
                             is Screen.VoiceSetup -> VoiceSetupScreen(vm, screen)
                             is Screen.TypingSetup -> TypingSetupScreen(vm, screen)
+                            is Screen.AuthenticatorSetup -> AuthenticatorSetupScreen(vm, screen)
                             Screen.Home -> HomeScreen(vm)
                             is Screen.Pay -> PayScreen(vm, screen)
                             is Screen.Amount -> AmountScreen(vm, screen)

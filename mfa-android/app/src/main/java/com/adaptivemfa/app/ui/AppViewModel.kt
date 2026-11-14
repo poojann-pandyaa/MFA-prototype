@@ -11,6 +11,7 @@ import com.adaptivemfa.app.data.AmfaLink
 import com.adaptivemfa.app.data.ApiException
 import com.adaptivemfa.app.data.BankApi
 import com.adaptivemfa.app.data.Behaviour
+import com.adaptivemfa.app.data.TotpSetup
 import com.adaptivemfa.app.data.Me
 import com.adaptivemfa.app.data.SessionState
 import com.adaptivemfa.app.data.Started
@@ -44,6 +45,8 @@ sealed interface Screen {
     data class VoiceSetup(val consentRequired: Boolean, val consentVersion: String) : Screen
     /** Typing setup: the phrase [Behaviour.repetitions] times and, on a phone, the traced line. */
     data class TypingSetup(val consentRequired: Boolean, val consentVersion: String, val behaviour: Behaviour) : Screen
+    /** Authenticator-app setup: add [secret] to an app (or open [otpauthUri]) and confirm with the code it shows. */
+    data class AuthenticatorSetup(val otpauthUri: String, val secret: String) : Screen
     data object Home : Screen
     data class Pay(val bills: Boolean = false) : Screen
     data class Amount(val kind: String, val ref: String, val display: String, val initials: String) : Screen
@@ -100,7 +103,7 @@ class AppViewModel(
         when (val s = screen) {
             Screen.Settings -> go(beforeSettings)
             Screen.SignIn, Screen.SignUp -> go(Screen.Welcome)
-            is Screen.FaceSetup, is Screen.VoiceSetup, is Screen.TypingSetup -> { go(Screen.Home); notice = "You can set this up later from Profile." }
+            is Screen.FaceSetup, is Screen.VoiceSetup, is Screen.TypingSetup, is Screen.AuthenticatorSetup -> { go(Screen.Home); notice = "You can set this up later from Profile." }
             is Screen.Amount -> go(Screen.Pay(s.kind == "bill"))
             is Screen.Review -> cancelReview()
             is Screen.Verify -> cancelVerify()
@@ -181,11 +184,33 @@ class AppViewModel(
         val api = amfaApi(link)
         val state = withContext(io) { api.enrollmentState() }
         if (state.enrolled[factor] == true) return finishSetup("That check is already set up.")
+        if (factor == "OTP") {
+            val t = withContext(io) { api.totpStart() }
+            return go(Screen.AuthenticatorSetup(t.otpauthUri, t.secret))
+        }
         go(when (factor) {
             "VOICE" -> Screen.VoiceSetup(state.consentRequired, state.consentVersion)
             "UEBA" -> Screen.TypingSetup(state.consentRequired, state.consentVersion, state.behaviour ?: throw ApiException(0, "The bank's typing setup is not available right now."))
             else -> Screen.FaceSetup(state.consentRequired, state.consentVersion)
         })
+    }
+
+    /** Confirms the authenticator app with the code it shows. */
+    fun confirmAuthenticator(code: String) = run {
+        val api = amfa ?: throw ApiException(0, "The setup session ended. Start it again.")
+        withContext(io) { api.totpConfirm(code.trim()); api.enrollComplete() }
+        finishSetup("Authenticator app set up. Payments that need a code will ask for the one it shows.")
+    }
+
+    /** Sends a fresh emailed code while a payment is waiting for one. */
+    fun resendCode() {
+        val v = screen as? Screen.Verify ?: return
+        run {
+            val api = amfa ?: throw ApiException(0, "The approval session ended. Start the payment again.")
+            val session = withContext(io) { api.resendCode() }
+            screen = Screen.Verify(v.actionId, session)
+            notice = "We sent a new code."
+        }
     }
 
     /** [frames] are the five JPEG data URLs of the setup script. */

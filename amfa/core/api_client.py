@@ -10,9 +10,10 @@ from sqlalchemy import func, select
 
 from amfa.common import crypto
 from amfa.common.web import ApiError, rate_limit
-from amfa.core import audit, db, factors, orchestrator, otp, webhooks
+from amfa.core import audit, context_builder, db, factors, orchestrator, otp, webhooks
 from amfa.core.auth import ClientCaller, client_caller
 from amfa.core.context_builder import device_key
+from amfa.engine.policy import OtpMethod
 
 router = APIRouter(prefix="/c/v1", tags=["customer"])
 log = logging.getLogger("amfa.client")
@@ -104,7 +105,8 @@ def enrollment_state(caller: ClientCaller = Depends(enroll_caller)):
                             "version": CONSENT_VERSION, "purposes": CONSENT_PURPOSES,
                             "retention": "templates are kept until you or the bank remove them; "
                                          "raw images and recordings are never stored"},
-                "otpDelivery": bool(customer.contact_sealed),
+                "otpDelivery": context_builder.contact_channel(customer) in {m.value for m in _policy(s, caller.tenant_id).otpMethods},
+                "otpMethods": [m.value for m in _policy(s, caller.tenant_id).otpMethods],
                 "attestation": {"required": _policy(s, caller.tenant_id).attestation.required,
                                 "challenge": crypto.b64e(__import__("amfa.core.attestation", fromlist=["x"])
                                                          .challenge_for("enroll", caller.token_id))},
@@ -136,6 +138,8 @@ def totp_start(caller: ClientCaller = Depends(enroll_caller)):
     rate_limit(f"enroll:{caller.customer_id}:totp", 10, 600)
     with db.session() as s:
         tenant, customer = _load(s, caller)
+        if OtpMethod.AUTHENTICATOR not in _policy(s, caller.tenant_id).otpMethods:
+            raise ApiError(403, "METHOD_NOT_ALLOWED", "this bank does not use an authenticator app")
         cred = s.get(db.TotpCredential, customer.id)
         if cred is not None and cred.confirmed and not caller.may_replace:
             raise ApiError(409, "ALREADY_ENROLLED", "an authenticator is already enrolled")

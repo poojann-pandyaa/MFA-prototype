@@ -317,6 +317,7 @@ private fun CodeCheck(vm: AppViewModel, ch: AmfaChallenge) {
         H3(if (ch.mode == "totp") "Enter your authenticator code" else "Enter the code we sent")
         Muted(if (ch.mode == "totp") "Open your authenticator app and enter the 6-digit code for this bank." else "We sent it to ${ch.sentTo ?: "you"}. The message names this amount and payee, so check they match.")
         CodeBoxes(code, { code = it }, enabled = !vm.busy)
+        if (ch.mode != "totp") LinkText("Send a new code", small = true, modifier = Modifier.align(Alignment.CenterHorizontally)) { vm.resendCode() }
     }
     Btn("Confirm", enabled = code.length == 6, busy = vm.busy) { vm.submitCode(code); code = "" }
 }

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 import time
 from dataclasses import dataclass, field
@@ -9,7 +10,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 
-from amfa.common import geo
+from amfa.common import crypto, geo
 from amfa.common.contract import FAILED, SPOOF_DETECTED
 from amfa.common.crypto import keyed_hash
 from amfa.core import db, factors
@@ -72,7 +73,29 @@ def _hour_deviation(hour: int, histogram: list[int]) -> float:
     return diff * 24 / (2 * math.pi) * conc
 
 
-def enrollment_of(s, customer: db.Customer) -> Enrollment:
+def contact_channel(customer: db.Customer) -> Optional[str]:
+    """"email" or "sms" for the address or number the bank gave, None if it gave none."""
+    if not customer.contact_sealed:
+        return None
+    try:
+        return json.loads(crypto.open_(customer.contact_sealed, f"contact|{customer.id}", "contact")).get("channel")
+    except Exception:
+        return None
+
+
+def otp_route(s, customer: db.Customer, policy: TenantPolicy) -> Optional[str]:
+    """How this customer's one-time code is produced under the bank's policy: "totp" (an authenticator app they
+    confirmed), "delivered" (sent to the contact the bank gave) or None (the bank allows neither for them)."""
+    methods = {m.value for m in policy.otpMethods}
+    cred = s.get(db.TotpCredential, customer.id)
+    if cred is not None and cred.confirmed and "authenticator" in methods:
+        return "totp"
+    if contact_channel(customer) in methods:
+        return "delivered"
+    return None
+
+
+def enrollment_of(s, customer: db.Customer, policy: Optional[TenantPolicy] = None) -> Enrollment:
     rows = {e.factor: e for e in s.execute(select(db.Enrollment).where(
         db.Enrollment.customer_id == customer.id, db.Enrollment.status == "ENROLLED")).scalars()}
     ueba = rows.get("UEBA")
@@ -81,7 +104,7 @@ def enrollment_of(s, customer: db.Customer) -> Enrollment:
     inputs = d.get("inputs", ["keyboard"]) if ueba else []
     shapes = d.get("shapeInputs", ["keyboard"] if d.get("shape") else [])
     return Enrollment(
-        otp="OTP" in rows or bool(customer.contact_sealed),
+        otp=(otp_route(s, customer, policy) is not None) if policy is not None else ("OTP" in rows or bool(customer.contact_sealed)),
         face="FACE" in rows,
         voice="VOICE" in rows,
         keystroke="keyboard" in inputs,
@@ -185,7 +208,7 @@ def assemble(s, tenant: db.Tenant, customer: db.Customer, txn_id: str, t: TxnInp
         device=DeviceCtx(deviceKnown=device_known, locationKnown=location_known,
                          hourUnusual=hour_unusual, channel=t.channel),
         behavioural=behavioural,
-        enrollment=enrollment_of(s, customer),
+        enrollment=enrollment_of(s, customer, policy),
         capability=capability,
         policy=Policy(actionFloor=floor, guidance=policy.agent.guidance if policy.agent.enabled else None,
                       smallPaymentCap=policy.smallPaymentCap, lowTouch=policy.lowTouch),

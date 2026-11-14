@@ -316,6 +316,7 @@ fun ProfileScreen(vm: AppViewModel) {
         ListCard(listOf(
             { Item({ Tile("face") }, "Face check", { SubText(if (me.faceEnrolled) "Set up" else "Not set up yet") }, if (me.faceEnrolled) ({ Chip("Ready", "ok") }) else ({ SoftBtn("Set up") { vm.startSetup("FACE") } })) },
             { Item({ Tile("phone") }, "Voice", { SubText(if (me.voiceEnrolled) "Set up" else "Read three sentences aloud") }, if (me.voiceEnrolled) ({ Chip("Ready", "ok") }) else ({ SoftBtn("Set up") { vm.startSetup("VOICE") } })) },
+            { Item({ Tile("lock") }, "Authenticator app", { SubText(if (me.authenticatorEnrolled) "Set up" else "Codes from an app on this phone") }, if (me.authenticatorEnrolled) ({ Chip("Ready", "ok") }) else ({ SoftBtn("Set up") { vm.startSetup("OTP") } })) },
             { Item({ Tile("key") }, "Typing", { SubText(if (me.typingEnrolled) "Set up" else "Your typing rhythm and swipe") }, if (me.typingEnrolled) ({ Chip("Ready", "ok") }) else ({ SoftBtn("Set up") { vm.startSetup("UEBA") } })) },
             { Item({ Tile("phone") }, "This phone", { SubText("Calls the bank at ${vm.store.baseUrl}") }, chevron = true) { vm.go(Screen.Settings) } },
         ))

@@ -13,7 +13,7 @@ from sqlalchemy.orm.exc import StaleDataError
 from amfa.common import crypto
 from amfa.common.contract import (FAILED, INSUFFICIENT_DATA, PASSED, SPOOF_DETECTED, UNAVAILABLE)
 from amfa.common.web import ApiError
-from amfa.core import audit, db, factors, otp, proofs, webhooks
+from amfa.core import audit, context_builder, db, factors, otp, proofs, webhooks
 from amfa.engine.agent import reassess
 from amfa.engine.availability import available
 from amfa.engine.context import Band, Context, Factor, dynamic_factors
@@ -119,13 +119,13 @@ def issue_challenge(s, sess: db.AuthSession, customer: db.Customer, txn: db.Tran
 
     params: dict = {}
     if factor == "OTP":
-        cred = s.get(db.TotpCredential, customer.id)
+        route = context_builder.otp_route(s, customer, TenantPolicy.model_validate(tenant.policy))
         sent = s.execute(select(db.OtpCode).where(
             db.OtpCode.session_id == sess.id, db.OtpCode.consumed_at.is_(None),
             db.OtpCode.expires_at > now + 10).order_by(db.OtpCode.created_at.desc())).scalars().first()
         last = s.execute(select(db.Challenge).where(db.Challenge.session_id == sess.id, db.Challenge.factor == "OTP")
                          .order_by(db.Challenge.expires_at.desc())).scalars().first()
-        if cred is not None and cred.confirmed:
+        if route == "totp":
             params = {"mode": "totp", "digits": otp.DIGITS}
         elif sent is not None and last is not None and last.params.get("mode") == "delivered":
             # a retry after a wrong code: the code already sent still works, so don't send another
@@ -139,8 +139,8 @@ def issue_challenge(s, sess: db.AuthSession, customer: db.Customer, txn: db.Tran
                 db.OtpCode.session_id == sess.id)).scalar_one()
             if sends >= MAX_OTP_SENDS:
                 raise ApiError(429, "OTP_SEND_LIMIT", "too many codes requested for this session")
-            if not customer.contact_sealed:
-                raise ApiError(409, "NO_OTP_CHANNEL", "no authenticator or contact enrolled")
+            if route != "delivered":
+                raise ApiError(409, "NO_OTP_CHANNEL", "this bank's one-time code is not available to this customer")
             import json
             contact = json.loads(crypto.open_(customer.contact_sealed, f"contact|{customer.id}", "contact"))
             code = otp.new_code()

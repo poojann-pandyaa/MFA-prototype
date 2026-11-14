@@ -262,3 +262,34 @@ fun TypingCheck(vm: AppViewModel, ch: AmfaChallenge) {
         }
     }
 }
+
+// ---------------------------------------------------------------- authenticator app
+
+/** Shows the secret in groups of four, a button that opens it in an authenticator app, and the code boxes to confirm. */
+@Composable
+fun AuthenticatorSetupScreen(vm: AppViewModel, s: Screen.AuthenticatorSetup) {
+    val context = LocalContext.current
+    var code by rememberSaveable { mutableStateOf("") }
+    var problem by remember { mutableStateOf<String?>(null) }
+    Page {
+        TopBar(label = "Authenticator app", onBack = { vm.back() })
+        H1("Set up an authenticator app")
+        Lede("Use Google Authenticator, Microsoft Authenticator, Authy or any app that makes 6-digit codes.")
+        Messages(vm)
+        problem?.let { Note("warn", "info", it) }
+        CardBox {
+            H3("1. Add this account")
+            Btn("Open in my authenticator app", BtnKind.Secondary) {
+                try { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(s.otpauthUri))) }
+                catch (e: android.content.ActivityNotFoundException) { problem = "No authenticator app was found. Install one, or type the key below into it yourself." }
+            }
+            Muted("Or add it by hand with this key:", small = true)
+            Text(s.secret.chunked(4).joinToString(" "), color = C.ink, fontSize = 18.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+        }
+        CardBox {
+            H3("2. Enter the code it shows")
+            CodeBoxes(code, { code = it }, enabled = !vm.busy)
+        }
+        Btn("Confirm", enabled = code.length == 6, busy = vm.busy) { vm.confirmAuthenticator(code); code = "" }
+    }
+}
