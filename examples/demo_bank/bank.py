@@ -3,6 +3,7 @@ approved by AMFA first. The bank starts an AMFA transaction, the customer comple
 for, and the bank only acts after verifying and consuming a signed proof bound to that exact action."""
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import ipaddress
@@ -654,6 +655,47 @@ async def webhook(request: Request):
     if hit is not None:
         settle(CUSTOMERS[hit[0]], hit[1])
     return {"received": True}
+
+
+# ---------- one-time codes AMFA hands to the bank to deliver ----------
+#
+# With AMFA_OTP_PROVIDER=webhook, AMFA does not email or text the code; it posts it, signed, to the bank, which sends it
+# through its own channel. A real bank would email or text it. This demo has neither, so with demo tools on it keeps the
+# latest code per customer for a few minutes and shows it to that signed-in customer ("Show demo code"), which is what
+# lets people try a hosted demo without a mailbox.
+
+OTP_WEBHOOK_SECRET = os.getenv("AMFA_OTP_WEBHOOK_SECRET", "")
+CODE_SHOWN_S = 180
+_codes: dict[str, dict] = {}       # username -> {"code", "message", "at"}; in memory only, never saved
+
+
+@app.post("/webhooks/otp")
+async def otp_webhook(request: Request):
+    body = await request.body()
+    want = hmac.new(OTP_WEBHOOK_SECRET.encode(), body, hashlib.sha256).hexdigest() if OTP_WEBHOOK_SECRET else None
+    if want is None or not hmac.compare_digest(want, request.headers.get("x-amfa-signature", "")):
+        raise HTTPException(401, "bad signature")
+    msg = json.loads(body)
+    if abs(time.time() - float(msg.get("ts", 0))) > 300:
+        raise HTTPException(400, "stale message")
+    text = base64.urlsafe_b64decode(msg["messageB64"] + "=" * (-len(msg["messageB64"]) % 4)).decode()
+    digits = re.match(r"\d{6}", text)
+    with _lock:
+        for username, c in CUSTOMERS.items():
+            if code_contact(c)["to"] == msg.get("to"):
+                _codes[username] = {"code": digits.group(0) if digits else None, "message": text, "at": time.time()}
+    # a real bank would now send `text` to msg["to"] by email or SMS
+    return {"received": True}
+
+
+@app.get("/api/demo/code")
+def demo_code(request: Request):
+    """The customer's latest code, only on a demo server and only for the signed-in customer."""
+    _demo(request)
+    hit = _codes.get(_username(request))
+    if not hit or time.time() - hit["at"] > CODE_SHOWN_S:
+        return {"code": None}
+    return {"code": hit["code"], "message": hit["message"], "secondsLeft": int(CODE_SHOWN_S - (time.time() - hit["at"]))}
 
 
 # ---------- demo tools: stage the signals a real bank would learn from its own systems ----------

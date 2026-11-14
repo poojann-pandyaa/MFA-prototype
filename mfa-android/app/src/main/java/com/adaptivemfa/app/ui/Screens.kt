@@ -318,6 +318,10 @@ private fun CodeCheck(vm: AppViewModel, ch: AmfaChallenge) {
         Muted(if (ch.mode == "totp") "Open your authenticator app and enter the 6-digit code for this bank." else "We sent it to ${ch.sentTo ?: "you"}. The message names this amount and payee, so check they match.")
         CodeBoxes(code, { code = it }, enabled = !vm.busy)
         if (ch.mode != "totp") LinkText("Send a new code", small = true, modifier = Modifier.align(Alignment.CenterHorizontally)) { vm.resendCode() }
+        if (ch.mode != "totp" && vm.me?.demoTools == true) {
+            vm.demoCode?.let { Note("brand", "info", "This is a demo server, so no email is sent. Your code is $it.") }
+            LinkText("Show demo code", small = true, modifier = Modifier.align(Alignment.CenterHorizontally)) { vm.fetchDemoCode() }
+        }
     }
     Btn("Confirm", enabled = code.length == 6, busy = vm.busy) { vm.submitCode(code); code = "" }
 }

@@ -42,6 +42,8 @@ data class Me(
     val dailyLimitMinor: Long,
     val sentTodayMinor: Long,
     val codeTo: String,
+    /** True on a demo server, where the bank can show the customer the code it was handed instead of sending it. */
+    val demoTools: Boolean = false,
 )
 
 /** One payment or account change as the bank shows it to the customer (never the risk score or AMFA's decision). */
@@ -137,9 +139,12 @@ class BankApi(
             authenticatorEnrolled = j.optJSONObject("enrolled")?.optBoolean("OTP_TOTP", false) ?: false,
             protection = prot?.optString("level") ?: "", have = prot?.texts("have") ?: emptyList(), canAdd = prot?.texts("canAdd") ?: emptyList(),
             frozen = j.optBoolean("frozen", false), dailyLimitMinor = j.optLong("dailyLimit"), sentTodayMinor = j.optLong("sentToday"),
-            codeTo = j.optString("codeTo"),
+            codeTo = j.optString("codeTo"), demoTools = j.optBoolean("demoTools", false),
         )
     }
+
+    /** On a demo server: the latest code the bank was handed for this customer, or null if there is none yet. */
+    fun demoCode(): String? = call(http, "GET", url("/api/demo/code")).let { if (it.isNull("code")) null else it.optString("code").ifEmpty { null } }
 
     /** Asks the bank to have AMFA open an enrolment for this customer: "FACE", "VOICE" or "UEBA" (typing). */
     fun startSetup(factor: String): AmfaLink =

@@ -1,9 +1,24 @@
 // Full-screen host for AMFA's own setup and verification pages. AMFA captures the face, voice and codes on
 // its origin; this layer gives it the bank's header and step progress so it feels like one app.
+import { api } from "./api.js";
 import { state } from "./app.js";
 import { h, icon, iconButton, stepsBar } from "./ui.js";
 
 const STEP_NAMES = { OTP: "code", FACE: "face", VOICE: "voice", UEBA: "typing", CONSENT: "consent", DEVICE: "this device" };
+
+// On a demo server no email or text is sent: the bank keeps the latest code for the signed-in customer and shows it on request.
+function demoCode() {
+  if (!state.me || !state.me.demoTools) return null;
+  const out = h("strong", { style: { marginLeft: "6px" } });
+  const btn = h("button", { type: "button", class: "link small", text: "Show demo code", style: { marginLeft: "10px" } });
+  btn.addEventListener("click", async () => {
+    try {
+      const r = await api("GET", "/api/demo/code");
+      out.textContent = r.code ? `Your code: ${r.code}` : "No code yet: ask for one first.";
+    } catch (e) { out.textContent = e.message; }
+  });
+  return h("span", {}, btn, out);
+}
 
 export function openAmfa(url, { flow = "session", title = "Confirm it's you" } = {}) {
   return new Promise((resolve) => {
@@ -16,7 +31,7 @@ export function openAmfa(url, { flow = "session", title = "Confirm it's you" } =
         h("div", { class: "topbar" }, iconButton("close", "Close", () => finish({ closed: true })), label, h("span", { style: { width: "44px" } })),
         bars),
       frame,
-      h("div", { class: "foot" }, icon("lock", 14), "Secured by Demo Bank · nothing is recorded or kept"));
+      h("div", { class: "foot", style: { flexWrap: "wrap" } }, icon("lock", 14), "Secured by Demo Bank · nothing is recorded or kept", demoCode()));
 
     function finish(result) {
       window.removeEventListener("message", onMessage);

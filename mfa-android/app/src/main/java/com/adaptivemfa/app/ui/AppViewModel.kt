@@ -83,12 +83,16 @@ class AppViewModel(
     var activity by mutableStateOf<List<ActivityItem>>(emptyList())
         private set
 
+    /** The code a demo server showed for the payment in progress (null until asked for). */
+    var demoCode by mutableStateOf<String?>(null)
+        private set
     private var amfa: AmfaApi? = null
     private var pending: Started? = null
 
     fun go(to: Screen) {
         error = null
         notice = null
+        demoCode = null
         if (to == Screen.Settings && screen != Screen.Settings) beforeSettings = screen
         screen = to
     }
@@ -202,6 +206,13 @@ class AppViewModel(
         finishSetup("Authenticator app set up. Payments that need a code will ask for the one it shows.")
     }
 
+    /** Demo servers send no email: ask the bank for the code it was handed for this customer. */
+    fun fetchDemoCode() = run {
+        val code = withContext(io) { bank.demoCode() }
+        demoCode = code
+        if (code == null) error = "No code yet. The bank shows one a moment after it is requested."
+    }
+
     /** Sends a fresh emailed code while a payment is waiting for one. */
     fun resendCode() {
         val v = screen as? Screen.Verify ?: return
@@ -209,6 +220,7 @@ class AppViewModel(
             val api = amfa ?: throw ApiException(0, "The approval session ended. Start the payment again.")
             val session = withContext(io) { api.resendCode() }
             screen = Screen.Verify(v.actionId, session)
+            demoCode = null
             notice = "We sent a new code."
         }
     }
@@ -295,6 +307,7 @@ class AppViewModel(
     private suspend fun advance(actionId: String, out: Submitted) {
         if (out.session.status != "PENDING") return settle(actionId)
         screen = Screen.Verify(actionId, out.session)
+        demoCode = null
         error = if (out.factorStatus == "PASSED") null else (out.guidance ?: "That didn't work. Please try again.")
     }
 

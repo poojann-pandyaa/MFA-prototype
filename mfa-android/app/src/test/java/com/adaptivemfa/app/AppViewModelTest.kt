@@ -388,4 +388,23 @@ class AppViewModelTest {
         assertTrue(vm.screen is Screen.Verify)
         assertEquals("wait a few seconds before asking for another code", vm.error)
     }
+
+    // ---- demo server: the bank shows the code it was handed
+
+    @Test fun aDemoServerShowsTheCodeAndAskingAgainBeforeOneExistsSaysSo() {
+        val ch = """{"challengeId":"ch_bbbbbbbbbbbbbbbbbbbb","factor":"OTP","params":{"mode":"delivered","sentTo":"a***@example.com"}}"""
+        val me = ok("""{"name":"Alice Rao","balance":50000000,"enrolled":{"FACE":"ENROLLED"},"demoTools":true,"protection":{"level":"Good"},"payees":[{"ref":"BEN-42","display":"V. Mehta"}]}""")
+        val http = RoutedHttp("POST /api/login" to LOGIN, "GET /api/me" to me, "GET /api/activity" to ACTIVITY,
+            "POST /api/actions/transfer" to FACE_CHECK, "GET /c/v1/session" to ok(session("PENDING", ch)),
+            "GET /api/demo/code" to ok("""{"code":null}"""))
+        val vm = signedIn(http)
+        assertTrue(vm.me!!.demoTools)
+        vm.startPayment("transfer", "BEN-42", 5000.0); vm.confirmPayment()
+        vm.fetchDemoCode()
+        assertNull(vm.demoCode)
+        assertTrue(vm.error!!.startsWith("No code yet"))
+        http.routes["GET /api/demo/code"] = ok("""{"code":"482913","message":"482913 is your code","secondsLeft":170}""")
+        vm.fetchDemoCode()
+        assertEquals("482913", vm.demoCode)
+    }
 }

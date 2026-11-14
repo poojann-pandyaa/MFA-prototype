@@ -630,3 +630,48 @@ def test_no_key_before_the_approval_has_passed(stack, app):
     auth = {"authorization": "Bearer " + started["challengeUrl"].split("#token=", 1)[1]}
     r = _add_key(stack, auth)
     assert r.status_code == 409 and r.json()["error"]["code"] == "SESSION_NOT_VERIFIED"
+
+
+# ---- codes handed to the bank to deliver (AMFA_OTP_PROVIDER=webhook) and shown on a demo server
+
+def signed_otp(secret, to, text, ts=None, tamper=False):
+    import base64
+    import hashlib
+    import hmac
+    import json
+    raw = json.dumps({"id": "otp_x", "channel": "email", "to": to, "messageB64": base64.urlsafe_b64encode(text.encode()).decode().rstrip("="),
+                      "ts": int(ts or time.time())}, separators=(",", ":")).encode()
+    sig = hmac.new(secret.encode(), raw, hashlib.sha256).hexdigest()
+    return raw, {"x-amfa-signature": ("0" * 64 if tamper else sig), "content-type": "application/json"}
+
+
+def test_a_code_from_amfa_reaches_only_the_customer_it_was_for(stack, app, monkeypatch):
+    monkeypatch.setattr(stack.bank, "OTP_WEBHOOK_SECRET", "s" * 40)
+    other = TestClient(stack.bank.app)
+    other.post("/api/register", json={"username": f"o{uuid.uuid4().hex[:8]}", "name": "Other Person", "password": "long-password-1",
+                                      "phone": "+919800000001", "email": "other@example.com", "deviceId": "device-other-0001"})
+    assert app.get("/api/demo/code").json() == {"code": None}
+    raw, headers = signed_otp("s" * 40, EMAIL, "482913 is your Demo Bank code to approve ₹2,500.00 to V. Mehta. Valid 3 minutes.")
+    assert app.post("/webhooks/otp", content=raw, headers=headers).json() == {"received": True}
+    shown = app.get("/api/demo/code").json()
+    assert shown["code"] == "482913" and shown["secondsLeft"] > 100
+    assert other.get("/api/demo/code").json() == {"code": None}          # someone else's code is not theirs to see
+
+
+def test_a_forged_or_stale_code_message_is_refused(stack, app, monkeypatch):
+    monkeypatch.setattr(stack.bank, "OTP_WEBHOOK_SECRET", "s" * 40)
+    raw, headers = signed_otp("s" * 40, EMAIL, "111111 is your code", tamper=True)
+    assert app.post("/webhooks/otp", content=raw, headers=headers).status_code == 401
+    raw, headers = signed_otp("s" * 40, EMAIL, "111111 is your code", ts=time.time() - 3600)
+    assert app.post("/webhooks/otp", content=raw, headers=headers).status_code == 400
+    raw, headers = signed_otp("wrong-secret-" + "x" * 30, EMAIL, "111111 is your code")
+    assert app.post("/webhooks/otp", content=raw, headers=headers).status_code == 401
+    monkeypatch.setattr(stack.bank, "OTP_WEBHOOK_SECRET", "")
+    raw, headers = signed_otp("", EMAIL, "111111 is your code")
+    assert app.post("/webhooks/otp", content=raw, headers=headers).status_code == 401    # no secret configured: nothing is accepted
+    assert app.get("/api/demo/code").json() == {"code": None}
+
+
+def test_the_code_is_not_shown_when_demo_tools_are_off(stack, app, monkeypatch):
+    monkeypatch.setattr(stack.bank, "DEMO_TOOLS", False)
+    assert app.get("/api/demo/code").status_code == 404
