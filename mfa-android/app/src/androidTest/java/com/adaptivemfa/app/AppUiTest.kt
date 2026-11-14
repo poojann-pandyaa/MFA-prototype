@@ -5,6 +5,8 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.v2.createEmptyComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -36,58 +38,55 @@ class AppUiTest {
     }
 
     @Test fun loginScreenNeedsBothFields() {
-        compose.onNodeWithText("Sign in").assertIsDisplayed()
-        compose.onNodeWithText("Server: http://10.0.2.2:8000").assertIsDisplayed()
-        compose.onNodeWithText("Log in").assertIsNotEnabled()
+        compose.onNodeWithText("Sign in", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithText("Bank: http://10.0.2.2:8050").assertIsDisplayed()
+        compose.onAllNodesWithText("Sign in").onLast().assertIsNotEnabled()
         compose.onNodeWithText("Username").performTextInput("alice")
-        compose.onNodeWithText("Log in").assertIsNotEnabled()
+        compose.onAllNodesWithText("Sign in").onLast().assertIsNotEnabled()
         compose.onNodeWithText("Password").performTextInput("pw")
-        compose.onNodeWithText("Log in").assertIsEnabled()
+        compose.onAllNodesWithText("Sign in").onLast().assertIsEnabled()
     }
 
-    @Test fun enrollNeedsMatchingPasswordsAndAPhoto() {
-        compose.onNodeWithText("No account yet? Enroll").performClick()
+    @Test fun openingAnAccountNeedsAValidFormAndGoesBack() {
+        compose.onNodeWithText("New here? Open an account").performClick()
         compose.onNodeWithText("Create your account").assertIsDisplayed()
+        compose.onNodeWithText("Open account").performScrollTo().assertIsNotEnabled()
         compose.onNodeWithText("Username").performTextInput("bob")
-        compose.onNodeWithText("Password").performTextInput("secret1")
-        compose.onNodeWithText("Confirm password").performTextInput("secret2")
-        compose.onNodeWithText("Passwords do not match").assertIsDisplayed()
-        compose.onNodeWithText("Confirm password").performTextClearance()
-        compose.onNodeWithText("Confirm password").performTextInput("secret1")
-        // Still no photo taken, so the account cannot be created yet.
-        compose.onNodeWithText("Create account").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithText("Password").performTextInput("secret123")
+        compose.onNodeWithText("Confirm password").performTextInput("different1")
+        compose.onNodeWithText("Passwords do not match", substring = true).performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Back").performClick()
-        compose.onNodeWithText("Sign in").assertIsDisplayed()
+        compose.onNodeWithText("New here? Open an account").assertIsDisplayed()
     }
 
     @Test fun settingsRejectsABadAddressAndSavesAGoodOne() {
         compose.onNodeWithText("Settings").performClick()
-        compose.onNodeWithText("Server URL").performTextClearance()
-        compose.onNodeWithText("Server URL").performTextInput("not an address")
+        compose.onNodeWithText("Bank URL").performTextClearance()
+        compose.onNodeWithText("Bank URL").performTextInput("not an address")
         compose.onNodeWithText("Save").performClick()
-        compose.onNodeWithText("That does not look like a server address. Example: http://192.168.1.20:8000").assertIsDisplayed()
+        compose.onNodeWithText("That does not look like a server address. Example: http://192.168.1.20:8050").assertIsDisplayed()
 
-        compose.onNodeWithText("Server URL").performTextClearance()
-        compose.onNodeWithText("Server URL").performTextInput("192.168.1.20:8000")
+        compose.onNodeWithText("Bank URL").performTextClearance()
+        compose.onNodeWithText("Bank URL").performTextInput("192.168.1.20:8050")
         compose.onNodeWithText("Save").performClick()
         compose.onNodeWithText("Saved").assertIsDisplayed()
         compose.onNodeWithText("Back").performClick()
-        compose.onNodeWithText("Server: http://192.168.1.20:8000").assertIsDisplayed()
+        compose.onNodeWithText("Bank: http://192.168.1.20:8050").assertIsDisplayed()
     }
 
-    @Test fun unreachableServerShowsAHelpfulError() {
+    @Test fun unreachableBankShowsAHelpfulError() {
         // Port 9 on the device itself: nothing listens there, so the connection is refused at once.
         compose.onNodeWithText("Settings").performClick()
-        compose.onNodeWithText("Server URL").performTextClearance()
-        compose.onNodeWithText("Server URL").performTextInput("http://127.0.0.1:9")
+        compose.onNodeWithText("Bank URL").performTextClearance()
+        compose.onNodeWithText("Bank URL").performTextInput("http://127.0.0.1:9")
         compose.onNodeWithText("Save").performClick()
         compose.onNodeWithText("Back").performClick()
 
         compose.onNodeWithText("Username").performTextInput("alice")
         compose.onNodeWithText("Password").performTextInput("pw")
-        compose.onNodeWithText("Log in").performClick()
+        compose.onAllNodesWithText("Sign in").onLast().performClick()
         compose.waitUntil(10_000) {
-            compose.onAllNodesWithTextContaining("Cannot reach the server").fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodesWithTextContaining("Cannot reach").fetchSemanticsNodes().isNotEmpty()
         }
     }
 }

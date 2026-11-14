@@ -1,37 +1,46 @@
 package com.adaptivemfa.app.logic
 
 import java.util.Base64
+import java.util.Locale
 
-/** Same burst as the web client (frontend/src/components/ChallengeCameraCapture.jsx). */
+/** Pacing of a face check. The frame count and interval come from AMFA's challenge; these are its defaults. */
 object Burst {
-    const val FRAME_COUNT = 13
+    const val FRAME_COUNT = 20
     const val INTERVAL_MS = 150L
+
     /** Give up if the camera cannot deliver the frames within this many ticks. */
-    const val MAX_TICKS = FRAME_COUNT * 3
+    fun maxTicks(frames: Int) = frames * 3
+}
+
+/** The face-enrolment script: five pictures, a cue before each, extra time to move after a new cue (the web setup page does the same). */
+object FaceSetup {
+    val CUES = listOf(
+        "Look straight at the camera",
+        "Look straight at the camera",
+        "Turn your head slightly to your left",
+        "Turn your head slightly to your right",
+        "Look straight at the camera",
+    )
+    const val PICTURE_GAP_MS = 450L
+    const val NEW_CUE_PAUSE_MS = 1_500L
 }
 
 object Challenge {
-    /** Shown while frames are being captured. */
-    fun prompt(type: String): String = when (type) {
-        "blink" -> "Blink naturally"
-        "turn_left" -> "Turn your head to your left"
-        "turn_right" -> "Turn your head to your right"
+    fun prompt(action: String?): String = when (action) {
+        "TURN_LEFT" -> "Turn your head to your left"
+        "TURN_RIGHT" -> "Turn your head to your right"
         else -> "Hold still"
     }
 
-    /**
-     * Shown before capture starts. The backend compares the first frames of the burst with the last
-     * ones, so the user must START facing the camera and only move once capture begins.
-     */
-    fun instructions(type: String): String = when (type) {
-        "blink" -> "Look straight at the camera. Press the button, then blink once."
-        "turn_left" -> "Look straight at the camera. Press the button, then slowly turn your head to your left and hold it until capture finishes."
-        "turn_right" -> "Look straight at the camera. Press the button, then slowly turn your head to your right and hold it until capture finishes."
+    /** The server compares the first frames with the last ones, so the user must START facing the camera and move only once capture begins. */
+    fun instructions(action: String?): String = when (action) {
+        "TURN_LEFT" -> "Look straight at the camera. Press the button, then slowly turn your head to your left and hold it until capture finishes."
+        "TURN_RIGHT" -> "Look straight at the camera. Press the button, then slowly turn your head to your right and hold it until capture finishes."
         else -> "Look straight at the camera and press the button."
     }
 }
 
-/** The backend accepts base64 with or without the data-URL prefix; send what the web app sends. */
+/** AMFA accepts base64 with or without the data-URL prefix; send what the web pages send. */
 fun jpegDataUrl(jpeg: ByteArray): String = "data:image/jpeg;base64," + Base64.getEncoder().encodeToString(jpeg)
 
 /**
@@ -46,11 +55,43 @@ fun normalizeBaseUrl(input: String): String? {
     return if (host.isEmpty()) null else withScheme.trimEnd('/')
 }
 
-/** The server stores naive UTC timestamps such as 2026-11-14T10:05:33.123456. */
-fun formatTimestamp(raw: String): String {
-    if (raw.length < 16 || raw[10] != 'T') return raw
-    return raw.substring(0, 10) + " " + raw.substring(11, 16) + " UTC"
+/**
+ * The bank hands back AMFA links built from AMFA's own public address, which on a developer machine is
+ * 127.0.0.1 or localhost: unreachable from a phone. Point those at the machine the bank was reached on.
+ */
+fun reachableAmfaBase(amfaBase: String, bankBase: String): String {
+    val host = amfaBase.substringAfter("://").substringBefore(':').substringBefore('/')
+    if (host != "127.0.0.1" && host != "localhost") return amfaBase
+    val bankHost = bankBase.substringAfter("://").substringBefore('/').substringBefore(':')
+    return amfaBase.replaceFirst(host, bankHost)
 }
 
-/** Username rules are the server's; this only stops obviously empty submissions. */
-fun canSubmit(username: String, password: String): Boolean = username.isNotBlank() && password.isNotEmpty()
+fun formatMoney(minor: Long): String = "₹" + String.format(Locale.US, "%,.2f", minor / 100.0)
+
+/** Rupees as typed ("1,250.5") -> a number with at most two decimals, or null. */
+fun parseRupees(text: String): Double? {
+    val t = text.trim().replace(",", "")
+    if (!Regex("""\d{1,8}(\.\d{1,2})?""").matches(t)) return null
+    return t.toDouble().takeIf { it > 0 }
+}
+
+/** The bank's own sign-up rules, so the button stays off until the form can pass. Null means fine. */
+fun registrationProblem(username: String, name: String, phone: String, email: String, password: String, confirm: String): String? = when {
+    !Regex("^[a-z0-9][a-z0-9_-]{2,23}$").matches(username) -> "Username: 3 to 24 lowercase letters, digits, - or _"
+    name.trim().length < 2 -> "Enter your full name"
+    !Regex("^\\+?[0-9]{10,13}$").matches(phone) -> "Mobile number: 10 to 13 digits"
+    !Regex("^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,180}\\.[A-Za-z]{2,24}$").matches(email.trim()) -> "Enter a valid email address"
+    password.length < 8 -> "Password: at least 8 characters"
+    confirm != password -> "Passwords do not match"
+    else -> null
+}
+
+/** AMFA's reason codes for a rejected face enrolment, in words. */
+fun faceSetupReason(reason: String): String = when (reason) {
+    "LIVENESS_NOT_ESTABLISHED" -> "We couldn't tell a live face is in front of the camera. Use good, even light and try again."
+    "INCONSISTENT_IDENTITY" -> "The pictures didn't look like the same person. Try again, facing the camera."
+    "NO_FACE_DETECTED" -> "We couldn't see your face. Face the camera in good light."
+    "MULTIPLE_FACES" -> "More than one face is in view. Make sure you are alone in the picture."
+    "FACE_TOO_SMALL" -> "Move closer to the camera."
+    else -> "The face setup didn't work ($reason). Please try again."
+}

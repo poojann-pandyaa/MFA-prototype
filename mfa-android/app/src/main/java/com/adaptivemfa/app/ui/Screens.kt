@@ -1,9 +1,7 @@
 package com.adaptivemfa.app.ui
 
-import android.graphics.BitmapFactory
 import android.os.SystemClock
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -34,36 +32,38 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.sp
 import com.adaptivemfa.app.BuildConfig
 import com.adaptivemfa.app.camera.CameraPermissionGate
 import com.adaptivemfa.app.camera.FaceCamera
 import com.adaptivemfa.app.camera.FrameGrabber
-import com.adaptivemfa.app.data.HistoryItem
+import com.adaptivemfa.app.data.ActivityItem
+import com.adaptivemfa.app.data.AmfaChallenge
 import com.adaptivemfa.app.logic.Burst
 import com.adaptivemfa.app.logic.Challenge
-import com.adaptivemfa.app.logic.canSubmit
-import com.adaptivemfa.app.logic.formatTimestamp
+import com.adaptivemfa.app.logic.FaceSetup
+import com.adaptivemfa.app.logic.formatMoney
 import com.adaptivemfa.app.logic.jpegDataUrl
+import com.adaptivemfa.app.logic.parseRupees
+import com.adaptivemfa.app.logic.registrationProblem
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
-// ---------------------------------------------------------------- Login (step 1)
+// ---------------------------------------------------------------- Sign in
 
 @Composable
 fun LoginScreen(vm: AppViewModel) {
     var user by rememberSaveable { mutableStateOf(vm.username) }
     var password by rememberSaveable { mutableStateOf("") }
-    Page("Adaptive MFA", actionLabel = "Settings", onAction = { vm.go(Screen.Settings) }) {
+    Page("Demo Bank", actionLabel = "Settings", onAction = { vm.go(Screen.Settings) }) {
         Text("Sign in", fontSize = 24.sp, fontWeight = FontWeight.Bold)
         Text(
-            "From a phone you have used before you only need your password. From a new phone, or at an unusual time, you will also be asked for a quick face check.",
+            "Everyday payments stay one tap. Anything unusual gets a quick face or code check, run by AMFA.",
             color = Color.DarkGray, fontSize = 14.sp,
         )
         Messages(vm)
@@ -72,14 +72,46 @@ fun LoginScreen(vm: AppViewModel) {
             Field("Password", password, { password = it }, password = true, enabled = !vm.busy)
             Button(
                 onClick = { vm.login(user, password) },
-                enabled = canSubmit(user, password) && !vm.busy,
+                enabled = user.isNotBlank() && password.isNotEmpty() && !vm.busy,
                 modifier = Modifier.fillMaxWidth(),
-            ) { Text(if (vm.busy) "Checking..." else "Log in") }
+            ) { Text(if (vm.busy) "Signing in..." else "Sign in") }
         }
-        TextButton(onClick = { vm.go(Screen.Enroll) }, modifier = Modifier.align(Alignment.CenterHorizontally)) {
-            Text("No account yet? Enroll")
+        TextButton(onClick = { vm.go(Screen.Register) }, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+            Text("New here? Open an account")
         }
-        Text("Server: ${vm.store.baseUrl}", color = Color.Gray, fontSize = 12.sp, modifier = Modifier.align(Alignment.CenterHorizontally))
+        Text("Bank: ${vm.store.baseUrl}", color = Color.Gray, fontSize = 12.sp, modifier = Modifier.align(Alignment.CenterHorizontally))
+    }
+}
+
+// ---------------------------------------------------------------- Open an account
+
+@Composable
+fun RegisterScreen(vm: AppViewModel) {
+    var user by rememberSaveable { mutableStateOf("") }
+    var name by rememberSaveable { mutableStateOf("") }
+    var phone by rememberSaveable { mutableStateOf("") }
+    var email by rememberSaveable { mutableStateOf("") }
+    var password by rememberSaveable { mutableStateOf("") }
+    var confirm by rememberSaveable { mutableStateOf("") }
+    val problem = registrationProblem(user.trim().lowercase(), name, phone.trim(), email, password, confirm)
+    Page("Open an account", backLabel = "Back", onBack = { vm.back() }) {
+        Text("Create your account", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        Text("Next you will set up a face check, which AMFA asks for only when a payment looks unusual.", color = Color.DarkGray, fontSize = 14.sp)
+        Messages(vm)
+        Panel {
+            Field("Full name", name, { name = it }, enabled = !vm.busy, keyboard = KeyboardType.Text)
+            Field("Email (codes are sent here)", email, { email = it }, enabled = !vm.busy, keyboard = KeyboardType.Email)
+            Field("Mobile number", phone, { phone = it }, enabled = !vm.busy, keyboard = KeyboardType.Phone)
+            Field("Username", user, { user = it }, enabled = !vm.busy)
+            Field("Password", password, { password = it }, password = true, enabled = !vm.busy)
+            Field("Confirm password", confirm, { confirm = it }, password = true, enabled = !vm.busy)
+            if (problem != null && (user.isNotEmpty() || name.isNotEmpty())) Text(problem, color = Bad, fontSize = 13.sp)
+        }
+        Button(
+            onClick = { vm.register(user, name, phone, email, password) },
+            enabled = problem == null && !vm.busy,
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text(if (vm.busy) "Creating account..." else "Open account") }
     }
 }
 
@@ -106,10 +138,167 @@ private fun CameraBox(grabber: FrameGrabber, caption: String, highlight: Color, 
     }
 }
 
-// ---------------------------------------------------------------- Face check (step 2)
+// ---------------------------------------------------------------- Taking frames
+
+/** Grabs [count] frames [intervalMs] apart; null if the camera could not keep up. */
+private suspend fun captureBurst(grabber: FrameGrabber, count: Int, intervalMs: Long, onFrame: (Int) -> Unit): List<String>? {
+    val frames = mutableListOf<String>()
+    var ticks = 0
+    while (frames.size < count && ticks < Burst.maxTicks(count)) {
+        ticks++
+        val started = SystemClock.elapsedRealtime()
+        val jpeg = withTimeoutOrNull(1_000) { grabber.grab() }
+        if (jpeg != null) {
+            frames += jpegDataUrl(jpeg)
+            onFrame(frames.size)
+        }
+        val wait = intervalMs - (SystemClock.elapsedRealtime() - started)
+        if (wait > 0) delay(wait)
+    }
+    return frames.takeIf { it.size == count }
+}
+
+// ---------------------------------------------------------------- Face setup (AMFA enrolment)
 
 @Composable
-fun FaceCheckScreen(vm: AppViewModel, s: Screen.FaceCheck) {
+fun FaceSetupScreen(vm: AppViewModel, s: Screen.FaceSetup) {
+    val grabber = remember { FrameGrabber() }
+    val scope = rememberCoroutineScope()
+    var agreed by rememberSaveable { mutableStateOf(!s.consentRequired) }
+    var capturing by remember { mutableStateOf(false) }
+    var cue by remember { mutableStateOf(FaceSetup.CUES[0]) }
+    var cameraError by remember { mutableStateOf<String?>(null) }
+
+    fun start() {
+        if (capturing || vm.busy) return
+        vm.error = null
+        capturing = true
+        scope.launch {
+            val frames = mutableListOf<String>()
+            for ((i, c) in FaceSetup.CUES.withIndex()) {
+                cue = "$c  (picture ${i + 1} of ${FaceSetup.CUES.size})"
+                // time to move after a new cue; the first picture waits a beat too
+                delay(if (i == 0 || c != FaceSetup.CUES[i - 1]) FaceSetup.NEW_CUE_PAUSE_MS else FaceSetup.PICTURE_GAP_MS)
+                val jpeg = withTimeoutOrNull(2_000) { grabber.grab() }
+                if (jpeg == null) { vm.error = "The camera did not deliver a picture. Please try again."; capturing = false; return@launch }
+                frames += jpegDataUrl(jpeg)
+            }
+            capturing = false
+            vm.submitFaceSetup(frames)
+        }
+    }
+
+    Page("Set up your face", backLabel = "Later", onBack = { vm.back() }) {
+        Text("Five quick pictures, about 30 seconds.", color = Color.DarkGray, fontSize = 14.sp)
+        Messages(vm)
+        if (!agreed) {
+            Panel {
+                Text("Before we start", fontWeight = FontWeight.SemiBold)
+                Text(
+                    "AMFA turns your pictures into an encrypted face template to confirm payments that look unusual and to detect " +
+                        "impersonation. The pictures themselves are never stored. Demo Bank deletes the template if you ask.",
+                    fontSize = 14.sp,
+                )
+                Button(onClick = { agreed = true }, modifier = Modifier.fillMaxWidth()) { Text("I agree, continue") }
+            }
+        } else {
+            cameraError?.let { Banner(it, Bad) }
+            CameraPermissionGate {
+                CameraBox(grabber, if (capturing) cue else "Put your face inside the oval", if (capturing) Good else Color.White.copy(alpha = 0.8f)) { cameraError = it }
+                when {
+                    vm.busy -> Busy("Checking the pictures...")
+                    capturing -> Busy("Taking pictures...")
+                    else -> Button(onClick = { start() }, modifier = Modifier.fillMaxWidth()) { Text("Start") }
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------- Home
+
+@Composable
+fun DashboardScreen(vm: AppViewModel) {
+    LaunchedEffect(Unit) { if (vm.activity.isEmpty()) vm.refreshHome() }
+    val me = vm.me
+    var payee by rememberSaveable { mutableStateOf("") }
+    var amount by rememberSaveable { mutableStateOf("") }
+    val chosen = payee.ifEmpty { me?.payees?.firstOrNull()?.ref ?: "" }
+    val rupees = parseRupees(amount)
+    Page("Demo Bank", actionLabel = "Sign out", onAction = { vm.logout() }) {
+        Text("Hello, ${me?.name?.ifBlank { null } ?: vm.username}", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        Messages(vm)
+        Panel {
+            Text("Balance", color = Color.Gray, fontSize = 13.sp)
+            Text(if (me == null) "..." else formatMoney(me.balanceMinor), fontSize = 28.sp, fontWeight = FontWeight.Bold)
+            if (me != null) Text("Protection: ${me.protection.ifBlank { "Basic" }}", fontSize = 13.sp, color = Color.DarkGray)
+        }
+        if (me != null && !me.faceEnrolled) {
+            Banner("Your face check is not set up yet, so unusual payments can't be approved.", Warn)
+            OutlinedButton(onClick = { vm.startFaceSetup() }, enabled = !vm.busy, modifier = Modifier.fillMaxWidth()) { Text("Set up face check") }
+        }
+        Panel {
+            Text("Send money", fontWeight = FontWeight.SemiBold)
+            me?.payees?.forEach { p ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = { payee = p.ref }) { Text(if (p.ref == chosen) "● ${p.display}" else "○ ${p.display}") }
+                }
+            }
+            Field("Amount in rupees", amount, { amount = it }, enabled = !vm.busy, keyboard = KeyboardType.Decimal)
+            Button(
+                onClick = { rupees?.let { vm.sendMoney(chosen, it) } },
+                enabled = me != null && chosen.isNotEmpty() && rupees != null && !vm.busy,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text(if (vm.busy) "Working..." else "Send") }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Activity", fontWeight = FontWeight.SemiBold, fontSize = 18.sp, modifier = Modifier.weight(1f))
+            TextButton(onClick = { vm.refreshHome() }, enabled = !vm.busy) { Text("Refresh") }
+            TextButton(onClick = { vm.go(Screen.Settings) }) { Text("Settings") }
+        }
+        if (!vm.busy && vm.activity.isEmpty()) Text("Nothing yet.", color = Color.Gray)
+        Panel {
+            vm.activity.forEachIndexed { i, item ->
+                if (i > 0) HorizontalDivider()
+                ActivityRow(item)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActivityRow(item: ActivityItem) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(item.title.ifBlank { item.payee }, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+            Text(formatMoney(item.amountMinor), fontWeight = FontWeight.SemiBold)
+        }
+        Text(item.status.lowercase().replace('_', ' '), fontSize = 12.sp, color = if (item.status == "DONE") Good else Color.Gray)
+        item.detail?.let { Text(it, fontSize = 12.sp, color = Color.Gray) }
+    }
+}
+
+// ---------------------------------------------------------------- Verify a payment (AMFA checks)
+
+@Composable
+fun VerifyScreen(vm: AppViewModel, s: Screen.Verify) {
+    val ch = s.session.challenge
+    Page("Confirm it's you", backLabel = "Cancel", onBack = { vm.back() }) {
+        Banner("${s.session.amount} to ${s.session.payee}", BrandDark)
+        Messages(vm)
+        when (ch?.factor) {
+            "FACE" -> FaceCheck(vm, ch)
+            "OTP" -> CodeCheck(vm, ch)
+            else -> Panel {
+                Text("This payment needs a ${ch?.factor?.lowercase() ?: "different"} check, which the app doesn't support yet.", fontSize = 14.sp)
+                Text("Cancel and use a different payment, or finish it in the web bank.", fontSize = 13.sp, color = Color.DarkGray)
+            }
+        }
+    }
+}
+
+@Composable
+private fun FaceCheck(vm: AppViewModel, ch: AmfaChallenge) {
     val grabber = remember { FrameGrabber() }
     val scope = rememberCoroutineScope()
     var capturing by remember { mutableStateOf(false) }
@@ -122,155 +311,43 @@ fun FaceCheckScreen(vm: AppViewModel, s: Screen.FaceCheck) {
         capturing = true
         captured = 0
         scope.launch {
-            val frames = mutableListOf<String>()
-            var ticks = 0
-            while (frames.size < Burst.FRAME_COUNT && ticks < Burst.MAX_TICKS) {
-                ticks++
-                val started = SystemClock.elapsedRealtime()
-                val jpeg = withTimeoutOrNull(1_000) { grabber.grab() }
-                if (jpeg != null) {
-                    frames += jpegDataUrl(jpeg)
-                    captured = frames.size
-                }
-                val wait = Burst.INTERVAL_MS - (SystemClock.elapsedRealtime() - started)
-                if (wait > 0) delay(wait)
-            }
+            val frames = captureBurst(grabber, ch.frames, ch.intervalMs) { captured = it }
             capturing = false
-            if (frames.size == Burst.FRAME_COUNT) vm.submitFaceCheck(frames)
-            else vm.error = "The camera did not deliver enough frames. Please try again."
+            if (frames != null) vm.submitFace(frames) else vm.error = "The camera did not deliver enough frames. Please try again."
         }
     }
 
-    Page("Face check", backLabel = "Cancel", onBack = { vm.back() }) {
-        Banner("${s.riskScore} risk: new device or unusual time. Please confirm it's you, ${s.username}.", riskColor(s.riskScore))
-        Messages(vm)
-        cameraError?.let { Banner(it, Bad) }
-        CameraPermissionGate {
-            val caption = when {
-                vm.busy -> "Captured - verifying..."
-                capturing -> "${Challenge.prompt(s.challengeType)} ($captured/${Burst.FRAME_COUNT})"
-                else -> "Put your face inside the oval"
-            }
-            CameraBox(grabber, caption, if (capturing) Good else Color.White.copy(alpha = 0.8f)) { cameraError = it }
-            Panel {
-                Text("Your challenge: ${Challenge.prompt(s.challengeType)}", fontWeight = FontWeight.SemiBold)
-                Text(Challenge.instructions(s.challengeType), fontSize = 14.sp)
-                Text("This challenge expires about 90 seconds after you logged in.", color = Color.Gray, fontSize = 12.sp)
-                when {
-                    vm.busy -> Busy("Checking liveness and matching your face...")
-                    capturing -> Busy("Capturing...")
-                    else -> Button(onClick = { startBurst() }, modifier = Modifier.fillMaxWidth()) { Text("Verify identity") }
-                }
+    cameraError?.let { Banner(it, Bad) }
+    CameraPermissionGate {
+        val caption = when {
+            vm.busy -> "Captured - verifying..."
+            capturing -> "${Challenge.prompt(ch.action)} ($captured/${ch.frames})"
+            else -> "Put your face inside the oval"
+        }
+        CameraBox(grabber, caption, if (capturing) Good else Color.White.copy(alpha = 0.8f)) { cameraError = it }
+        Panel {
+            Text("Your challenge: ${Challenge.prompt(ch.action)}", fontWeight = FontWeight.SemiBold)
+            Text(Challenge.instructions(ch.action), fontSize = 14.sp)
+            when {
+                vm.busy -> Busy("Checking liveness and matching your face...")
+                capturing -> Busy("Capturing...")
+                else -> Button(onClick = { startBurst() }, modifier = Modifier.fillMaxWidth()) { Text("Verify identity") }
             }
         }
     }
 }
 
-// ---------------------------------------------------------------- Enroll
-
 @Composable
-fun EnrollScreen(vm: AppViewModel) {
-    val grabber = remember { FrameGrabber() }
-    val scope = rememberCoroutineScope()
-    var user by rememberSaveable { mutableStateOf("") }
-    var password by rememberSaveable { mutableStateOf("") }
-    var confirm by rememberSaveable { mutableStateOf("") }
-    var photo by remember { mutableStateOf<ByteArray?>(null) }
-    var taking by remember { mutableStateOf(false) }
-    var cameraError by remember { mutableStateOf<String?>(null) }
-    val preview = remember(photo) { photo?.let { BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() } }
-    val mismatch = confirm.isNotEmpty() && confirm != password
-
-    Page("Enroll", backLabel = "Back", onBack = { vm.back() }) {
-        Text("Create your account", fontSize = 22.sp, fontWeight = FontWeight.Bold)
-        Text(
-            "Your face photo is turned into a face template on the server and compared at later logins. The photo itself is not kept on the phone.",
-            color = Color.DarkGray, fontSize = 14.sp,
-        )
-        Messages(vm)
-        Panel {
-            Field("Username", user, { user = it }, enabled = !vm.busy)
-            Field("Password", password, { password = it }, password = true, enabled = !vm.busy)
-            Field("Confirm password", confirm, { confirm = it }, password = true, enabled = !vm.busy)
-            if (mismatch) Text("Passwords do not match", color = Bad, fontSize = 13.sp)
-        }
-        cameraError?.let { Banner(it, Bad) }
-        CameraPermissionGate {
-            if (preview != null) {
-                Image(
-                    preview, contentDescription = "Your face photo",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxWidth().aspectRatio(3f / 4f).clip(RoundedCornerShape(16.dp)),
-                )
-                OutlinedButton(onClick = { photo = null }, enabled = !vm.busy, modifier = Modifier.fillMaxWidth()) { Text("Retake photo") }
-            } else {
-                CameraBox(grabber, "Look straight at the camera, good light, no glasses glare", Color.White.copy(alpha = 0.8f)) { cameraError = it }
-                Button(
-                    onClick = {
-                        taking = true
-                        scope.launch {
-                            photo = withTimeoutOrNull(3_000) { grabber.grab() }
-                            if (photo == null) vm.error = "The camera did not deliver a photo. Please try again."
-                            taking = false
-                        }
-                    },
-                    enabled = !taking && !vm.busy,
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text(if (taking) "Taking photo..." else "Take photo") }
-            }
-        }
+private fun CodeCheck(vm: AppViewModel, ch: AmfaChallenge) {
+    var code by rememberSaveable { mutableStateOf("") }
+    Panel {
+        Text(if (ch.mode == "totp") "Enter your authenticator code" else "Enter the code we sent to ${ch.sentTo ?: "you"}", fontWeight = FontWeight.SemiBold)
+        Field("6-digit code", code, { code = it.filter(Char::isDigit).take(6) }, enabled = !vm.busy, keyboard = KeyboardType.NumberPassword)
         Button(
-            onClick = { photo?.let { vm.enroll(user, password, jpegDataUrl(it)) } },
-            enabled = canSubmit(user, password) && !mismatch && confirm.isNotEmpty() && photo != null && !vm.busy,
+            onClick = { vm.submitCode(code); code = "" },
+            enabled = code.length == 6 && !vm.busy,
             modifier = Modifier.fillMaxWidth(),
-        ) { Text(if (vm.busy) "Creating account..." else "Create account") }
-    }
-}
-
-// ---------------------------------------------------------------- Dashboard
-
-@Composable
-fun DashboardScreen(vm: AppViewModel) {
-    LaunchedEffect(Unit) { if (vm.history.isEmpty()) vm.refreshHistory() }
-    Page("Dashboard", actionLabel = "Log out", onAction = { vm.logout() }) {
-        Text("Welcome, ${vm.username}", fontSize = 22.sp, fontWeight = FontWeight.Bold)
-        Messages(vm)
-        Panel {
-            Text("This phone", fontWeight = FontWeight.SemiBold)
-            Text("Device id: ${vm.store.deviceId}", fontSize = 13.sp, color = Color.DarkGray)
-            Text("Server: ${vm.store.baseUrl}", fontSize = 13.sp, color = Color.DarkGray)
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Login history", fontWeight = FontWeight.SemiBold, fontSize = 18.sp, modifier = Modifier.weight(1f))
-            TextButton(onClick = { vm.refreshHistory() }, enabled = !vm.busy) { Text("Refresh") }
-            TextButton(onClick = { vm.go(Screen.Settings) }) { Text("Settings") }
-        }
-        if (vm.busy && vm.history.isEmpty()) Busy("Loading...")
-        if (!vm.busy && vm.history.isEmpty()) Text("No logins recorded yet.", color = Color.Gray)
-        Panel {
-            vm.history.forEachIndexed { i, item ->
-                if (i > 0) HorizontalDivider()
-                HistoryRow(item, thisDevice = item.deviceIdentifier == vm.store.deviceId)
-            }
-        }
-    }
-}
-
-@Composable
-private fun HistoryRow(item: HistoryItem, thisDevice: Boolean) {
-    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(formatTimestamp(item.timestamp), fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-            Text(if (item.success) "Success" else "Failed", color = if (item.success) Good else Bad, fontWeight = FontWeight.SemiBold)
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("${item.riskScore} risk", color = riskColor(item.riskScore), fontSize = 13.sp)
-            Text(if (item.faceCheckTriggered) "Face check" else "Password only", fontSize = 13.sp, color = Color.DarkGray)
-        }
-        Text(
-            item.deviceIdentifier + if (thisDevice) "  (this phone)" else "",
-            fontSize = 12.sp, color = Color.Gray,
-        )
+        ) { Text(if (vm.busy) "Checking..." else "Confirm") }
     }
 }
 
@@ -282,11 +359,12 @@ fun SettingsScreen(vm: AppViewModel) {
     Page("Settings", backLabel = "Back", onBack = { vm.back() }) {
         Messages(vm)
         Panel {
-            Text("MFA server address", fontWeight = FontWeight.SemiBold)
-            Field("Server URL", url, { url = it }, enabled = !vm.busy)
+            Text("Bank server address", fontWeight = FontWeight.SemiBold)
+            Field("Bank URL", url, { url = it }, enabled = !vm.busy)
             Text(
-                "Android emulator: http://10.0.2.2:8000 (your computer's localhost).\n" +
-                    "Real phone: http://<your computer's Wi-Fi IP>:8000, same Wi-Fi, backend started with --host 0.0.0.0.",
+                "Android emulator: http://10.0.2.2:8050 (your computer's localhost).\n" +
+                    "Real phone: http://<your computer's Wi-Fi IP>:8050, same Wi-Fi. AMFA's own address comes from the bank; when it " +
+                    "says 127.0.0.1 the app uses the bank's host instead (AMFA on port 8040 of the same computer).",
                 fontSize = 13.sp, color = Color.DarkGray,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -298,7 +376,7 @@ fun SettingsScreen(vm: AppViewModel) {
             Text("About", fontWeight = FontWeight.SemiBold)
             Text("Adaptive MFA ${BuildConfig.VERSION_NAME}", fontSize = 13.sp)
             Text("Device id: ${vm.store.deviceId}", fontSize = 13.sp, color = Color.DarkGray)
-            Text("Face detection, anti-spoofing and face matching all run on the server. The app only captures camera frames.", fontSize = 13.sp, color = Color.DarkGray)
+            Text("Face detection, liveness and matching all run on AMFA's servers. The app only captures camera frames.", fontSize = 13.sp, color = Color.DarkGray)
         }
     }
 }

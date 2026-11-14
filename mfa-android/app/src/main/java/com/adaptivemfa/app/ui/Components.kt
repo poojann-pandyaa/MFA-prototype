@@ -89,7 +89,7 @@ fun Messages(vm: AppViewModel) {
 }
 
 @Composable
-fun Field(label: String, value: String, onChange: (String) -> Unit, password: Boolean = false, enabled: Boolean = true) {
+fun Field(label: String, value: String, onChange: (String) -> Unit, password: Boolean = false, enabled: Boolean = true, keyboard: KeyboardType? = null) {
     OutlinedTextField(
         value = value,
         onValueChange = onChange,
@@ -97,7 +97,7 @@ fun Field(label: String, value: String, onChange: (String) -> Unit, password: Bo
         singleLine = true,
         enabled = enabled,
         visualTransformation = if (password) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
-        keyboardOptions = KeyboardOptions(keyboardType = if (password) KeyboardType.Password else KeyboardType.Ascii),
+        keyboardOptions = KeyboardOptions(keyboardType = keyboard ?: if (password) KeyboardType.Password else KeyboardType.Ascii),
         modifier = Modifier.fillMaxWidth(),
     )
 }
