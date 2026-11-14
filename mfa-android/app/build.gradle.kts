@@ -63,6 +63,9 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:$camerax")
     implementation("androidx.camera:camera-view:$camerax")
 
+    // on-device face finder: where the head is, so the circle can react while the person moves (the model ships in the app)
+    implementation("com.google.mlkit:face-detection:16.1.7")
+
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 

@@ -20,6 +20,7 @@ import com.adaptivemfa.app.data.Submitted
 import com.adaptivemfa.app.logic.Outcome
 import com.adaptivemfa.app.logic.setupReason
 import com.adaptivemfa.app.logic.formatMoney
+import com.adaptivemfa.app.logic.noCheckOutcome
 import com.adaptivemfa.app.logic.normalizeBaseUrl
 import com.adaptivemfa.app.logic.outcomeFor
 import com.adaptivemfa.app.logic.reachableAmfaBase
@@ -57,6 +58,8 @@ sealed interface Screen {
     data class Result(val outcome: Outcome, val action: ActivityItem?) : Screen
     data object Activity : Screen
     data object Profile : Screen
+    /** The customer's own "no extra checks up to this much a day". */
+    data object NoCheck : Screen
     data object Settings : Screen
 }
 
@@ -109,6 +112,7 @@ class AppViewModel(
             Screen.SignIn, Screen.SignUp -> go(Screen.Welcome)
             is Screen.FaceSetup, is Screen.VoiceSetup, is Screen.TypingSetup, is Screen.AuthenticatorSetup -> { go(Screen.Home); notice = "You can set this up later from Profile." }
             is Screen.Amount -> go(Screen.Pay(s.kind == "bill"))
+            Screen.NoCheck -> go(Screen.Profile)
             is Screen.Review -> cancelReview()
             is Screen.Verify -> cancelVerify()
             is Screen.Pay -> go(Screen.Home)
@@ -269,6 +273,20 @@ class AppViewModel(
         screen = Screen.Review(started)
     }
 
+    /** Sets the limit: the same checked flow as a payment (review, then AMFA's checks, then the bank applies it). */
+    fun startNoCheck(rupees: Int) = run {
+        val started = withContext(io) { bank.startNoCheck(rupees.toDouble()) }
+        pending = started
+        screen = Screen.Review(started)
+    }
+
+    fun removeNoCheck() = run {
+        withContext(io) { bank.removeNoCheck() }
+        refresh()
+        go(Screen.Profile)
+        notice = "Extra checks are back to normal."
+    }
+
     /** "Confirm and pay": open AMFA's session if it asked for checks, otherwise let the bank settle it. */
     fun confirmPayment() {
         val started = pending ?: return
@@ -317,7 +335,10 @@ class AppViewModel(
         try { refresh() } catch (_: ApiException) { }
         val a = done.action
         pending = null
-        go(Screen.Result(outcomeFor(a.status, a.detail, formatMoney(a.amountMinor), a.payee, a.kind == "bill"), a))
+        val m = me
+        val wait = m?.noCheckPendingFrom?.let { ((it - System.currentTimeMillis() / 1000.0) / 3600).toLong() }
+        go(Screen.Result(if (a.kind == "nocheck" && a.status == "DONE") noCheckOutcome(formatMoney(a.amountMinor), if (m?.noCheckPendingMinor != null) wait else null)
+                         else outcomeFor(a.status, a.detail, formatMoney(a.amountMinor), a.payee, a.kind == "bill"), a))
     }
 
     fun cancelReview() {
@@ -331,11 +352,12 @@ class AppViewModel(
     }
 
     private fun cancelAction(actionId: String) = run {
+        val isLimit = pending?.action?.kind == "nocheck"
         withContext(io) { try { bank.cancel(actionId) } catch (_: ApiException) { } }
         pending = null
         try { refresh() } catch (_: ApiException) { }
-        go(Screen.Home)
-        notice = "Payment cancelled. Nothing was sent."
+        go(if (isLimit) Screen.Profile else Screen.Home)
+        notice = if (isLimit) "Cancelled. Nothing was changed." else "Payment cancelled. Nothing was sent."
     }
 
     fun refreshHome() = run { refresh() }

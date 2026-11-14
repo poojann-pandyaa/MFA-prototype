@@ -25,7 +25,7 @@ class MainActivity : ComponentActivity() {
             initializer {
                 val store = Store(applicationContext)
                 val http = UrlConnectionHttp()
-                AppViewModel(store, BankApi(http, { store.baseUrl }, { store.deviceId }), { link -> AmfaApi(http, link) })
+                AppViewModel(store, BankApi(http, { store.baseUrl }, { store.deviceId }), { link -> AmfaApi(http, link, secure = true, pins = store) })
             }
         }
     }
@@ -57,6 +57,7 @@ class MainActivity : ComponentActivity() {
                             is Screen.Result -> ResultScreen(vm, screen)
                             Screen.Activity -> ActivityScreen(vm)
                             Screen.Profile -> ProfileScreen(vm)
+                            Screen.NoCheck -> NoCheckScreen(vm)
                             Screen.Settings -> SettingsScreen(vm)
                         }
                     }

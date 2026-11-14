@@ -44,6 +44,10 @@ data class Me(
     val codeTo: String,
     /** True on a demo server, where the bank can show the customer the code it was handed instead of sending it. */
     val demoTools: Boolean = false,
+    /** The customer's own "no extra checks up to this much a day" (paise); 0 = off. A raise may still be waiting out the bank's delay. */
+    val noCheckMinor: Long = 0,
+    val noCheckPendingMinor: Long? = null,
+    val noCheckPendingFrom: Double? = null,
 )
 
 /** One payment or account change as the bank shows it to the customer (never the risk score or AMFA's decision). */
@@ -140,6 +144,9 @@ class BankApi(
             protection = prot?.optString("level") ?: "", have = prot?.texts("have") ?: emptyList(), canAdd = prot?.texts("canAdd") ?: emptyList(),
             frozen = j.optBoolean("frozen", false), dailyLimitMinor = j.optLong("dailyLimit"), sentTodayMinor = j.optLong("sentToday"),
             codeTo = j.optString("codeTo"), demoTools = j.optBoolean("demoTools", false),
+            noCheckMinor = j.optJSONObject("noCheck")?.optLong("limit") ?: 0,
+            noCheckPendingMinor = j.optJSONObject("noCheck")?.let { if (it.isNull("pending")) null else it.optLong("pending") },
+            noCheckPendingFrom = j.optJSONObject("noCheck")?.let { if (it.isNull("pendingFrom")) null else it.optDouble("pendingFrom") },
         )
     }
 
@@ -165,6 +172,14 @@ class BankApi(
 
     fun startBill(billerRef: String, amountRupees: Double) =
         start("bill", JSONObject().put("billerRef", billerRef).put("amountRupees", amountRupees))
+
+    /** Sets the customer's own no-extra-check limit. It is a checked account change, like a payment: AMFA decides the checks. */
+    fun startNoCheck(rupees: Double) = start("nocheck", JSONObject().put("limitRupees", rupees))
+
+    /** Turning it off only adds checks, so it needs nothing beyond being signed in. */
+    fun removeNoCheck() {
+        call(http, "DELETE", url("/api/nocheck-limit"))
+    }
 
     /** The bank asks AMFA how the approval ended, applies the payment only on a verified proof, and says what happened. */
     fun complete(actionId: String): Settled {
@@ -219,13 +234,33 @@ data class AmfaChallenge(
     val phrase: String? = null, val shape: List<Pair<Double, Double>>? = null, val input: String? = null,
 )
 
-data class SessionState(val status: String, val amount: String, val payee: String, val steps: List<String>, val challenge: AmfaChallenge?)
+data class SessionState(val status: String, val amount: String, val payee: String, val steps: List<String>, val challenge: AmfaChallenge?, val sessionId: String = "")
 
 /** What AMFA said about the attempt itself; [session] is where the approval stands now. */
 data class Submitted(val factorStatus: String, val retry: Boolean, val guidance: String?, val session: SessionState)
 
-class AmfaApi(private val http: Http, private val link: AmfaLink) {
+/**
+ * [secure] sends pictures, recordings and typing as end-to-end boxes to AMFA's key (see [E2E]). It fails closed: when the key
+ * cannot be fetched, or is not the one pinned for this server, nothing biometric is sent.
+ */
+class AmfaApi(private val http: Http, private val link: AmfaLink, private val secure: Boolean = false, private val pins: PinStore? = null) {
     private fun url(path: String) = link.base.trimEnd('/') + "/c/v1" + path
+
+    private val serverKey: E2EKey by lazy {
+        val j = call(http, "GET", url("/e2e-key"))
+        val k = E2EKey(j.getString("kid"), j.getString("publicKey"), j.getString("fingerprint"))
+        if (!E2E.consistent(k)) throw ApiException(0, "The server's encryption key is not valid, so nothing was sent.", "E2E_KEY_INVALID")
+        val pinned = pins?.pin(link.base)
+        if (pinned == null) pins?.setPin(link.base, k.fingerprint)
+        else if (pinned != k.fingerprint) throw ApiException(0, "The server's encryption key changed, so nothing was sent. If you did not expect this, do not continue.", "E2E_KEY_CHANGED")
+        k
+    }
+
+    /** The body for a biometric submission: the box when [secure], otherwise the plain payload. */
+    private fun sealed(payload: JSONObject, aad: String): JSONObject =
+        if (!secure) payload else JSONObject().put("e2e", E2E.encrypt(serverKey, payload.toString(), aad))
+
+    private fun enrolAad(factor: String) = "enroll|${E2E.sha256Hex(link.token.toByteArray())}|$factor"
 
     fun enrollmentState(): EnrollState {
         val j = call(http, "GET", url("/enrollment"), token = link.token)
@@ -244,13 +279,13 @@ class AmfaApi(private val http: Http, private val link: AmfaLink) {
 
     /** Returns null when the face was enrolled, otherwise AMFA's reason (for example LIVENESS_NOT_ESTABLISHED). */
     fun enrollFace(frames: List<String>): String? {
-        val j = call(http, "POST", url("/enrollment/face"), JSONObject().put("frames", JSONArray(frames)), link.token)
+        val j = call(http, "POST", url("/enrollment/face"), sealed(JSONObject().put("frames", JSONArray(frames)), enrolAad("FACE")), link.token)
         return if (j.optBoolean("enrolled", false)) null else j.optString("reason", "REJECTED")
     }
 
     /** Voice setup: three clips as base64 WAV. Null when enrolled, otherwise AMFA's reason. */
     fun enrollVoice(clips: List<String>): String? {
-        val j = call(http, "POST", url("/enrollment/voice"), JSONObject().put("samples", JSONArray(clips)), link.token)
+        val j = call(http, "POST", url("/enrollment/voice"), sealed(JSONObject().put("samples", JSONArray(clips)), enrolAad("VOICE")), link.token)
         return if (j.optBoolean("enrolled", false)) null else j.optString("reason", "REJECTED")
     }
 
@@ -258,7 +293,7 @@ class AmfaApi(private val http: Http, private val link: AmfaLink) {
     fun enrollBehaviour(samples: List<JSONArray>, traces: List<JSONArray>, input: String): String? {
         val body = JSONObject().put("keystrokeSamples", JSONArray(samples)).put("shapeTraces", JSONArray(traces)).put("input", input)
             .put("shapePointerTypes", JSONArray(traces.map { if (input == "touch") "touch" else "mouse" }))
-        val j = call(http, "POST", url("/enrollment/behaviour"), body, link.token)
+        val j = call(http, "POST", url("/enrollment/behaviour"), sealed(body, enrolAad("UEBA")), link.token)
         return if (j.optBoolean("enrolled", false)) null else j.optString("reason", "REJECTED")
     }
 
@@ -280,11 +315,18 @@ class AmfaApi(private val http: Http, private val link: AmfaLink) {
         call(http, "POST", url("/enrollment/complete"), JSONObject(), link.token)
     }
 
-    fun session(): SessionState = parseSession(call(http, "GET", url("/session"), token = link.token))
+    private var sessionId = ""
+
+    fun session(): SessionState = parseSession(call(http, "GET", url("/session"), token = link.token)).also { sessionId = it.sessionId }
 
     fun submit(factor: String, challengeId: String, payload: JSONObject): Submitted {
+        // one-time codes stay plain (they are not biometric); everything else goes as a box bound to this session and challenge
+        val body = if (factor == "OTP") payload else {
+            if (secure && sessionId.isEmpty()) session()
+            sealed(payload, "$sessionId|$factor|$challengeId")
+        }
         val j = call(http, "POST", url("/session/factors/$factor"),
-            JSONObject().put("challengeId", challengeId).put("payload", payload), link.token)
+            JSONObject().put("challengeId", challengeId).put("payload", body), link.token)
         val r = j.optJSONObject("result")
         return Submitted(r?.optString("status") ?: "", r?.optBoolean("retry", false) ?: false,
             r?.optString("guidance")?.ifEmpty { null }, parseSession(j.getJSONObject("state")))
@@ -297,6 +339,7 @@ fun parseSession(j: JSONObject): SessionState {
     val ch = j.optJSONObject("challenge")
     val p = ch?.optJSONObject("params")
     return SessionState(
+        sessionId = j.optString("sessionId"),
         status = j.optString("status"),
         amount = approving?.optString("amount") ?: "",
         payee = approving?.optString("payee") ?: "",

@@ -11,7 +11,7 @@ interface Settings {
 }
 
 /** Small on-device settings. No password, token or face data is stored on the phone. */
-class Store(context: Context) : Settings {
+class Store(context: Context) : Settings, PinStore {
     private val p = context.getSharedPreferences("adaptive_mfa", Context.MODE_PRIVATE)
 
     override var username: String?
@@ -29,6 +29,10 @@ class Store(context: Context) : Settings {
     override val deviceId: String
         get() = p.getString("deviceId", null)
             ?: ("android_" + UUID.randomUUID().toString().replace("-", "").take(12)).also { p.edit().putString("deviceId", it).apply() }
+
+    /** The key fingerprint first seen for each AMFA address (see [PinStore]). */
+    override fun pin(base: String): String? = p.getString("e2ePin:$base", null)
+    override fun setPin(base: String, fingerprint: String) = p.edit().putString("e2ePin:$base", fingerprint).apply()
 
     companion object {
         val DEFAULT_BASE_URL: String = com.adaptivemfa.app.BuildConfig.DEFAULT_BANK_URL

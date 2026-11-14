@@ -3,40 +3,12 @@ package com.adaptivemfa.app.logic
 import java.util.Base64
 import java.util.Locale
 
-/** Pacing of a face check. The frame count and interval come from AMFA's challenge; these are its defaults. */
-object Burst {
-    const val FRAME_COUNT = 20
-    const val INTERVAL_MS = 150L
-
-    /** Give up if the camera cannot deliver the frames within this many ticks. */
-    fun maxTicks(frames: Int) = frames * 3
-}
-
-/** The face-enrolment script: five pictures, a cue before each, extra time to move after a new cue (the web setup page does the same). */
-object FaceSetup {
-    val CUES = listOf(
-        "Look straight at the camera",
-        "Look straight at the camera",
-        "Turn your head slightly to your left",
-        "Turn your head slightly to your right",
-        "Look straight at the camera",
-    )
-    const val PICTURE_GAP_MS = 450L
-    const val NEW_CUE_PAUSE_MS = 1_500L
-}
-
 object Challenge {
-    fun prompt(action: String?): String = when (action) {
-        "TURN_LEFT" -> "Turn your head to your left"
-        "TURN_RIGHT" -> "Turn your head to your right"
-        else -> "Hold still"
-    }
-
-    /** The server compares the first frames with the last ones, so the user must START facing the camera and move only once capture begins. */
+    /** Shown under the circle. The circle itself says what to do next and when it is right. */
     fun instructions(action: String?): String = when (action) {
-        "TURN_LEFT" -> "Look straight at the camera. Press the button, then slowly turn your head to your left and hold it until capture finishes."
-        "TURN_RIGHT" -> "Look straight at the camera. Press the button, then slowly turn your head to your right and hold it until capture finishes."
-        else -> "Look straight at the camera and press the button."
+        "TURN_LEFT" -> "Look straight at the camera until the circle turns green, then slowly turn your head to your left and hold it until it turns green again."
+        "TURN_RIGHT" -> "Look straight at the camera until the circle turns green, then slowly turn your head to your right and hold it until it turns green again."
+        else -> "Look straight at the camera."
     }
 }
 
@@ -137,6 +109,20 @@ fun shortName(display: String): String {
 
 /** What the result screen says: mark kind (ok, warn, bad), headline and text; [rupees] is the formatted amount. */
 data class Outcome(val kind: String, val icon: String, val title: String, val text: String)
+
+/** The limits a customer may choose for "no extra checks" (rupees a day); the bank and AMFA may allow less. */
+const val NO_CHECK_MIN = 500
+const val NO_CHECK_MAX = 50_000
+
+/** Whole rupees within the allowed range, or null (also for blanks, decimals and anything else). */
+fun parseNoCheck(text: String): Int? = text.trim().replace(",", "").toIntOrNull()?.takeIf { it in NO_CHECK_MIN..NO_CHECK_MAX }
+
+/** What the customer is told once a limit change is done; [waitingHours] is set when a raise has not started yet. */
+fun noCheckOutcome(rupees: String, waitingHours: Long?): Outcome =
+    if (waitingHours != null) Outcome("ok", "shieldClock", "Your new limit starts later",
+        "No extra checks up to $rupees a day will start in about ${maxOf(1, waitingHours)} hours. Until then your current setting stays. We wait before raising it to keep your account safe.")
+    else Outcome("ok", "shieldCheck", "No extra checks up to $rupees a day",
+        "Payments within this to people you've paid before, from this phone, skip the extra checks. New payees, new phones and anything unusual are still checked.")
 
 fun outcomeFor(status: String, detail: String?, rupees: String, payee: String, bill: Boolean): Outcome = when (status) {
     "DONE" -> Outcome("ok", "check", "$rupees ${if (bill) "paid" else "sent"}", "to $payee")

@@ -34,7 +34,11 @@ import androidx.compose.ui.unit.sp
 import com.adaptivemfa.app.BuildConfig
 import com.adaptivemfa.app.data.ActivityItem
 import com.adaptivemfa.app.data.Me
+import androidx.compose.ui.text.input.KeyboardType
+import com.adaptivemfa.app.logic.NO_CHECK_MAX
+import com.adaptivemfa.app.logic.NO_CHECK_MIN
 import com.adaptivemfa.app.logic.formatMoney
+import com.adaptivemfa.app.logic.parseNoCheck
 import com.adaptivemfa.app.logic.greeting
 import com.adaptivemfa.app.logic.pressKey
 import com.adaptivemfa.app.logic.rupeesParts
@@ -230,11 +234,19 @@ fun AmountScreen(vm: AppViewModel, s: Screen.Amount) {
 fun ReviewScreen(vm: AppViewModel, s: Screen.Review) {
     val a = s.started.action
     val bill = a.kind == "bill"
+    val limit = a.kind == "nocheck"
     val n = a.checks.size
     Page {
-        TopBar(title = if (bill) "Review bill payment" else "Review payment", onBack = { vm.back() })
+        TopBar(title = if (limit) "Review your limit" else if (bill) "Review bill payment" else "Review payment", onBack = { vm.back() })
         Messages(vm)
-        CardBox {
+        if (limit) CardBox {
+            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Tile("shieldCheck", size = 56)
+                Muted("No extra checks up to")
+                Text(formatMoney(a.amountMinor), color = C.ink, fontSize = 36.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-1).sp)
+                Text("a day", color = C.ink, fontWeight = FontWeight.Bold)
+            }
+        } else CardBox {
             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 if (bill) Tile("bolt", size = 56) else Avatar(a.initials, 56)
                 Muted(if (bill) "You're paying" else "You're sending")
@@ -253,7 +265,7 @@ fun ReviewScreen(vm: AppViewModel, s: Screen.Review) {
         }
         if (a.reviewAfter) Note("brand", "shieldClock", "After these steps, someone at Demo Bank will look at this before it goes through. Your money stays in your account until then.", "Then a quick check by our team")
         if (a.scamWarning) Note("warn", "warn", "Demo Bank will never ask you to move money to keep it safe, to share a code, or to pay to receive a refund or prize.", "Did someone ask you to make this payment?")
-        Btn("Confirm and pay ${formatMoney(a.amountMinor)}", busy = vm.busy) { vm.confirmPayment() }
+        Btn(if (limit) "Confirm and set limit" else "Confirm and pay ${formatMoney(a.amountMinor)}", busy = vm.busy) { vm.confirmPayment() }
         LinkText("Cancel", modifier = Modifier.align(Alignment.CenterHorizontally)) { vm.cancelReview() }
     }
 }
@@ -273,7 +285,7 @@ fun ResultScreen(vm: AppViewModel, s: Screen.Result) {
             Column { Kv("When", whenText(a.createdAt)); Kv("Reference", a.id)
                 if (a.confirmedWith.isNotEmpty()) Kv("Confirmed with", a.confirmedWith.joinToString(", ")) }
         }
-        Btn(if (o.kind == "bad" && a != null && a.kind != "") "Try again" else "Done") { if (o.kind == "bad" && a != null) vm.go(Screen.Pay(a.kind == "bill")) else vm.go(Screen.Home) }
+        Btn(if (o.kind == "bad" && a != null && a.kind != "") "Try again" else "Done") { if (o.kind == "bad" && a != null) vm.go(if (a.kind == "nocheck") Screen.NoCheck else Screen.Pay(a.kind == "bill")) else vm.go(if (a?.kind == "nocheck") Screen.Profile else Screen.Home) }
         if (o.kind == "bad") Btn("Back to home", BtnKind.Secondary) { vm.go(Screen.Home) }
     }
 }
@@ -318,6 +330,7 @@ fun ProfileScreen(vm: AppViewModel) {
             { Item({ Tile("phone") }, "Voice", { SubText(if (me.voiceEnrolled) "Set up" else "Read three sentences aloud") }, if (me.voiceEnrolled) ({ Chip("Ready", "ok") }) else ({ SoftBtn("Set up") { vm.startSetup("VOICE") } })) },
             { Item({ Tile("lock") }, "Authenticator app", { SubText(if (me.authenticatorEnrolled) "Set up" else "Codes from an app on this phone") }, if (me.authenticatorEnrolled) ({ Chip("Ready", "ok") }) else ({ SoftBtn("Set up") { vm.startSetup("OTP") } })) },
             { Item({ Tile("key") }, "Typing", { SubText(if (me.typingEnrolled) "Set up" else "Your typing rhythm and swipe") }, if (me.typingEnrolled) ({ Chip("Ready", "ok") }) else ({ SoftBtn("Set up") { vm.startSetup("UEBA") } })) },
+            { Item({ Tile("shieldCheck") }, "No extra checks", { SubText(noCheckSummary(me)) }, chevron = true) { vm.go(Screen.NoCheck) } },
             { Item({ Tile("phone") }, "This phone", { SubText("Calls the bank at ${vm.store.baseUrl}") }, chevron = true) { vm.go(Screen.Settings) } },
         ))
         Btn("Sign out", BtnKind.Secondary) { vm.logout() }
@@ -345,5 +358,37 @@ fun SettingsScreen(vm: AppViewModel) {
             Muted("Device id: ${vm.store.deviceId}", small = true)
             Muted("Face detection, liveness and matching all run on AMFA's servers. The app only captures camera frames.", small = true)
         }
+    }
+}
+
+
+private fun noCheckSummary(me: Me): String = when {
+    me.noCheckMinor > 0 -> "Up to ${formatMoney(me.noCheckMinor)} a day" + (me.noCheckPendingMinor?.let { ", raising to ${formatMoney(it)} soon" } ?: "")
+    me.noCheckPendingMinor != null -> "Starting soon: up to ${formatMoney(me.noCheckPendingMinor)} a day"
+    else -> "Off. Every payment gets the checks we think it needs"
+}
+
+/** "I don't want extra checks for payments up to this much a day." Choosing it is itself checked. */
+@Composable
+fun NoCheckScreen(vm: AppViewModel) {
+    val me = vm.me ?: return
+    var text by rememberSaveable { mutableStateOf(if (me.noCheckMinor > 0) (me.noCheckMinor / 100).toString() else "") }
+    val rupees = parseNoCheck(text)
+    val problem = if (text.isNotBlank() && rupees == null) "Enter a whole amount from ₹$NO_CHECK_MIN to ₹${String.format(Locale.US, "%,d", NO_CHECK_MAX)}." else null
+    Page {
+        TopBar(title = "No extra checks", onBack = { vm.back() })
+        Messages(vm)
+        CardBox {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Tile("shieldCheck")
+                Column(Modifier.weight(1f)) { H3("Up to how much a day?"); Muted(noCheckSummary(me), small = true) }
+            }
+            Field("Amount a day", text, { text = it.filter { c -> c.isDigit() }.take(6) }, enabled = !vm.busy, keyboard = KeyboardType.Number, prefix = "₹", error = problem)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { listOf(1000, 2000, 5000, 10000).forEach { v -> SoftBtn("₹${String.format(Locale.US, "%,d", v)}") { text = v.toString() } } }
+        }
+        Note("brand", "shieldCheck", "Payments up to this much a day, to people you've paid before, from this phone, skip the extra checks. New payees, new phones, a lot of payments in a day and anything unusual are still checked. Your bank may also keep some checks it requires by law.", "What this does")
+        Note("warn", "shieldClock", "Raising your limit may take effect after a waiting period. Lowering or turning it off is immediate.", "Raised limits wait")
+        Btn(if (me.noCheckMinor > 0) "Change limit" else "Set limit", enabled = rupees != null, busy = vm.busy) { rupees?.let { vm.startNoCheck(it) } }
+        if (me.noCheckMinor > 0 || me.noCheckPendingMinor != null) Btn("Turn off", BtnKind.Secondary) { vm.removeNoCheck() }
     }
 }

@@ -1,6 +1,5 @@
 package com.adaptivemfa.app.ui
 
-import android.os.SystemClock
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -21,8 +20,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -33,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
@@ -42,16 +41,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.adaptivemfa.app.camera.CameraPermissionGate
 import com.adaptivemfa.app.camera.FaceCamera
-import com.adaptivemfa.app.camera.FrameGrabber
+import com.adaptivemfa.app.camera.FrameStream
 import com.adaptivemfa.app.data.AmfaChallenge
-import com.adaptivemfa.app.logic.Burst
+import com.adaptivemfa.app.logic.Coaching
 import com.adaptivemfa.app.logic.Challenge
-import com.adaptivemfa.app.logic.FaceSetup
+import com.adaptivemfa.app.logic.Pose
+import com.adaptivemfa.app.logic.PoseCoach
 import com.adaptivemfa.app.logic.jpegDataUrl
 import com.adaptivemfa.app.logic.registrationProblem
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeoutOrNull
 
 // ---------------------------------------------------------------- welcome
 
@@ -141,89 +140,81 @@ fun SetupScreen(vm: AppViewModel) {
     }
 }
 
-// ---------------------------------------------------------------- camera: a circle with a progress ring and a turn arrow
+// ---------------------------------------------------------------- the camera circle that reacts to the head
 
+/** The circle: red until the step the person is on is done, green when it is; the white arc is how far along they are. */
 @Composable
-private fun FaceCircle(grabber: FrameGrabber, prompt: String, progress: Float, arrow: String?, onError: (String) -> Unit) {
+private fun FaceCircle(stream: FrameStream, coaching: Coaching, green: Boolean, onError: (String) -> Unit) {
+    val turn = coaching.pose != Pose.STRAIGHT && !green
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(prompt, color = C.ink, fontSize = 19.sp, fontWeight = FontWeight.ExtraBold, textAlign = TextAlign.Center, modifier = Modifier.height(52.dp))
+        Muted("Step ${minOf(coaching.step + 1, coaching.steps)} of ${coaching.steps}", small = true)
+        Text(coaching.message, color = if (green) C.ok else C.ink, fontSize = 19.sp, fontWeight = FontWeight.ExtraBold, textAlign = TextAlign.Center, modifier = Modifier.height(52.dp))
         Box(Modifier.widthIn(max = 300.dp).fillMaxWidth(0.78f).aspectRatio(1f), contentAlignment = Alignment.Center) {
-            Box(Modifier.fillMaxSize().padding(14.dp).clip(CircleShape).background(C.ink)) { FaceCamera(grabber, Modifier.fillMaxSize(), onError) }
-            val track = C.line
-            val bar = C.brand
+            Box(Modifier.fillMaxSize().padding(14.dp).clip(CircleShape).background(C.ink)) { FaceCamera(stream, Modifier.fillMaxSize(), onError) }
+            val ring = if (green) C.ok else C.bad
+            val arc = Color.White
             Canvas(Modifier.fillMaxSize()) {
-                val w = 6.dp.toPx()
+                val w = 7.dp.toPx()
                 val s = Size(size.width - w, size.height - w)
-                drawArc(track, 0f, 360f, false, Offset(w / 2, w / 2), s, style = Stroke(w))
-                drawArc(bar, -90f, 360f * progress.coerceIn(0f, 1f), false, Offset(w / 2, w / 2), s, style = Stroke(w, cap = StrokeCap.Round))
+                drawArc(ring, 0f, 360f, false, Offset(w / 2, w / 2), s, style = Stroke(w))
+                if (!green && coaching.progress > 0f) drawArc(arc, -90f, 360f * coaching.progress.coerceIn(0f, 1f), false, Offset(w / 2, w / 2), s, style = Stroke(w, cap = StrokeCap.Round))
             }
-            if (arrow != null) Box(
-                Modifier.align(if (arrow == "LEFT") Alignment.CenterStart else Alignment.CenterEnd).offset(x = if (arrow == "LEFT") (-6).dp else 6.dp)
-                    .size(48.dp).clip(CircleShape).background(C.brand), contentAlignment = Alignment.Center,
-            ) { Ic(if (arrow == "LEFT") "arrowLeft" else "arrowRight", C.brandInk, 26.dp) }
+            if (turn) Box(
+                Modifier.align(if (coaching.pose == Pose.LEFT) Alignment.CenterStart else Alignment.CenterEnd).offset(x = if (coaching.pose == Pose.LEFT) (-6).dp else 6.dp)
+                    .size(48.dp).clip(CircleShape).background(C.bad), contentAlignment = Alignment.Center,
+            ) { Ic(if (coaching.pose == Pose.LEFT) "arrowLeft" else "arrowRight", Color.White, 26.dp) }
         }
     }
 }
 
-/** Grabs [count] frames [intervalMs] apart; null if the camera could not keep up. */
-private suspend fun captureBurst(grabber: FrameGrabber, count: Int, intervalMs: Long, onFrame: (Int) -> Unit): List<String>? {
-    val frames = mutableListOf<String>()
-    var ticks = 0
-    while (frames.size < count && ticks < Burst.maxTicks(count)) {
-        ticks++
-        val started = SystemClock.elapsedRealtime()
-        val jpeg = withTimeoutOrNull(1_000) { grabber.grab() }
-        if (jpeg != null) {
-            frames += jpegDataUrl(jpeg)
-            onFrame(frames.size)
+/**
+ * Watches the head and walks the person through [poses]. Nothing is asked for before the last thing is done: the circle stays
+ * red, with a reason, until each pose has been held; then it flashes green and asks for the next. When the last is done the
+ * frames to send are handed to [onFrames].
+ */
+@Composable
+private fun GuidedFace(poses: List<Pose>, continuous: Boolean, busy: Boolean, onFrames: (List<String>) -> Unit) {
+    val stream = remember { FrameStream() }
+    val coach = remember { PoseCoach(poses, continuous) }
+    val scope = rememberCoroutineScope()
+    var coaching by remember { mutableStateOf(Coaching(poses[0], 0, poses.size, false, 0f, "Look straight at the camera")) }
+    var flash by remember { mutableStateOf(false) }
+    var cameraError by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(stream) {
+        val recent = ArrayDeque<Pair<Int, ByteArray>>()
+        var i = 0
+        stream.frames.collect { f ->
+            if (coach.finished) return@collect
+            val idx = i++
+            recent.addLast(idx to f.jpeg)
+            while (recent.size > 90) recent.removeFirst()
+            val c = coach.update(idx, f.look)
+            coaching = c
+            if (c.advanced) scope.launch { flash = true; delay(450); flash = false }
+            if (c.finished) {
+                val byIndex = recent.toMap()
+                onFrames(coach.chosen().mapNotNull { byIndex[it] }.map { jpegDataUrl(it) })
+            }
         }
-        val wait = intervalMs - (SystemClock.elapsedRealtime() - started)
-        if (wait > 0) delay(wait)
     }
-    return frames.takeIf { it.size == count }
+    cameraError?.let { Note("bad", "warn", it) }
+    CameraPermissionGate {
+        FaceCircle(stream, coaching, flash || coach.finished || busy) { cameraError = it }
+        if (busy) Busy("Checking liveness and matching your face...")
+        else Muted("The circle turns green when you have done each move properly.", small = true, align = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+    }
 }
 
 // ---------------------------------------------------------------- face setup (AMFA enrolment)
 
 @Composable
 fun FaceSetupScreen(vm: AppViewModel, s: Screen.FaceSetup) {
-    val grabber = remember { FrameGrabber() }
-    val scope = rememberCoroutineScope()
     var agreed by rememberSaveable { mutableStateOf(!s.consentRequired) }
-    var capturing by remember { mutableStateOf(false) }
-    var cue by remember { mutableStateOf(FaceSetup.CUES[0]) }
-    var progress by remember { mutableFloatStateOf(0f) }
-    var arrow by remember { mutableStateOf<String?>(null) }
-    var cameraError by remember { mutableStateOf<String?>(null) }
-
-    fun start() {
-        if (capturing || vm.busy) return
-        vm.error = null
-        capturing = true
-        scope.launch {
-            val frames = mutableListOf<String>()
-            for ((i, c) in FaceSetup.CUES.withIndex()) {
-                cue = "$c · picture ${i + 1} of ${FaceSetup.CUES.size}"
-                arrow = if (c.contains("left")) "LEFT" else if (c.contains("right")) "RIGHT" else null
-                progress = i / FaceSetup.CUES.size.toFloat()
-                // time to move after a new cue; the first picture waits a beat too
-                delay(if (i == 0 || c != FaceSetup.CUES[i - 1]) FaceSetup.NEW_CUE_PAUSE_MS else FaceSetup.PICTURE_GAP_MS)
-                val jpeg = withTimeoutOrNull(2_000) { grabber.grab() }
-                if (jpeg == null) { vm.error = "The camera did not deliver a picture. Please try again."; capturing = false; arrow = null; progress = 0f; return@launch }
-                frames += jpegDataUrl(jpeg)
-            }
-            progress = 1f
-            arrow = null
-            capturing = false
-            vm.submitFaceSetup(frames)
-        }
-    }
-
     Page {
         TopBar(label = "Step 2 of 2", onBack = { vm.back() })
         StepsBar(2, 2)
         H1("Set up your face")
-        Lede("Five quick pictures, about 30 seconds.")
+        Lede("Four quick pictures, each taken when your head is in the right place: straight, left, right, straight.")
         Messages(vm)
         if (!agreed) {
             CardBox {
@@ -232,15 +223,7 @@ fun FaceSetupScreen(vm: AppViewModel, s: Screen.FaceSetup) {
                 Btn("I agree, continue") { agreed = true }
             }
         } else {
-            cameraError?.let { Note("bad", "warn", it) }
-            CameraPermissionGate {
-                FaceCircle(grabber, if (capturing) cue else "Put your face inside the circle", progress, arrow) { cameraError = it }
-                when {
-                    vm.busy -> Busy("Checking the pictures...")
-                    capturing -> Busy("Taking pictures...")
-                    else -> Btn("Start") { start() }
-                }
-            }
+            GuidedFace(listOf(Pose.STRAIGHT, Pose.LEFT, Pose.RIGHT, Pose.STRAIGHT), continuous = false, busy = vm.busy) { vm.submitFaceSetup(it) }
         }
     }
 }
@@ -273,41 +256,12 @@ fun VerifyScreen(vm: AppViewModel, s: Screen.Verify) {
 
 @Composable
 private fun FaceCheck(vm: AppViewModel, ch: AmfaChallenge) {
-    val grabber = remember { FrameGrabber() }
-    val scope = rememberCoroutineScope()
-    var capturing by remember { mutableStateOf(false) }
-    var captured by remember { mutableIntStateOf(0) }
-    var cameraError by remember { mutableStateOf<String?>(null) }
-    val dir = if (ch.action == "TURN_LEFT") "LEFT" else "RIGHT"
-
-    fun startBurst() {
-        if (capturing || vm.busy) return
-        vm.error = null
-        capturing = true
-        captured = 0
-        scope.launch {
-            val frames = captureBurst(grabber, ch.frames, ch.intervalMs) { captured = it }
-            capturing = false
-            if (frames != null) vm.submitFace(frames) else vm.error = "The camera did not deliver enough frames. Please try again."
-        }
+    val turn = if (ch.action == "TURN_LEFT") Pose.LEFT else Pose.RIGHT
+    // a new challenge (after a failed try) starts a fresh coach
+    key(ch.id) {
+        GuidedFace(listOf(Pose.STRAIGHT, turn), continuous = true, busy = vm.busy) { vm.submitFace(it) }
     }
-
-    cameraError?.let { Note("bad", "warn", it) }
-    CameraPermissionGate {
-        val prompt = when {
-            vm.busy -> "Checking, one moment..."
-            capturing && captured * 4 < ch.frames -> "Look straight at the camera"
-            capturing -> Challenge.prompt(ch.action)
-            else -> "Put your face inside the circle"
-        }
-        FaceCircle(grabber, prompt, if (capturing || vm.busy) captured / ch.frames.toFloat() else 0f, if (capturing && captured * 4 >= ch.frames) dir else null) { cameraError = it }
-        Muted(Challenge.instructions(ch.action), align = TextAlign.Center, modifier = Modifier.fillMaxWidth())
-        when {
-            vm.busy -> Busy("Checking liveness and matching your face...")
-            capturing -> Busy("Capturing...")
-            else -> Btn("Verify identity") { startBurst() }
-        }
-    }
+    Muted(Challenge.instructions(ch.action), align = TextAlign.Center, modifier = Modifier.fillMaxWidth())
 }
 
 @Composable

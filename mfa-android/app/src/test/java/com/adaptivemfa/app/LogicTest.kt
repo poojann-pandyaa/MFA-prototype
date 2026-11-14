@@ -1,8 +1,7 @@
 package com.adaptivemfa.app
 
-import com.adaptivemfa.app.logic.Burst
+import com.adaptivemfa.app.logic.Pose
 import com.adaptivemfa.app.logic.Challenge
-import com.adaptivemfa.app.logic.FaceSetup
 import com.adaptivemfa.app.logic.faceSetupReason
 import com.adaptivemfa.app.logic.formatMoney
 import com.adaptivemfa.app.logic.jpegDataUrl
@@ -18,27 +17,35 @@ import org.junit.Test
 import java.util.Base64
 
 class LogicTest {
-    @Test fun defaultBurstFitsTheFaceServiceLimits() {
-        // amfa/factors/face/service.py: VERIFY_FRAMES = (6, 24)
-        assertTrue(Burst.FRAME_COUNT in 6..24)
-        assertEquals(150L, Burst.INTERVAL_MS)
-        assertEquals(60, Burst.maxTicks(20))
+    @Test fun theSentFramesFitTheFaceServiceLimits() {
+        // amfa/factors/face/service.py: VERIFY_FRAMES = (6, 24), ENROLL_FRAMES = (3, 8)
+        assertTrue(com.adaptivemfa.app.logic.PoseCoach.MAX_FRAMES in 6..24)
+        assertTrue(listOf(Pose.STRAIGHT, Pose.LEFT, Pose.RIGHT, Pose.STRAIGHT).size in 3..8)
     }
 
-    @Test fun faceSetupSendsBetweenThreeAndEightPictures() {
-        // amfa/core/api_client.py FaceEnroll: 3 to 8 frames; the script starts and ends facing the camera
-        assertTrue(FaceSetup.CUES.size in 3..8)
-        assertEquals(FaceSetup.CUES.first(), FaceSetup.CUES.last())
-        assertTrue(FaceSetup.CUES.any { it.contains("left") } && FaceSetup.CUES.any { it.contains("right") })
+    @Test fun ourThresholdsAreStricterThanTheServersSoWhatWePassItPasses() {
+        // amfa/factors/face/service.py: FRONTAL_MAX_YAW = 0.12, TURN_MIN_DELTA = 0.18, TURN_MIN_IN_BETWEEN = 2
+        assertTrue(com.adaptivemfa.app.logic.PoseCoach.FRONT_OK < 0.12)
+        assertTrue(com.adaptivemfa.app.logic.PoseCoach.TURN_OK > 0.18)
+        assertTrue(com.adaptivemfa.app.logic.PoseCoach.MIN_IN_BETWEEN >= 2)
     }
 
-    @Test fun everyFaceChallengeActionHasItsOwnPrompt() {
-        for (a in listOf("TURN_LEFT", "TURN_RIGHT")) {
-            assertFalse(Challenge.prompt(a) == Challenge.prompt(null))
-            assertTrue(Challenge.instructions(a).startsWith("Look straight at the camera"))
-        }
-        assertTrue(Challenge.prompt("TURN_LEFT").contains("left"))
-        assertTrue(Challenge.prompt("TURN_RIGHT").contains("right"))
+    @Test fun theNoseOffsetHasTheServersSignWhateverTheDetectorCallsTheEyes() {
+        // eyes at x=100 and x=200 (y equal), nose in the middle: straight; nose toward the right of the picture: positive
+        assertEquals(0.0, com.adaptivemfa.app.logic.noseOffset(100.0, 50.0, 200.0, 50.0, 150.0, 90.0)!!, 1e-9)
+        assertEquals(0.3, com.adaptivemfa.app.logic.noseOffset(100.0, 50.0, 200.0, 50.0, 180.0, 90.0)!!, 1e-9)
+        assertEquals(-0.3, com.adaptivemfa.app.logic.noseOffset(100.0, 50.0, 200.0, 50.0, 120.0, 90.0)!!, 1e-9)
+        // the same face with the two eyes given the other way round measures the same
+        assertEquals(0.3, com.adaptivemfa.app.logic.noseOffset(200.0, 50.0, 100.0, 50.0, 180.0, 90.0)!!, 1e-9)
+        // rolling the head (the eye line slopes, the nose stays on the line at right angles to it) does not look like a turn
+        assertEquals(0.0, com.adaptivemfa.app.logic.noseOffset(100.0, 50.0, 190.0, 100.0, 120.0, 120.0)!!, 1e-9)
+        assertNull(com.adaptivemfa.app.logic.noseOffset(100.0, 50.0, 100.0, 50.0, 100.0, 80.0))
+    }
+
+    @Test fun theInstructionsTellWhichWayToTurn() {
+        assertTrue(Challenge.instructions("TURN_LEFT").contains("left") && !Challenge.instructions("TURN_LEFT").contains("right"))
+        assertTrue(Challenge.instructions("TURN_RIGHT").contains("right"))
+        assertTrue(Challenge.instructions("TURN_LEFT").contains("turns green"))
     }
 
     @Test fun dataUrlIsWhatTheWebPagesSend() {

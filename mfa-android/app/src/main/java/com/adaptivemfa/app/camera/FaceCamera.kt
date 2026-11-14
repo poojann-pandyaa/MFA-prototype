@@ -4,6 +4,8 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Matrix
+import android.os.SystemClock
+import android.util.Log
 import android.util.Size
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -34,11 +36,20 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import com.google.android.gms.tasks.Tasks
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.face.FaceDetection
+import com.google.mlkit.vision.face.FaceDetectorOptions
+import com.google.mlkit.vision.face.FaceLandmark
+import com.adaptivemfa.app.logic.Look
+import com.adaptivemfa.app.logic.noseOffset
+import java.util.concurrent.TimeUnit
+import kotlin.math.abs
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.Executors
-import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.max
 
 /**
@@ -46,35 +57,48 @@ import kotlin.math.max
  * client's captured frames: the backend's head-turn direction check assumes unmirrored images.
  * (Only the on-screen preview is mirrored, so turning left moves your face left on screen.)
  */
-class FrameGrabber : ImageAnalysis.Analyzer {
-    private val pending = AtomicReference<CompletableDeferred<ByteArray>?>(null)
+/** One camera frame: the picture (upright, not mirrored, what the server gets) and what the on-device face finder saw in it. */
+class Frame(val jpeg: ByteArray, val look: Look)
+
+/**
+ * Turns the camera's frames into [Frame]s about ten times a second: a JPEG for AMFA and a measurement of the head for the
+ * coach. The finder is Google's on-device ML Kit face detector (no picture leaves the phone for this); AMFA's own service
+ * still makes the real decision on the pictures that are sent.
+ */
+class FrameStream : ImageAnalysis.Analyzer {
+    val frames = MutableSharedFlow<Frame>(extraBufferCapacity = 4, onBufferOverflow = BufferOverflow.DROP_OLDEST)
 
     /** How many frames the camera has delivered at all; zero after a few seconds means it is not working. */
     @Volatile var framesSeen = 0
         private set
 
+    private var lastMs = 0L
+    private val detector by lazy {
+        FaceDetection.getClient(
+            FaceDetectorOptions.Builder().setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
+                .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_ALL).setMinFaceSize(0.15f).build(),
+        )
+    }
+
     override fun analyze(image: ImageProxy) {
         framesSeen++
         try {
-            val request = pending.getAndSet(null) ?: return
-            try {
-                request.complete(encode(image))
-            } catch (e: Throwable) {
-                request.completeExceptionally(e)
-            }
+            val now = SystemClock.elapsedRealtime()
+            if (now - lastMs < MIN_GAP_MS) return
+            lastMs = now
+            val bitmap = upright(image)
+            val out = ByteArrayOutputStream()
+            bitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out)
+            frames.tryEmit(Frame(out.toByteArray(), look(bitmap, now)))
+            bitmap.recycle()
+        } catch (e: Throwable) {
+            Log.w("FrameStream", "frame skipped: ${e.message}")
         } finally {
             image.close()
         }
     }
 
-    /** Suspends until the camera delivers its next frame. */
-    suspend fun grab(): ByteArray {
-        val request = CompletableDeferred<ByteArray>()
-        pending.set(request)
-        return request.await()
-    }
-
-    private fun encode(image: ImageProxy): ByteArray {
+    private fun upright(image: ImageProxy): Bitmap {
         val raw = image.toBitmap()
         val rotation = image.imageInfo.rotationDegrees
         val longSide = max(raw.width, raw.height)
@@ -84,23 +108,33 @@ class FrameGrabber : ImageAnalysis.Analyzer {
             if (rotation != 0) postRotate(rotation.toFloat())
         }
         val upright = if (rotation == 0 && scale == 1f) raw else Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, matrix, true)
-        val out = ByteArrayOutputStream()
-        upright.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out)
-        if (upright !== raw) upright.recycle()
-        raw.recycle()
-        return out.toByteArray()
+        if (upright !== raw) raw.recycle()
+        return upright
+    }
+
+    private fun look(bitmap: Bitmap, now: Long): Look {
+        val faces = Tasks.await(detector.process(InputImage.fromBitmap(bitmap, 0)), 2, TimeUnit.SECONDS)
+        if (faces.size != 1) return Look(now, faces.size, null, 0.0, false)
+        val f = faces[0]
+        val eyes = listOfNotNull(f.getLandmark(FaceLandmark.LEFT_EYE)?.position, f.getLandmark(FaceLandmark.RIGHT_EYE)?.position)
+        val nose = f.getLandmark(FaceLandmark.NOSE_BASE)?.position
+        val offset = if (eyes.size == 2 && nose != null) noseOffset(eyes[0].x.toDouble(), eyes[0].y.toDouble(), eyes[1].x.toDouble(), eyes[1].y.toDouble(), nose.x.toDouble(), nose.y.toDouble()) else null
+        val box = f.boundingBox
+        val centered = abs(box.centerX() / bitmap.width.toDouble() - 0.5) <= 0.2 && abs(box.centerY() / bitmap.height.toDouble() - 0.5) <= 0.25
+        return Look(now, 1, offset, box.width() / bitmap.width.toDouble(), centered)
     }
 
     companion object {
         /** Same size class as the web client's 720x540 frames; well under the server's 1 MB per-frame limit. */
         const val MAX_SIDE = 720
         const val JPEG_QUALITY = 85
+        const val MIN_GAP_MS = 90L
     }
 }
 
 /** Front-camera preview bound to the screen's lifecycle; feeds [grabber]. */
 @Composable
-fun FaceCamera(grabber: FrameGrabber, modifier: Modifier = Modifier, onError: (String) -> Unit = {}) {
+fun FaceCamera(grabber: FrameStream, modifier: Modifier = Modifier, onError: (String) -> Unit = {}) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val previewView = remember {
