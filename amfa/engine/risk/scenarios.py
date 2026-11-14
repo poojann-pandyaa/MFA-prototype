@@ -41,6 +41,10 @@ CITIES = [("IN", c) for c in (
 ABROAD = [("AE", "Dubai"), ("SG", "Singapore"), ("GB", "London"), ("US", "New York"), ("NG", "Lagos"),
           ("KH", "Phnom Penh"), ("RU", "Moscow"), ("TH", "Bangkok")]
 SEGMENTS = {"STANDARD": .60, "PREMIUM": .12, "SENIOR": .12, "NEW_TO_BANK": .10, "CORPORATE": .06}
+# Every customer's own scale is stretched by a log-normal factor of this spread, so a customer can pay ten times (or a tenth
+# of) what their segment usually pays. Without it the model learns "big rupees = unusual", which is false for a customer
+# whose normal is big; with it, only how a payment compares with THIS customer's own habit predicts fraud.
+SCALE_SPREAD = 1.0
 MEDIAN_AMOUNT = {"STANDARD": 1500, "PREMIUM": 8000, "SENIOR": 2500, "NEW_TO_BANK": 1000, "CORPORATE": 40000}
 TXNS_PER_DAY = {"STANDARD": .7, "PREMIUM": .9, "SENIOR": .4, "NEW_TO_BANK": .5, "CORPORATE": 2.5}
 PAY_TYPES = ["TRANSFER", "PAYMENT", "CARD_NOT_PRESENT"]
@@ -232,7 +236,7 @@ class Customer:
         t = AGE_GROUPS[self.age_group]
         self.age = rng.randint(*t.span)
         self.feed = _pick(rng, FEEDS)
-        self.median = MEDIAN_AMOUNT[self.segment] * rng.lognormvariate(0, .5) * t.median
+        self.median = MEDIAN_AMOUNT[self.segment] * rng.lognormvariate(0, .5) * t.median * rng.lognormvariate(0, SCALE_SPREAD)
         self.sigma = rng.uniform(.5, 1.0)
         self.rate = TXNS_PER_DAY[self.segment] * rng.uniform(.5, 1.6) * t.rate
         self.home = rng.choice(CITIES)

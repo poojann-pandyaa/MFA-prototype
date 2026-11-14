@@ -10,7 +10,7 @@ from .availability import apply_availability, apply_org_requirements, enforce_fl
 from .context import SELECTABLE, Band, Context, Plan, dynamic_factors
 from .rationale import counterfactual, reasoning
 from .risk import scorer
-from .risk.threat import (BAND, COLD_START_PAYMENTS, RESPONSE, REVIEW_LEVEL, new_customer_relief,
+from .risk.threat import (BAND, COLD_START_PAYMENTS, RESPONSE, REVIEW_LEVEL, customer_bypass, new_customer_relief,
                           regular_payee_relief, small_payment_cap)
 from .rules import select_by_rules
 
@@ -42,6 +42,12 @@ def select_by_model(features: Optional[dict], ctx: Context) -> Plan:
         lvl, why = regular_payee_relief(r.level, features)
     if lvl == r.level and ctx.policy.smallPaymentCap and ctx.policy.lowTouch and exposure in (Band.LOW, Band.MEDIUM):
         lvl, why = new_customer_relief(lvl, features)
+    if ctx.policy.customerBypassMinor:
+        lowered, note = customer_bypass(lvl, features, limit_minor=ctx.policy.customerBypassMinor,
+                                        exposure_minor=ctx.transaction.exposureMinor,
+                                        new_payee=ctx.transaction.isNewBeneficiary)
+        if note:
+            lvl, why = lowered, note
     plan = Plan(required=list(RESPONSE[lvl]), riskBand=BAND[lvl], source="model", riskScore=r.score,
                 threatLevel=lvl, modelLevel=r.level, capReason=why, riskReasons=r.reasons, modelVersion=r.version)
     if lvl == REVIEW_LEVEL:

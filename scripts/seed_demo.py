@@ -24,7 +24,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 os.environ.setdefault("AMFA_ENV", "development")
 
 from argon2 import PasswordHasher  # noqa: E402
-from sqlalchemy import select  # noqa: E402
+from sqlalchemy import select
+from sqlalchemy.orm.attributes import flag_modified  # noqa: E402
 
 from amfa.core import db, factors  # noqa: E402
 from amfa.core.context_builder import device_key, payee_key  # noqa: E402
@@ -47,6 +48,11 @@ def main() -> int:
     db.migrate()
     with db.session() as s:
         tenant = s.execute(select(db.Tenant).where(db.Tenant.slug == a.tenant)).scalars().one()
+        # let customers choose their own no-extra-check limit; no waiting period here so a presenter can show it
+        pol = dict(tenant.policy)
+        pol["customerBypass"] = {"enabled": True, "maxMinor": 5_000_000, "coolingOffHours": 0}
+        tenant.policy = pol
+        flag_modified(tenant, "policy")
     chosen = [p for p in P.PERSONAS if not a.only or p.username in a.only]
     if a.device:   # the demo phones become every customer's usual phone, so signing in on them is "their own phone"
         from dataclasses import replace

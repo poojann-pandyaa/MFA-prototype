@@ -47,6 +47,13 @@ def platform_exemption_caps() -> dict[str, int]:
     return out
 
 
+def platform_bypass_caps() -> dict[str, int]:
+    """The most any bank may let a customer choose, in minor units, whatever the bank's own setting."""
+    import os
+    raw = os.getenv("AMFA_BYPASS_CAPS", "INR:5000000,EUR:50000,USD:50000,GBP:50000")
+    return {c.strip().upper(): int(a) for c, a in (p.split(":", 1) for p in raw.split(",") if ":" in p)}
+
+
 class AmountBands(BaseModel):
     model_config = ConfigDict(extra="forbid")
     mediumFromMinor: int = Field(ge=1)
@@ -64,6 +71,17 @@ class Exemption(BaseModel):
     enabled: bool = False
     maxAmountMinor: int = Field(default=0, ge=0)
     types: list[TxnType] = Field(default_factory=lambda: [TxnType.TRANSFER, TxnType.PAYMENT])
+
+
+class CustomerBypass(BaseModel):
+    """Lets a customer choose an amount up to which payments skip the risk-based extra checks (never the legal minimum)."""
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = False
+    # the most a customer may choose, per rolling 24 h (this payment plus the last day's); also capped by the platform
+    maxMinor: int = Field(default=0, ge=0)
+    # a raised limit starts only after this many hours, so someone who has taken over an account cannot raise it and drain
+    # it in one sitting; lowering or removing the limit is immediate
+    coolingOffHours: int = Field(default=24, ge=0, le=168)
 
 
 class TxnRule(BaseModel):
@@ -160,6 +178,8 @@ class TenantPolicy(BaseModel):
     ], max_length=20)
     permittedFactors: list[Factor] = Field(
         default_factory=lambda: [Factor.OTP, Factor.UEBA, Factor.FACE, Factor.VOICE])
+    # biometric and behaviour submissions must arrive end-to-end encrypted to AMFA (amfa/common/e2e.py), not only over HTTPS
+    requireE2E: bool = False
     # the bank chooses how the one-time code reaches its customers: sent by email or text, or made by an
     # authenticator app the customer sets up; any mix. A method left out is neither offered nor accepted.
     otpMethods: list[OtpMethod] = Field(default_factory=lambda: [OtpMethod.EMAIL, OtpMethod.SMS, OtpMethod.AUTHENTICATOR],
@@ -175,6 +195,7 @@ class TenantPolicy(BaseModel):
     smallPaymentCap: bool = True
     # strongest automated checks instead of a person, except for hard-hold signs; False restores "high risk -> review"
     lowTouch: bool = True
+    customerBypass: CustomerBypass = Field(default_factory=CustomerBypass)
     deviceTrustDays: int = Field(default=0, ge=0, le=90)
     dormancyDays: int = Field(default=180, ge=30, le=1095)
     quietHours: QuietHours = Field(default_factory=QuietHours)
@@ -255,6 +276,13 @@ class TenantPolicy(BaseModel):
                 raise ValueError(f"exemption ceiling exceeds the platform ceiling of {plat} minor units")
         if self.currency not in self.amountBands:
             raise ValueError(f"amountBands has no entry for {self.currency}")
+        cb = self.customerBypass
+        if cb.enabled:
+            plat = platform_bypass_caps().get(self.currency)
+            if plat is None or cb.maxMinor < 1:
+                raise ValueError("customerBypass needs maxMinor, and the platform needs a ceiling for the currency")
+            if cb.maxMinor > plat:
+                raise ValueError(f"customerBypass.maxMinor exceeds the platform ceiling of {plat} minor units")
         return self
 
 

@@ -243,13 +243,24 @@ def me(request: Request, deviceId: str = ""):
     return {"name": c["name"], "ref": c["ref"], "balance": c["balance"], "enrolled": enrolled,
             "protection": protection(enrolled or {}, code_label(c)), "frozen": c.get("frozen", False),
             "codeTo": code_to(c),
-            "dailyLimit": c["dailyLimit"], "sentToday": sent_today(c),
+            "dailyLimit": c["dailyLimit"], "sentToday": sent_today(c), "noCheck": c.get("noCheck"),
             "phone": _mask(c["phone"]), "email": _mask(c["email"]),
             "deviceTrusted": deviceId in c["devices"], "devices": len(c["devices"]), "demoTools": DEMO_TOOLS,
             "payees": [{"ref": k, "display": p["display"], "initials": initials(p["display"]),
                         "riskFlag": p.get("riskFlag", False)} for k, p in c["payees"].items()],
             "recentPayees": recent_payees(c),
             "billers": [{"ref": k, "display": v} for k, v in BILLERS.items()]}
+
+
+@app.delete("/api/nocheck-limit")
+def remove_nocheck(request: Request):
+    """Turning it off only ever adds checks, so it needs nothing more than being signed in."""
+    c = customer(request)
+    if c["amfaUser"]:
+        AMFA.request("DELETE", f"/v1/users/{c['amfaUser']}/bypass-limit")
+    c["noCheck"] = None
+    _save()
+    return {"noCheck": None}
 
 
 class Enrol(BaseModel):
@@ -307,6 +318,10 @@ class AddPayee(Device):
 
 class Limit(Device):
     limitRupees: float = Field(ge=1000, le=MAX_DAILY_LIMIT / 100)
+
+
+class NoCheckLimit(Device):
+    limitRupees: float = Field(ge=500, le=50_000)
 
 
 class Contact(Device):
@@ -387,6 +402,23 @@ def start_limit(c: dict, b: Limit) -> dict:
             "payeeDisplay": "Daily limit"}
 
 
+def start_nocheck(c: dict, b: NoCheckLimit) -> dict:
+    """The customer's own "no extra checks up to this amount a day". Setting it is itself a checked CHANGE_LIMIT."""
+    return {"title": f"No extra checks up to ₹{b.limitRupees:,.0f} a day", "amountMinor": _minor(b.limitRupees),
+            "payeeRef": "NOCHECK", "payeeDisplay": "No-extra-check limit"}
+
+
+def apply_nocheck(c: dict, a: dict) -> Optional[str]:
+    """AMFA accepts the limit only against this very action's verified CHANGE_LIMIT, and may delay a raise."""
+    try:
+        out = AMFA.request("PUT", f"/v1/users/{c['amfaUser']}/bypass-limit",
+                           {"amountMinor": a["amountMinor"], "transactionId": a["amfaTxn"]})
+    except AmfaError as e:
+        return f"the limit could not be saved ({e.code})"
+    c["noCheck"] = {"limit": out["limitMinor"], "pending": out["pendingMinor"], "pendingFrom": out["pendingFrom"]}
+    return None
+
+
 def start_contact(c: dict, b: Contact) -> dict:
     if not re.match(PHONE if b.field == "phone" else EMAIL, b.value):
         raise HTTPException(422, f"that is not a valid {b.field}")
@@ -428,6 +460,7 @@ KINDS = {
     "bill": Kind(Bill, "PAYMENT", start_bill, _debit),
     "payee": Kind(AddPayee, "ADD_BENEFICIARY", start_add_payee, apply_add_payee),
     "limit": Kind(Limit, "CHANGE_LIMIT", start_limit, lambda c, a: c.update(dailyLimit=a["amountMinor"])),
+    "nocheck": Kind(NoCheckLimit, "CHANGE_LIMIT", start_nocheck, apply_nocheck),
     "contact": Kind(Contact, "PROFILE_CHANGE", start_contact, apply_contact),
     "password": Kind(Password, "PROFILE_CHANGE", start_password, apply_password),
     "device": Kind(Device, "DEVICE_BINDING", start_device,

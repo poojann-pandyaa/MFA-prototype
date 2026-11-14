@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 import time
 from typing import Any, Literal, Optional
 
-from fastapi import APIRouter, Depends, Request
-from pydantic import BaseModel, ConfigDict, Field
+from fastapi import APIRouter, Body, Depends, Request
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy import func, select
 
-from amfa.common import crypto
+from amfa.common import crypto, e2e
 from amfa.common.web import ApiError, rate_limit
 from amfa.core import audit, context_builder, db, factors, orchestrator, otp, webhooks
 from amfa.core.auth import ClientCaller, client_caller
@@ -82,6 +83,25 @@ def _record_enrollment(s, customer: db.Customer, factor: str, detail: dict) -> N
         s.add(db.Enrollment(customer_id=customer.id, factor=factor, detail=detail))
     else:
         row.status, row.detail, row.enrolled_at = "ENROLLED", detail, time.time()
+
+
+@router.get("/e2e-key")
+def e2e_key(request: Request):
+    """The public key a phone encrypts pictures, recordings and typing to. No sign-in is needed to read a public key."""
+    rate_limit(f"ip:{request.state.client_ip}:e2ekey", 60, 60)
+    return e2e.public_key()
+
+
+def _open(payload: dict, aad: str, *, policy, factor: str) -> dict:
+    """Decrypt a payload sent as an end-to-end box; refuse plaintext where the bank requires encryption."""
+    if e2e.is_box(payload):
+        try:
+            return e2e.decrypt(payload["e2e"], aad)
+        except crypto.DecryptionError:
+            raise ApiError(400, "E2E_INVALID", "the encrypted submission could not be opened") from None
+    if policy.requireE2E and factor != "OTP":
+        raise ApiError(400, "E2E_REQUIRED", "this bank requires biometric data to be end-to-end encrypted")
+    return payload
 
 
 @router.get("/enrollment")
@@ -223,19 +243,33 @@ def _biometric_enroll(caller: ClientCaller, factor: str, payload: dict, rate_key
     return {"enrolled": True, "factor": factor, "quality": res.quality}
 
 
+def _enrol_from(request: Request, raw: dict, model: type[Strict], caller: ClientCaller, factor: str, rate_key: str) -> dict:
+    """The body is either the submission itself or an end-to-end box of it; either way it is checked against [model].
+    A box is bound to the enrolment link's token by its SHA-256, which the phone can compute and the server can too."""
+    with db.session() as s:
+        policy = _policy(s, caller.tenant_id)
+    token = request.headers.get("authorization", "")[7:].strip()
+    data = _open(raw, f"enroll|{hashlib.sha256(token.encode()).hexdigest()}|{factor}", policy=policy, factor=factor)
+    try:
+        body = model.model_validate(data)
+    except ValidationError:
+        raise ApiError(422, "INVALID_BODY", "the submission is not valid") from None
+    return _biometric_enroll(caller, factor, body.model_dump(), rate_key)
+
+
 @router.post("/enrollment/face")
-def enroll_face(body: FaceEnroll, caller: ClientCaller = Depends(enroll_caller)):
-    return _biometric_enroll(caller, "FACE", body.model_dump(), "face")
+def enroll_face(request: Request, raw: dict = Body(...), caller: ClientCaller = Depends(enroll_caller)):
+    return _enrol_from(request, raw, FaceEnroll, caller, "FACE", "face")
 
 
 @router.post("/enrollment/voice")
-def enroll_voice(body: VoiceEnroll, caller: ClientCaller = Depends(enroll_caller)):
-    return _biometric_enroll(caller, "VOICE", body.model_dump(), "voice")
+def enroll_voice(request: Request, raw: dict = Body(...), caller: ClientCaller = Depends(enroll_caller)):
+    return _enrol_from(request, raw, VoiceEnroll, caller, "VOICE", "voice")
 
 
 @router.post("/enrollment/behaviour")
-def enroll_behaviour(body: BehaviourEnroll, caller: ClientCaller = Depends(enroll_caller)):
-    return _biometric_enroll(caller, "UEBA", body.model_dump(), "behaviour")
+def enroll_behaviour(request: Request, raw: dict = Body(...), caller: ClientCaller = Depends(enroll_caller)):
+    return _enrol_from(request, raw, BehaviourEnroll, caller, "UEBA", "behaviour")
 
 
 class Attestation(Strict):
@@ -493,7 +527,8 @@ def submit_factor(factor: Literal["OTP", "FACE", "VOICE", "UEBA"], body: FactorS
         sess, txn, tenant, customer = _session(s, caller)
         if customer.status != "ACTIVE":
             raise ApiError(403, "CUSTOMER_UNAVAILABLE", "this account cannot be used right now")
+        payload = _open(body.payload, f"{sess.id}|{factor}|{body.challengeId}", policy=_policy(s, tenant.id), factor=factor)
         outcome = orchestrator.submit(s, sess=sess, customer=customer, txn=txn, tenant=tenant,
-                                      factor=factor, challenge_id=body.challengeId, payload=body.payload)
+                                      factor=factor, challenge_id=body.challengeId, payload=payload)
         s.flush()
         return {**outcome, "state": _state(s, sess, txn, tenant, customer)}

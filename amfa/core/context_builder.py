@@ -13,7 +13,7 @@ from sqlalchemy import select
 from amfa.common import crypto, geo
 from amfa.common.contract import FAILED, SPOOF_DETECTED
 from amfa.common.crypto import keyed_hash
-from amfa.core import db, factors
+from amfa.core import bypass, db, factors
 from amfa.engine.context import (Band, BehaviouralCtx, Capability, Context, DeviceCtx, Enrollment,
                                  Policy, Segment, TransactionCtx, TxnType)
 from amfa.engine.policy import TenantPolicy
@@ -232,6 +232,9 @@ def assemble(s, tenant: db.Tenant, customer: db.Customer, txn_id: str, t: TxnInp
     features = risk_features.build(cur, history, profile)
     exposure = risk_features.exposure_24h(cur, history)
     ctx.transaction.exposureBand = policy.band_for(int(round(exposure * 100)), t.currency)
+    ctx.transaction.exposureMinor = int(round(exposure * 100))
+    if t.type in (TxnType.TRANSFER, TxnType.PAYMENT, TxnType.CARD_NOT_PRESENT):
+        ctx.policy.customerBypassMinor = bypass.limit_for(s, customer.id, policy, t.currency, now)
     return Assembled(ctx=ctx, preview=preview, facts=facts, derived=derived, policy=policy, features=features)
 
 

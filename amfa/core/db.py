@@ -136,6 +136,16 @@ class Customer(Base):
     __table_args__ = (UniqueConstraint("tenant_id", "external_ref"),)
 
 
+class BypassLimit(Base):
+    """A customer's own "no extra checks up to this amount" setting. A raise waits in pending_* until its cooling-off ends."""
+    __tablename__ = "bypass_limit"
+    customer_id: Mapped[str] = mapped_column(ForeignKey("customer.id"), primary_key=True)
+    limit_minor: Mapped[int] = mapped_column(BigInteger, default=0)
+    pending_minor: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    pending_from: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    updated_at: Mapped[float] = mapped_column(Float, default=now)
+
+
 class Enrollment(Base):
     __tablename__ = "enrollment"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

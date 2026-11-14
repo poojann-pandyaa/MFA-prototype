@@ -93,3 +93,20 @@ def small_payment_cap(level: str, f: dict) -> tuple[str, Optional[str]]:
     if (f.get("amount_ratio") or 0) >= USUAL_RATIO:
         return level, None
     return CAP_LEVEL, f"small payment within this customer's usual, kept at {CAP_LEVEL}"
+
+
+BYPASS_LEVEL = "T0"
+
+
+def customer_bypass(level: str, f: dict, *, limit_minor: Optional[int], exposure_minor: Optional[int],
+                    new_payee: bool) -> tuple[str, Optional[str]]:
+    """The customer chose "no extra checks up to X". It holds only for an ordinary payment within X (this payment plus the
+    last 24 h): not to a payee never paid, not from a phone never used, not with any hard warning sign, and never to skip a
+    manual review (T4). What is left is the legal minimum, which the caller's floor adds back. Same shape as small_payment_cap."""
+    if not limit_minor or exposure_minor is None or new_payee or f.get("amount_log") is None:
+        return level, None
+    if level in (BYPASS_LEVEL, REVIEW_LEVEL) or hard_signals(f) or (f.get("device_seen") or 0) <= 0:
+        return level, None
+    if exposure_minor > limit_minor:
+        return level, None
+    return BYPASS_LEVEL, f"within the no-extra-check limit the customer chose ({limit_minor / 100:,.0f}), kept at {BYPASS_LEVEL}"

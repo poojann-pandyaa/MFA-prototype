@@ -90,6 +90,8 @@ class TransactionCtx(BaseModel):
     type: TxnType = TxnType.TRANSFER
     # band of this payment plus everything sent in the last 24 h; None = unknown, so no leniency
     exposureBand: Optional[Band] = None
+    # the same exposure in minor units (this payment plus the last 24 h), for the customer's own limit
+    exposureMinor: Optional[int] = None
 
 
 class DeviceCtx(BaseModel):
@@ -150,6 +152,8 @@ class Policy(BaseModel):
     smallPaymentCap: bool = True
     # the strongest automated checks replace a person unless a hard-hold sign is present (see adjudicate.py)
     lowTouch: bool = True
+    # the customer's own no-extra-check limit in force right now, in minor units (None = they set none)
+    customerBypassMinor: Optional[int] = None
 
 
 class Context(BaseModel):

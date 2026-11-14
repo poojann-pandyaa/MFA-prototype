@@ -1,0 +1,11 @@
+{
+ "serverPrivate": "1111111111111111222222222222222233333333333333334444444444444444",
+ "serverPublic": "BBbXiqlUKOVAv4nOGr_fFk-_7sjJICmVtCUo0Z4P2HzRm5bf4Koyo5UMyjTwlC_q1jbu0qopvg1aIReYTV5moq0",
+ "ephemeralPrivate": "5555555555555555666666666666666677777777777777778888888888888888",
+ "ephemeralPublic": "BETFNmjAmB8FNLwnYGtvEBstD2-5BzqNI99Y409DEWGLIreAk5Sb5HFl5w_yMevyOkm6umD1nOfPpWwe7IXgcJQ",
+ "nonce": "AAECAwQFBgcICQoL",
+ "kid": "v1.0123456789ab",
+ "aad": "sess_test|FACE|ch_test",
+ "plaintextJson": "{\"frames\":[\"data:image/jpeg;base64,AAAA\"],\"n\":1}",
+ "ct": "fEX2ZUwq4KRGInk7zaGyDEC-yjYhJq2q6nMGYl5jT4yiJCc8vR1n0sQyBkAEQ-8fHQgAEPvkWo0U_UQtLmIf6A"
+}

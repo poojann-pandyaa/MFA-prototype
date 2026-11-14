@@ -15,7 +15,7 @@ from amfa import config
 from amfa.common import crypto
 from amfa.common.contract import ID_PATTERN
 from amfa.common.web import ApiError
-from amfa.core import audit, db, factors, orchestrator, proofs, webhooks
+from amfa.core import audit, bypass, db, factors, orchestrator, proofs, webhooks
 from amfa.core.auth import TenantCaller, require_scope
 from amfa.core.context_builder import TxnInput, assemble, device_key
 from amfa.engine.agent import build_agent
@@ -144,6 +144,44 @@ def patch_user(user_id: str, body: PatchUser, caller: TenantCaller = Depends(req
     return view
 
 
+class SetBypass(Strict):
+    amountMinor: int = Field(ge=1)
+    transactionId: str = Field(max_length=40)
+
+
+@router.get("/users/{user_id}/bypass-limit")
+def get_bypass(user_id: str, caller: TenantCaller = Depends(require_scope("users:read"))):
+    policy = TenantPolicy.model_validate(caller.tenant.policy)
+    with db.session() as s:
+        return bypass.view(s, _customer(s, caller.tenant.id, user_id).id, policy, time.time())
+
+
+@router.put("/users/{user_id}/bypass-limit")
+def put_bypass(user_id: str, body: SetBypass, caller: TenantCaller = Depends(require_scope("users:write"))):
+    """The customer's own "no extra checks up to X". Only against a verified CHANGE_LIMIT transaction for the same amount;
+    a raise starts after the bank's cooling-off. See amfa/core/bypass.py."""
+    policy = TenantPolicy.model_validate(caller.tenant.policy)
+    with db.session() as s:
+        c = _customer(s, caller.tenant.id, user_id)
+        txn = s.get(db.Transaction, body.transactionId)
+        if txn is None or txn.tenant_id != caller.tenant.id:
+            raise ApiError(404, "TXN_NOT_FOUND", "no such transaction")
+        out = bypass.set_limit(s, c, policy, body.amountMinor, txn, time.time())
+    audit.record(f"apikey:{caller.key_id}", "customer.bypass_limit", user_id,
+                 {"amountMinor": body.amountMinor, "transactionId": body.transactionId, "pending": out["pendingMinor"]},
+                 caller.tenant.id)
+    return out
+
+
+@router.delete("/users/{user_id}/bypass-limit")
+def delete_bypass(user_id: str, caller: TenantCaller = Depends(require_scope("users:write"))):
+    policy = TenantPolicy.model_validate(caller.tenant.policy)
+    with db.session() as s:
+        out = bypass.clear(s, _customer(s, caller.tenant.id, user_id), policy, time.time())
+    audit.record(f"apikey:{caller.key_id}", "customer.bypass_limit_removed", user_id, {}, caller.tenant.id)
+    return out
+
+
 @router.delete("/users/{user_id}")
 def erase_user(user_id: str, caller: TenantCaller = Depends(require_scope("users:write"))):
     with db.session() as s:
@@ -151,7 +189,7 @@ def erase_user(user_id: str, caller: TenantCaller = Depends(require_scope("users
         results = {f: factors.erase(f, caller.tenant.id, c.id) for f in ("FACE", "VOICE", "UEBA")}
         if not all(results.values()):
             raise ApiError(503, "ERASURE_INCOMPLETE", "a factor service could not be reached; retry")
-        for model in (db.Enrollment, db.Device, db.KnownNetwork, db.KnownPayee):
+        for model in (db.Enrollment, db.Device, db.KnownNetwork, db.KnownPayee, db.BypassLimit):
             for row in s.execute(select(model).where(model.customer_id == c.id)).scalars():
                 s.delete(row)
         totp = s.get(db.TotpCredential, c.id)

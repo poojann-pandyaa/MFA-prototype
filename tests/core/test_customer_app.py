@@ -55,6 +55,15 @@ def scripted(monkeypatch):
     monkeypatch.setattr(otp, "deliver", lambda contact, message: SENT.append(message) or SENT_TO.append(contact) or "email")
 
 
+@pytest.fixture(autouse=True)
+def fresh_rate_limits():
+    """One test client is one IP, and the module's tests together make more requests a minute than the per-IP limit."""
+    from amfa.common import kv
+    store = kv.get()
+    for key in [k for k in getattr(store, "_data", {}) if k.startswith("rl:")]:
+        store._data.pop(key, None)
+
+
 @pytest.fixture
 def app(stack):
     """A signed-in, enrolled customer on their own trusted phone."""
@@ -82,6 +91,7 @@ def verify(stack, challenge_url):
     auth = {"authorization": f"Bearer {token}"}
     for _ in range(8):
         state = stack.core.get("/c/v1/session", headers=auth).json()
+        assert "challenge" in state, state
         ch = state["challenge"]
         if ch is None:
             return state
@@ -675,3 +685,204 @@ def test_a_forged_or_stale_code_message_is_refused(stack, app, monkeypatch):
 def test_the_code_is_not_shown_when_demo_tools_are_off(stack, app, monkeypatch):
     monkeypatch.setattr(stack.bank, "DEMO_TOOLS", False)
     assert app.get("/api/demo/code").status_code == 404
+
+
+# ---- end-to-end encryption of what the phone sends ---------------------------------------------------------------
+
+def _set_require_e2e(stack, on):
+    with db.session() as s:
+        t = s.get(db.Tenant, stack.tenant["id"])
+        t.policy = {**(t.policy or {}), "requireE2E": on}
+
+
+def _face_session(stack, app):
+    LEVEL["now"] = "T2"
+    started = act(app, "transfer", payeeRef="BEN-42", amountRupees=LARGE).json()
+    token = started["challengeUrl"].split("#token=", 1)[1]
+    auth = {"authorization": f"Bearer {token}"}
+    state = stack.core.get("/c/v1/session", headers=auth).json()
+    return auth, state
+
+
+def _pass_other_checks(stack, auth):
+    for _ in range(4):
+        ch = stack.core.get("/c/v1/session", headers=auth).json()["challenge"]
+        if ch is None or ch["factor"] == "FACE":
+            return ch
+        payload = {"code": re.match(r"(\d+)", SENT[-1]).group(1)} if ch["factor"] == "OTP" else {}
+        stack.core.post(f"/c/v1/session/factors/{ch['factor']}", headers=auth,
+                        json={"challengeId": ch["challengeId"], "payload": payload}).raise_for_status()
+
+
+def test_an_encrypted_face_submission_is_opened_by_the_core_and_only_there(stack, app, monkeypatch):
+    from amfa.common import e2e
+    seen = {}
+
+    def verify_(factor, **kw):
+        seen[factor] = kw
+        return FactorResult(factor=factor, status="PASSED", score=0.9, threshold=0.5)
+    monkeypatch.setattr(factors, "verify", verify_)
+    auth, state = _face_session(stack, app)
+    ch = _pass_other_checks(stack, auth)
+    assert ch and ch["factor"] == "FACE"
+    pub = stack.core.get("/c/v1/e2e-key").json()
+    assert pub["alg"] == e2e.ALG and pub["kid"] == e2e.public_key()["kid"]
+    frames = ["data:image/jpeg;base64,/9j/AAAA"]
+    sid = state["sessionId"]
+    box = e2e.encrypt(pub, {"frames": frames}, f"{sid}|FACE|{ch['challengeId']}")
+    assert "/9j/AAAA" not in str(box)
+    r = stack.core.post("/c/v1/session/factors/FACE", headers=auth,
+                        json={"challengeId": ch["challengeId"], "payload": {"e2e": box}})
+    assert r.status_code == 200, r.text
+    assert "FACE" in seen                                         # the biometric service got the decrypted pictures
+
+
+def test_a_box_for_another_challenge_or_a_changed_box_is_refused(stack, app, monkeypatch):
+    from amfa.common import e2e
+    auth, state = _face_session(stack, app)
+    ch = _pass_other_checks(stack, auth)
+    pub = stack.core.get("/c/v1/e2e-key").json()
+    sid = state["sessionId"]
+    wrong = e2e.encrypt(pub, {"frames": []}, f"{sid}|FACE|ch_somebody_elses")
+    r = stack.core.post("/c/v1/session/factors/FACE", headers=auth,
+                        json={"challengeId": ch["challengeId"], "payload": {"e2e": wrong}})
+    assert r.status_code == 400 and r.json()["error"]["code"] == "E2E_INVALID"
+
+
+def test_a_bank_can_require_encryption_and_plain_biometrics_are_then_refused(stack, app):
+    _set_require_e2e(stack, True)
+    try:
+        auth, _ = _face_session(stack, app)
+        for _ in range(4):                                         # codes stay plain; the first biometric must be a box
+            ch = stack.core.get("/c/v1/session", headers=auth).json()["challenge"]
+            payload = {"code": re.match(r"(\d+)", SENT[-1]).group(1)} if ch["factor"] == "OTP" else {}
+            r = stack.core.post(f"/c/v1/session/factors/{ch['factor']}", headers=auth,
+                                json={"challengeId": ch["challengeId"], "payload": payload})
+            if ch["factor"] != "OTP":
+                assert r.status_code == 400 and r.json()["error"]["code"] == "E2E_REQUIRED"
+                return
+            assert r.status_code == 200
+        raise AssertionError("no biometric check was asked for")
+    finally:
+        _set_require_e2e(stack, False)
+
+
+# ---- the customer's own "no extra checks up to X" limit ----------------------------------------------------------------
+
+def _bypass_policy(stack, **cb):
+    with db.session() as s:
+        t = s.get(db.Tenant, stack.tenant["id"])
+        t.policy = {**(t.policy or {}), "customerBypass": cb}
+
+
+@pytest.fixture
+def bypass_on(stack):
+    _bypass_policy(stack, enabled=True, maxMinor=10_000_00, coolingOffHours=0)
+    yield
+    _bypass_policy(stack, enabled=False)
+
+
+def _set_nocheck(stack, app, rupees):
+    started = act(app, "nocheck", limitRupees=rupees)
+    assert started.status_code == 201, started.text
+    verify(stack, started.json()["challengeUrl"])
+    return app.post(f"/api/actions/{started.json()['action']['id']}/complete").json()["action"], started.json()["action"]["id"]
+
+
+def _in_force(stack, app):
+    from amfa.core import bypass
+    from amfa.engine.policy import TenantPolicy
+    with db.session() as s:
+        cust = s.get(db.Customer, stack.bank.CUSTOMERS[app.user]["amfaUser"])
+        pol = TenantPolicy.model_validate(s.get(db.Tenant, stack.tenant["id"]).policy)
+        return bypass.limit_for(s, cust.id, pol, "INR", time.time())
+
+
+def test_a_limit_is_set_only_by_passing_the_checks_and_then_applies(stack, app, bypass_on):
+    LEVEL["now"] = "T2"
+    assert _in_force(stack, app) is None
+    done, _ = _set_nocheck(stack, app, 3000)
+    assert done["status"] == "DONE", done["detail"]
+    assert _in_force(stack, app) == 3000_00
+    me = app.get("/api/me", params={"deviceId": PHONE_DEVICE}).json()
+    assert me["noCheck"]["limit"] == 3000_00 and me["noCheck"]["pending"] is None
+
+
+def test_a_raise_waits_out_the_cooling_off_but_a_cut_is_immediate(stack, app, bypass_on):
+    _bypass_policy(stack, enabled=True, maxMinor=10_000_00, coolingOffHours=0)
+    _set_nocheck(stack, app, 2000)
+    _bypass_policy(stack, enabled=True, maxMinor=10_000_00, coolingOffHours=24)
+    raised, _ = _set_nocheck(stack, app, 8000)
+    me = app.get("/api/me", params={"deviceId": PHONE_DEVICE}).json()["noCheck"]
+    assert raised["status"] == "DONE" and me["limit"] == 2000_00 and me["pending"] == 8000_00
+    assert me["pendingFrom"] - time.time() > 23 * 3600 and _in_force(stack, app) == 2000_00   # still the old limit
+    _set_nocheck(stack, app, 1000)
+    assert _in_force(stack, app) == 1000_00                          # lowering never waits (and drops the pending raise)
+    assert app.get("/api/me", params={"deviceId": PHONE_DEVICE}).json()["noCheck"]["pending"] is None
+
+
+def test_a_raise_counts_once_its_cooling_off_has_passed(stack, app, bypass_on):
+    _bypass_policy(stack, enabled=True, maxMinor=10_000_00, coolingOffHours=24)
+    _set_nocheck(stack, app, 5000)
+    assert _in_force(stack, app) is None
+    with db.session() as s:
+        row = s.get(db.BypassLimit, stack.bank.CUSTOMERS[app.user]["amfaUser"])
+        row.pending_from = time.time() - 1
+    assert _in_force(stack, app) == 5000_00
+
+
+def test_the_limit_cannot_be_set_without_its_own_verified_change_limit_transaction(stack, app, bypass_on):
+    AmfaError = stack.bank.AmfaError
+    amfa_user = stack.bank.CUSTOMERS[app.user]["amfaUser"]
+    done, action_id = _set_nocheck(stack, app, 2000)
+    with db.session() as s:
+        used = _txn(s, action_id).id
+    put = lambda body: stack.bank.AMFA.request("PUT", f"/v1/users/{amfa_user}/bypass-limit", body)
+    with pytest.raises(AmfaError) as e:                              # the same approval cannot be used twice
+        put({"amountMinor": 2000_00, "transactionId": used})
+    assert e.value.code == "BYPASS_NOT_AUTHORISED"
+    other = act(app, "limit", limitRupees=200_000).json()            # an approved limit change for another amount
+    verify(stack, other["challengeUrl"])
+    app.post(f"/api/actions/{other['action']['id']}/complete").raise_for_status()
+    with db.session() as s:
+        other_txn = _txn(s, other["action"]["id"]).id
+    with pytest.raises(AmfaError) as e:
+        put({"amountMinor": 9000_00, "transactionId": other_txn})    # not the amount that was approved
+    assert e.value.code == "BYPASS_NOT_AUTHORISED"
+    pay = act(app, "transfer", payeeRef="BEN-42", amountRupees=10).json()
+    verify(stack, pay["challengeUrl"])
+    app.post(f"/api/actions/{pay['action']['id']}/complete").raise_for_status()
+    with db.session() as s:
+        pay_txn = _txn(s, pay["action"]["id"]).id
+    with pytest.raises(AmfaError) as e:                              # a payment's approval is not a limit change's
+        put({"amountMinor": 10_00, "transactionId": pay_txn})
+    assert e.value.code == "BYPASS_NOT_AUTHORISED"
+
+
+def test_a_bank_that_has_not_turned_it_on_refuses_it_and_one_cannot_exceed_its_maximum(stack, app):
+    _bypass_policy(stack, enabled=False)
+    done, _ = _set_nocheck(stack, app, 1000)
+    assert done["status"] == "FAILED" and "BYPASS_DISABLED" in done["detail"]
+    _bypass_policy(stack, enabled=True, maxMinor=4_000_00, coolingOffHours=0)
+    try:
+        done, _ = _set_nocheck(stack, app, 5000)
+        assert done["status"] == "FAILED" and "BYPASS_ABOVE_MAX" in done["detail"]
+    finally:
+        _bypass_policy(stack, enabled=False)
+
+
+def test_the_customer_can_turn_it_off_at_once(stack, app, bypass_on):
+    _set_nocheck(stack, app, 2000)
+    assert _in_force(stack, app) == 2000_00
+    assert app.delete("/api/nocheck-limit").json() == {"noCheck": None}
+    assert _in_force(stack, app) is None
+
+
+def test_a_bank_cannot_set_a_maximum_above_the_platform_ceiling(stack):
+    from pydantic import ValidationError
+
+    from amfa.engine.policy import TenantPolicy
+    with db.session() as s:
+        base = s.get(db.Tenant, stack.tenant["id"]).policy
+    with pytest.raises(ValidationError):
+        TenantPolicy.model_validate({**base, "customerBypass": {"enabled": True, "maxMinor": 99_999_999}})
