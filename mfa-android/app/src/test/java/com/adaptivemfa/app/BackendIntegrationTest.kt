@@ -68,7 +68,7 @@ private class FakeBankAndAmfa {
             "GET /api/me" -> bank { """{"name":"Alice","balance":50000000,"enrolled":{"FACE":"ENROLLED"},"protection":{"level":"Good"},"payees":[{"ref":"BEN-42","display":"V. Mehta"}]}""" }
             "GET /api/activity" -> bank { """{"activity":[],"balance":50000000}""" }
             "POST /api/actions/transfer" -> bank {
-                """{"action":{"id":"ACT1","status":"AWAITING_VERIFICATION"},"challengeUrl":"http://localhost:1/hosted/challenge?t=demo#token=sess-tok"}"""
+                """{"action":{"id":"ACT1","kind":"transfer","status":"AWAITING_VERIFICATION","amountMinor":500000,"checks":["face"],"payee":{"display":"V. Mehta"}},"challengeUrl":"http://localhost:1/hosted/challenge?t=demo#token=sess-tok"}"""
                     .replace("http://localhost:1", url)
             }
             "GET /c/v1/session" -> amfa { session() }
@@ -105,19 +105,20 @@ class BackendIntegrationTest {
 
     @Test fun signInPayWithAFaceCheckAndTheBankSettlesItOverRealHttp() {
         val vm = vm()
-        vm.login("alice", "pw")
-        assertEquals(Screen.Dashboard, vm.screen)
+        vm.signIn("alice", "pw")
+        assertEquals(Screen.Home, vm.screen)
         assertEquals(0, fake.rejectedWithoutCookie)   // the session cookie was sent back on /api/me and /api/activity
 
-        vm.sendMoney("BEN-42", 5000.0)
+        vm.startPayment("transfer", "BEN-42", 5000.0)
+        assertTrue(vm.screen is Screen.Review)
+        vm.confirmPayment()
         val v = vm.screen as Screen.Verify
         assertEquals("TURN_RIGHT", v.session.challenge!!.action)
 
         vm.submitFace(List(20) { "data:image/jpeg;base64,AAAA" })
         assertEquals(20, fake.faceFramesSeen)
         assertTrue(fake.paid)
-        assertEquals(Screen.Dashboard, vm.screen)
-        assertTrue(vm.notice!!.startsWith("Payment sent"))
+        assertEquals("ok", (vm.screen as Screen.Result).outcome.kind)
         assertEquals(0, fake.rejectedWithoutToken)
     }
 
@@ -131,8 +132,9 @@ class BackendIntegrationTest {
     @Test fun anUnreachableBankIsAReadableMessage() {
         val settings = InMemorySettings(baseUrl = "http://127.0.0.1:9")
         val vm = vm(settings)
-        vm.login("alice", "pw")
-        assertEquals(Screen.Login, vm.screen)
+        vm.go(Screen.SignIn)
+        vm.signIn("alice", "pw")
+        assertEquals(Screen.SignIn, vm.screen)
         assertTrue(vm.error!!.startsWith("Cannot reach 127.0.0.1:9"))
     }
 }

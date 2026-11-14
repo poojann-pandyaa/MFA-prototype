@@ -67,8 +67,7 @@ class ApiTest {
         assertEquals("sess", started.link!!.token)
         val body = JSONObject(http.last("/transfer").body!!)
         assertEquals(1250.5, body.getDouble("amountRupees"), 0.0)
-        assertTrue(body.getBoolean("camera") && body.getBoolean("touch"))
-        assertFalse(body.getBoolean("microphone"))
+        assertTrue(body.getBoolean("camera") && body.getBoolean("touch") && body.getBoolean("microphone"))
         assertFalse(body.getBoolean("pointer"))
     }
 
@@ -148,5 +147,59 @@ class ApiTest {
             assertEquals(409, e.status)
             assertEquals("SESSION_EXPIRED", e.code)
         }
+    }
+}
+
+class BehaviourApiTest {
+    private val link = AmfaLink("http://amfa:8040", "tok-2")
+
+    @Test fun setupLinkAsksForTheFactorRequested() {
+        val http = RoutedHttp("POST /api/amfa/enrol" to ok("""{"url":"http://127.0.0.1:8040/hosted/enroll#token=e1"}"""))
+        BankApi(http, { "http://bank:8050" }, { "android_test01" }).startSetup("UEBA")
+        assertEquals("UEBA", JSONObject(http.last("/api/amfa/enrol").body!!).getJSONArray("factors").getString(0))
+    }
+
+    @Test fun phoneDeclaresAMicrophoneToo() {
+        val http = RoutedHttp("POST /api/actions/transfer" to HttpResult(201, """{"action":{"id":"A1","status":"AWAITING_VERIFICATION"},"challengeUrl":null}"""))
+        BankApi(http, { "http://bank:8050" }, { "android_test01" }).startTransfer("BEN-42", 10.0)
+        assertTrue(JSONObject(http.last("/transfer").body!!).getBoolean("microphone"))
+    }
+
+    @Test fun enrolmentStateCarriesTheTypingScript() {
+        val http = RoutedHttp("GET /c/v1/enrollment" to ok("""{"consent":{"required":false,"version":"v"},"enrolled":{"UEBA":false,"FACE":true},
+            "behaviour":{"phrase":"the quick brown fox","repetitions":10,"shape":[[0.1,0.5],[0.9,0.5]],"shapeTracesRequired":4}}"""))
+        val st = AmfaApi(http, link).enrollmentState()
+        assertTrue(st.faceEnrolled)
+        assertEquals(false, st.enrolled["UEBA"])
+        assertEquals("the quick brown fox", st.behaviour!!.phrase)
+        assertEquals(10, st.behaviour!!.repetitions)
+        assertEquals(listOf(0.1 to 0.5, 0.9 to 0.5), st.behaviour!!.shape)
+        assertEquals(4, st.behaviour!!.tracesRequired)
+    }
+
+    @Test fun voiceAndTypingEnrolmentBodiesFollowTheServicesContract() {
+        val http = RoutedHttp("POST /c/v1/enrollment/voice" to ok("""{"enrolled":false,"reason":"TOO_NOISY"}"""),
+            "POST /c/v1/enrollment/behaviour" to ok("""{"enrolled":true,"factor":"UEBA","quality":{}}"""))
+        val api = AmfaApi(http, link)
+        assertEquals("TOO_NOISY", api.enrollVoice(listOf("a", "b", "c")))
+        assertEquals(3, JSONObject(http.last("/enrollment/voice").body!!).getJSONArray("samples").length())
+        val sample = org.json.JSONArray().put(JSONObject().put("key", "a").put("down", 1.0).put("up", 4.0))
+        val trace = org.json.JSONArray().put(JSONObject().put("x", 0.1).put("y", 0.5).put("t", 5.0))
+        assertEquals(null, api.enrollBehaviour(listOf(sample, sample), listOf(trace), "touch"))
+        val b = JSONObject(http.last("/enrollment/behaviour").body!!)
+        assertEquals(2, b.getJSONArray("keystrokeSamples").length())
+        assertEquals("touch", b.getString("input"))
+        assertEquals("touch", b.getJSONArray("shapePointerTypes").getString(0))
+        assertEquals(1, b.getJSONArray("shapeTraces").length())
+    }
+
+    @Test fun voiceAndTypingChallengesAreParsed() {
+        fun session(factor: String, params: String) = ok("""{"status":"PENDING","steps":[{"factor":"$factor","status":"PENDING"}],"challenge":{"challengeId":"ch_cccccccccccccccccccc","factor":"$factor","params":$params}}""")
+        val voice = AmfaApi(RoutedHttp("GET /c/v1/session" to session("VOICE", """{"prompt":"river maple orbit 1 2 3 4","minSeconds":3,"maxSeconds":10}""")), link).session().challenge!!
+        assertEquals("river maple orbit 1 2 3 4", voice.prompt); assertEquals(3, voice.minSeconds); assertEquals(10, voice.maxSeconds)
+        val typing = AmfaApi(RoutedHttp("GET /c/v1/session" to session("UEBA", """{"phrase":"pack my box","input":"touch","shape":[[0.1,0.5],[0.9,0.5]]}""")), link).session().challenge!!
+        assertEquals("pack my box", typing.phrase); assertEquals("touch", typing.input); assertEquals(2, typing.shape!!.size)
+        val noShape = AmfaApi(RoutedHttp("GET /c/v1/session" to session("UEBA", """{"phrase":"pack my box","input":"touch","shape":null}""")), link).session().challenge!!
+        assertEquals(null, noShape.shape)
     }
 }

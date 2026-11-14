@@ -7,6 +7,7 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.v2.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onLast
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -37,9 +38,10 @@ class AppUiTest {
         scenario?.close()
     }
 
-    @Test fun loginScreenNeedsBothFields() {
-        compose.onNodeWithText("Sign in", useUnmergedTree = true).assertIsDisplayed()
-        compose.onNodeWithText("Bank: http://10.0.2.2:8050").assertIsDisplayed()
+    @Test fun welcomeLeadsToSignInWhichNeedsBothFields() {
+        compose.onNodeWithText("Banking that knows it's really you").assertIsDisplayed()
+        compose.onNodeWithText("I already bank here").performClick()
+        compose.onNodeWithText("Welcome back").assertIsDisplayed()
         compose.onAllNodesWithText("Sign in").onLast().assertIsNotEnabled()
         compose.onNodeWithText("Username").performTextInput("alice")
         compose.onAllNodesWithText("Sign in").onLast().assertIsNotEnabled()
@@ -47,16 +49,13 @@ class AppUiTest {
         compose.onAllNodesWithText("Sign in").onLast().assertIsEnabled()
     }
 
-    @Test fun openingAnAccountNeedsAValidFormAndGoesBack() {
-        compose.onNodeWithText("New here? Open an account").performClick()
-        compose.onNodeWithText("Create your account").assertIsDisplayed()
-        compose.onNodeWithText("Open account").performScrollTo().assertIsNotEnabled()
-        compose.onNodeWithText("Username").performTextInput("bob")
-        compose.onNodeWithText("Password").performTextInput("secret123")
-        compose.onNodeWithText("Confirm password").performTextInput("different1")
-        compose.onNodeWithText("Passwords do not match", substring = true).performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("Back").performClick()
-        compose.onNodeWithText("New here? Open an account").assertIsDisplayed()
+    @Test fun openingAnAccountShowsTheFormAndGoesBack() {
+        compose.onNodeWithText("Open an account").performClick()
+        compose.onNodeWithText("It takes about a minute", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("Full name").assertIsDisplayed()
+        compose.onNodeWithText("Mobile number").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Back").performClick()
+        compose.onNodeWithText("Banking that knows it's really you").assertIsDisplayed()
     }
 
     @Test fun settingsRejectsABadAddressAndSavesAGoodOne() {
@@ -70,7 +69,7 @@ class AppUiTest {
         compose.onNodeWithText("Bank URL").performTextInput("192.168.1.20:8050")
         compose.onNodeWithText("Save").performClick()
         compose.onNodeWithText("Saved").assertIsDisplayed()
-        compose.onNodeWithText("Back").performClick()
+        compose.onNodeWithContentDescription("Back").performClick()
         compose.onNodeWithText("Bank: http://192.168.1.20:8050").assertIsDisplayed()
     }
 
@@ -80,8 +79,9 @@ class AppUiTest {
         compose.onNodeWithText("Bank URL").performTextClearance()
         compose.onNodeWithText("Bank URL").performTextInput("http://127.0.0.1:9")
         compose.onNodeWithText("Save").performClick()
-        compose.onNodeWithText("Back").performClick()
+        compose.onNodeWithContentDescription("Back").performClick()
 
+        compose.onNodeWithText("I already bank here").performClick()
         compose.onNodeWithText("Username").performTextInput("alice")
         compose.onNodeWithText("Password").performTextInput("pw")
         compose.onAllNodesWithText("Sign in").onLast().performClick()

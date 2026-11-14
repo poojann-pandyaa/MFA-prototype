@@ -10,29 +10,50 @@ import com.adaptivemfa.app.data.AmfaApi
 import com.adaptivemfa.app.data.AmfaLink
 import com.adaptivemfa.app.data.ApiException
 import com.adaptivemfa.app.data.BankApi
+import com.adaptivemfa.app.data.Behaviour
 import com.adaptivemfa.app.data.Me
 import com.adaptivemfa.app.data.SessionState
+import com.adaptivemfa.app.data.Started
 import com.adaptivemfa.app.data.Settings
 import com.adaptivemfa.app.data.Submitted
-import com.adaptivemfa.app.logic.faceSetupReason
+import com.adaptivemfa.app.logic.Outcome
+import com.adaptivemfa.app.logic.setupReason
 import com.adaptivemfa.app.logic.formatMoney
 import com.adaptivemfa.app.logic.normalizeBaseUrl
+import com.adaptivemfa.app.logic.outcomeFor
 import com.adaptivemfa.app.logic.reachableAmfaBase
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
+import com.adaptivemfa.app.logic.Setup
+import com.adaptivemfa.app.logic.TracePoint
+import com.adaptivemfa.app.logic.traceJson
 import org.json.JSONObject
 
 sealed interface Screen {
-    data object Login : Screen
-    data object Register : Screen
+    data object Welcome : Screen
+    data object SignIn : Screen
+    data object SignUp : Screen
+    /** "Let's protect your account": the step between opening an account and the face setup. */
+    data object Setup : Screen
     /** AMFA's face enrolment: [consentRequired] says whether the customer still has to agree to the notice first. */
     data class FaceSetup(val consentRequired: Boolean, val consentVersion: String) : Screen
-    data object Dashboard : Screen
+    /** Voice setup: three sentences read aloud. */
+    data class VoiceSetup(val consentRequired: Boolean, val consentVersion: String) : Screen
+    /** Typing setup: the phrase [Behaviour.repetitions] times and, on a phone, the traced line. */
+    data class TypingSetup(val consentRequired: Boolean, val consentVersion: String, val behaviour: Behaviour) : Screen
+    data object Home : Screen
+    data class Pay(val bills: Boolean = false) : Screen
+    data class Amount(val kind: String, val ref: String, val display: String, val initials: String) : Screen
+    /** What the customer is about to approve and which checks are coming; [Started.action] holds the plan. */
+    data class Review(val started: Started) : Screen
     /** One AMFA approval in progress; [session] carries the current challenge (face, code or something unsupported). */
     data class Verify(val actionId: String, val session: SessionState) : Screen
+    data class Result(val outcome: Outcome, val action: ActivityItem?) : Screen
+    data object Activity : Screen
+    data object Profile : Screen
     data object Settings : Screen
 }
 
@@ -43,9 +64,9 @@ class AppViewModel(
     private val io: CoroutineDispatcher = Dispatchers.IO,
 ) : ViewModel() {
 
-    var screen by mutableStateOf<Screen>(Screen.Login)
+    var screen by mutableStateOf<Screen>(Screen.Welcome)
         private set
-    private var beforeSettings: Screen = Screen.Login
+    private var beforeSettings: Screen = Screen.Welcome
 
     var busy by mutableStateOf(false)
         private set
@@ -60,6 +81,7 @@ class AppViewModel(
         private set
 
     private var amfa: AmfaApi? = null
+    private var pending: Started? = null
 
     fun go(to: Screen) {
         error = null
@@ -68,12 +90,21 @@ class AppViewModel(
         screen = to
     }
 
+    /** The four bottom tabs. */
+    fun tab(key: String) {
+        go(when (key) { "pay" -> Screen.Pay(); "activity" -> Screen.Activity; "profile" -> Screen.Profile; else -> Screen.Home })
+        if (key == "activity" || key == "home") refreshHome()
+    }
+
     fun back() {
-        when (screen) {
+        when (val s = screen) {
             Screen.Settings -> go(beforeSettings)
-            Screen.Register -> go(Screen.Login)
-            is Screen.FaceSetup -> { go(Screen.Dashboard); notice = "You can set up the face check later from the home screen." }
+            Screen.SignIn, Screen.SignUp -> go(Screen.Welcome)
+            is Screen.FaceSetup, is Screen.VoiceSetup, is Screen.TypingSetup -> { go(Screen.Home); notice = "You can set this up later from Profile." }
+            is Screen.Amount -> go(Screen.Pay(s.kind == "bill"))
+            is Screen.Review -> cancelReview()
             is Screen.Verify -> cancelVerify()
+            is Screen.Pay -> go(Screen.Home)
             else -> Unit
         }
     }
@@ -86,7 +117,7 @@ class AppViewModel(
             try {
                 block()
             } catch (e: ApiException) {
-                if (e.status == 401 && screen == Screen.Dashboard) signOut("Your session expired. Please sign in again.") else error = e.message
+                if (e.status == 401 && me != null) signOut("Your session expired. Please sign in again.") else error = e.message
             } catch (e: Exception) {
                 error = e.message ?: "Something went wrong."
             } finally {
@@ -107,24 +138,24 @@ class AppViewModel(
         store.username = user
         username = user
         refresh()
-        go(Screen.Dashboard)
+        go(Screen.Home)
     }
 
     // ------------------------------------------------------------ account
 
-    fun login(user: String, password: String) = run {
-        val u = user.trim()
+    fun signIn(user: String, password: String) = run {
+        val u = user.trim().lowercase()
         withContext(io) { bank.login(u, password) }
         enter(u)
     }
 
-    fun register(user: String, name: String, phone: String, email: String, password: String) = run {
+    fun signUp(user: String, name: String, phone: String, email: String, password: String) = run {
         val u = user.trim().lowercase()
         withContext(io) { bank.register(u, name.trim(), phone.trim(), email.trim(), password) }
         store.username = u
         username = u
         refresh()
-        beginFaceSetup()
+        go(Screen.Setup)
     }
 
     fun logout() = run { withContext(io) { try { bank.logout() } catch (_: ApiException) { } }; signOut(null) }
@@ -133,55 +164,96 @@ class AppViewModel(
         me = null
         activity = emptyList()
         amfa = null
-        go(Screen.Login)
+        pending = null
+        go(Screen.SignIn)
         error = message
     }
 
     // ------------------------------------------------------------ face setup (AMFA enrolment)
 
-    fun startFaceSetup() = run { beginFaceSetup() }
+    fun startFaceSetup() = startSetup("FACE")
 
-    private suspend fun beginFaceSetup() {
-        val link = withContext(io) { bank.startFaceSetup() }
+    /** [factor] is "FACE", "VOICE" or "UEBA" (typing). */
+    fun startSetup(factor: String) = run { beginSetup(factor) }
+
+    private suspend fun beginSetup(factor: String) {
+        val link = withContext(io) { bank.startSetup(factor) }
         val api = amfaApi(link)
         val state = withContext(io) { api.enrollmentState() }
-        if (state.faceEnrolled) return finishSetup("Your face check is already set up.")
-        go(Screen.FaceSetup(state.consentRequired, state.consentVersion))
+        if (state.enrolled[factor] == true) return finishSetup("That check is already set up.")
+        go(when (factor) {
+            "VOICE" -> Screen.VoiceSetup(state.consentRequired, state.consentVersion)
+            "UEBA" -> Screen.TypingSetup(state.consentRequired, state.consentVersion, state.behaviour ?: throw ApiException(0, "The bank's typing setup is not available right now."))
+            else -> Screen.FaceSetup(state.consentRequired, state.consentVersion)
+        })
     }
 
     /** [frames] are the five JPEG data URLs of the setup script. */
     fun submitFaceSetup(frames: List<String>) {
         val s = screen as? Screen.FaceSetup ?: return
-        run {
-            val api = amfa ?: throw ApiException(0, "The setup session ended. Start the face setup again.")
-            withContext(io) {
-                if (s.consentRequired) api.consent(s.consentVersion)
-                api.enrollFace(frames)?.let { throw ApiException(422, faceSetupReason(it)) }
-                api.enrollComplete()
-            }
-            finishSetup("Face check set up. Larger payments can now be approved with a quick face check.")
+        setUp(s.consentRequired, s.consentVersion, "You're all set. Larger payments can now be approved with a quick face check.") { it.enrollFace(frames) }
+    }
+
+    /** [clips] are three base64 WAV recordings of the setup sentences. */
+    fun submitVoiceSetup(clips: List<String>) {
+        val s = screen as? Screen.VoiceSetup ?: return
+        setUp(s.consentRequired, s.consentVersion, "Voice check set up.") { it.enrollVoice(clips) }
+    }
+
+    /** [samples] are the typed repetitions, [traces] the traced lines (phones only). */
+    fun submitTypingSetup(samples: List<JSONArray>, traces: List<List<TracePoint>>) {
+        val s = screen as? Screen.TypingSetup ?: return
+        setUp(s.consentRequired, s.consentVersion, "Typing check set up.") { it.enrollBehaviour(samples, traces.map(::traceJson), "touch") }
+    }
+
+    /** Consents if needed, enrols with [send] (null means accepted, else AMFA's reason) and completes the setup link. */
+    private fun setUp(consentRequired: Boolean, version: String, done: String, send: (AmfaApi) -> String?) = run {
+        val api = amfa ?: throw ApiException(0, "The setup session ended. Start it again.")
+        withContext(io) {
+            if (consentRequired) api.consent(version)
+            send(api)?.let { throw ApiException(422, setupReason(it)) }
+            api.enrollComplete()
         }
+        finishSetup(done)
     }
 
     private suspend fun finishSetup(message: String) {
         try { refresh() } catch (_: ApiException) { }
-        go(Screen.Dashboard)
+        go(Screen.Home)
         notice = message
     }
 
     // ------------------------------------------------------------ paying: the bank starts it, AMFA decides the checks
 
-    fun sendMoney(payeeRef: String, rupees: Double) = run {
-        val started = withContext(io) { bank.startTransfer(payeeRef, rupees) }
-        val link = started.link
-        if (link == null) return@run settle(started.actionId)
-        val api = amfaApi(link)
-        val session = withContext(io) { api.session() }
-        if (session.status == "PENDING" && session.challenge != null) screen = Screen.Verify(started.actionId, session)
-        else settle(started.actionId)
+    /** [kind] is "transfer" (ref is a payee) or "bill" (ref is a biller). Shows the review screen with AMFA's plan. */
+    fun startPayment(kind: String, ref: String, rupees: Double) = run {
+        val started = withContext(io) { if (kind == "bill") bank.startBill(ref, rupees) else bank.startTransfer(ref, rupees) }
+        pending = started
+        screen = Screen.Review(started)
+    }
+
+    /** "Confirm and pay": open AMFA's session if it asked for checks, otherwise let the bank settle it. */
+    fun confirmPayment() {
+        val started = pending ?: return
+        run {
+            val link = started.link ?: return@run settle(started.actionId)
+            val api = amfaApi(link)
+            val session = withContext(io) { api.session() }
+            if (session.status == "PENDING" && session.challenge != null) screen = Screen.Verify(started.actionId, session)
+            else settle(started.actionId)
+        }
     }
 
     fun submitFace(frames: List<String>) = submit("FACE") { JSONObject().put("frames", JSONArray(frames)) }
+
+    fun submitVoice(wavBase64: String) = submit("VOICE") { JSONObject().put("audio", wavBase64) }
+
+    /** [sample] is the typed phrase's key events; [trace] the traced line when the check asked for one. */
+    fun submitTyping(sample: JSONArray, trace: List<TracePoint>?) = submit("UEBA") {
+        val p = JSONObject().put("keystrokeSample", sample).put("keystrokeInput", "touch")
+        if (trace != null) p.put("shapeTrace", traceJson(trace)).put("shapePointerType", "touch")
+        p
+    }
 
     fun submitCode(code: String) = submit("OTP") { JSONObject().put("code", code.trim()) }
 
@@ -205,26 +277,27 @@ class AppViewModel(
     private suspend fun settle(actionId: String) {
         val done = withContext(io) { bank.complete(actionId) }
         try { refresh() } catch (_: ApiException) { }
-        go(Screen.Dashboard)
-        val text = when (done.status) {
-            "DONE" -> "Payment sent. Your balance is ${formatMoney(done.balanceMinor)}."
-            "UNDER_REVIEW" -> "The payment is waiting for a bank review. You will see the result under Activity."
-            "DECLINED" -> "The payment was declined. ${done.detail ?: ""}".trim()
-            "EXPIRED" -> "The approval timed out. Start the payment again."
-            "CANCELLED" -> "The payment was cancelled."
-            else -> done.detail ?: "The payment could not be completed (${done.status})."
-        }
-        if (done.status == "DONE" || done.status == "UNDER_REVIEW") notice = text else error = text
+        val a = done.action
+        pending = null
+        go(Screen.Result(outcomeFor(a.status, a.detail, formatMoney(a.amountMinor), a.payee, a.kind == "bill"), a))
+    }
+
+    fun cancelReview() {
+        val s = pending ?: return go(Screen.Home)
+        cancelAction(s.actionId)
     }
 
     fun cancelVerify() {
         val v = screen as? Screen.Verify ?: return
-        run {
-            withContext(io) { try { bank.cancel(v.actionId) } catch (_: ApiException) { } }
-            try { refresh() } catch (_: ApiException) { }
-            go(Screen.Dashboard)
-            notice = "Payment cancelled."
-        }
+        cancelAction(v.actionId)
+    }
+
+    private fun cancelAction(actionId: String) = run {
+        withContext(io) { try { bank.cancel(actionId) } catch (_: ApiException) { } }
+        pending = null
+        try { refresh() } catch (_: ApiException) { }
+        go(Screen.Home)
+        notice = "Payment cancelled. Nothing was sent."
     }
 
     fun refreshHome() = run { refresh() }

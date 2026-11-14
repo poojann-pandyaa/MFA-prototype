@@ -5,6 +5,15 @@ payment approved by AMFA (`../amfa`). The app was written by Preet against the e
 to the bank and to AMFA's customer API (`/c/v1`) instead, with no WebView: the app keeps its own CameraX capture and
 sends frames to AMFA itself.
 
+## Look and feel
+
+The screens follow the web bank (`examples/demo_bank/static`): the same colour tokens in light and dark (the phone's
+setting picks), the same stroke icons, welcome, sign-in and sign-up, "Let's protect your account", home with the balance
+card, pay again, protection and recent payments, pay (people and bills), the keypad amount screen, the review screen with
+AMFA's plan and scam warning, the verify step (a face circle with a progress ring and turn arrow, or six code boxes), the
+result screens, activity with filters, and a profile tab. Not ported: adding a payee, changing the limit, contact details
+or password, the "Behind the scenes" demo drawer, and opening an activity item to continue or report it.
+
 ## How it works
 
 | Step | App | Server |
@@ -14,11 +23,13 @@ sends frames to AMFA itself.
 | Send money | `BankApi.startTransfer` declares what the phone can do (camera and touch, no microphone); AMFA plans the checks | bank `/api/actions/transfer` |
 | Face check | `AmfaApi.session()` gives the challenge (turn left or right); the app captures `params.frames` frames `params.intervalMs` apart and submits them | AMFA `/c/v1/session`, `/c/v1/session/factors/FACE` |
 | Code check | a 6-digit code (email or authenticator) | AMFA `/c/v1/session/factors/OTP` |
+| Voice check | records 3 to 10 s of 16 kHz mono audio (`AudioRecord`), sends it as a base64 WAV | AMFA `/c/v1/session/factors/VOICE`; setup `/c/v1/enrollment/voice` (three sentences) |
+| Typing check | types the phrase in a text box (each key is recovered from the text change, as the web SDK does for phones) and, when asked, traces a line with a finger | AMFA `/c/v1/session/factors/UEBA`; setup `/c/v1/enrollment/behaviour` |
 | Settle | `BankApi.complete` | bank `/api/actions/{id}/complete`: the bank applies the payment only against AMFA's verified proof |
 
 All biometric work (detection, liveness, matching) stays on AMFA's servers; the app only captures camera frames, so the
-checks cannot be bypassed by changing the app. A voice or typing check is not supported yet: the app says so and
-offers to cancel. The phone declares no microphone, so AMFA plans around voice.
+checks cannot be bypassed by changing the app. The phone declares a camera, a microphone and touch, so AMFA can plan
+face, voice and typing checks; Profile sets each of them up.
 
 AMFA's links point at AMFA's own public address. When that is `127.0.0.1` or `localhost` (a developer machine) the app
 uses the bank's host instead (`reachableAmfaBase`), so an emulator reaching the bank at `10.0.2.2:8050` reaches AMFA at
@@ -89,7 +100,8 @@ matched.
 
 - Not run on a physical phone or against a real face in this branch. The liveness thresholds were tuned on webcam
   frames, so phone cameras may need calibration on the AMFA side.
-- Voice and typing checks are not supported; AMFA plans around that because the app declares no microphone.
+- Voice and typing were tested on the wire (JVM tests and a script against the running demo for typing) but not on a real
+  person or against the voice models.
 - The app has no on-device face detector, so the buttons do not wait for a face to be in view; AMFA rejects bursts
   without a usable face.
 - No device key or attestation yet (`/c/v1/session/device`): AMFA sees the phone by its install id only. Play

@@ -19,24 +19,23 @@ import androidx.camera.view.PreviewView
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
-import androidx.compose.material3.Text
+import com.adaptivemfa.app.ui.Btn
+import com.adaptivemfa.app.ui.Note
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.delay
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicReference
@@ -50,7 +49,12 @@ import kotlin.math.max
 class FrameGrabber : ImageAnalysis.Analyzer {
     private val pending = AtomicReference<CompletableDeferred<ByteArray>?>(null)
 
+    /** How many frames the camera has delivered at all; zero after a few seconds means it is not working. */
+    @Volatile var framesSeen = 0
+        private set
+
     override fun analyze(image: ImageProxy) {
+        framesSeen++
         try {
             val request = pending.getAndSet(null) ?: return
             try {
@@ -104,6 +108,14 @@ fun FaceCamera(grabber: FrameGrabber, modifier: Modifier = Modifier, onError: (S
             scaleType = PreviewView.ScaleType.FILL_CENTER
             implementationMode = PreviewView.ImplementationMode.COMPATIBLE
         }
+    }
+
+    LaunchedEffect(grabber) {
+        delay(4_000)
+        if (grabber.framesSeen == 0) onError(
+            "The camera is not delivering pictures. On the emulator, allow it to use your Mac's webcam " +
+                "(System Settings, Privacy & Security, Camera) and restart it; on a phone, close other apps that use the camera.",
+        )
     }
 
     DisposableEffect(lifecycleOwner) {
@@ -169,17 +181,13 @@ fun CameraPermissionGate(content: @Composable () -> Unit) {
     if (granted) {
         content()
     } else {
-        Column(
-            Modifier.fillMaxWidth().padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text(
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Note(
+                "brand", "face",
                 if (denied) "Camera access was refused. The face check needs the camera; allow it here or in the phone's app settings."
-                else "The face check needs the front camera. Photos are sent only to your MFA server and are not saved on the phone.",
-                textAlign = TextAlign.Center,
+                else "The face check needs the front camera. Pictures go only to AMFA's servers and are not saved on the phone.",
             )
-            Button(onClick = { launcher.launch(Manifest.permission.CAMERA) }) { Text("Allow camera") }
+            Btn("Allow camera") { launcher.launch(Manifest.permission.CAMERA) }
         }
     }
 }

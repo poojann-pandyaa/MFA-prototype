@@ -95,3 +95,71 @@ fun faceSetupReason(reason: String): String = when (reason) {
     "FACE_TOO_SMALL" -> "Move closer to the camera."
     else -> "The face setup didn't work ($reason). Please try again."
 }
+
+// ---------------------------------------------------------------- display helpers (same wording as the web bank)
+
+/** Keypad entry for an amount: digits and one dot, at most two decimals and eight whole digits. */
+fun pressKey(text: String, key: String): String = when {
+    key == "del" -> text.dropLast(1)
+    key == "." -> if (text.contains('.')) text else (text.ifEmpty { "0" } + ".")
+    text.contains('.') -> if (text.substringAfter('.').length >= 2) text else text + key
+    text == "0" -> key
+    text.length >= 8 -> text
+    else -> text + key
+}
+
+/** ₹1,234 and .50, so the paise can be drawn small like on the web home screen. */
+fun rupeesParts(minor: Long): Pair<String, String> {
+    val whole = String.format(Locale.US, "%,d", minor / 100)
+    return whole to String.format(Locale.US, ".%02d", minor % 100)
+}
+
+fun greeting(hour: Int) = if (hour < 12) "Good morning" else if (hour < 17) "Good afternoon" else "Good evening"
+
+/** Label and chip tone for an action's status (STATUS in the web bank's ui.js). */
+fun statusLabel(status: String): Pair<String, String> = when (status) {
+    "AWAITING_VERIFICATION" -> "Waiting for you" to "warn"
+    "UNDER_REVIEW" -> "Being reviewed" to "warn"
+    "DONE" -> "Done" to "ok"
+    "DECLINED" -> "Not sent, check failed" to "bad"
+    "EXPIRED" -> "Expired" to "bad"
+    "CANCELLED" -> "Cancelled" to ""
+    "FAILED" -> "Didn't go through" to "bad"
+    else -> status.lowercase().replace('_', ' ') to ""
+}
+
+/** Same rule as the web bank: drop masks and digits, take the first word longer than an initial. */
+fun shortName(display: String): String {
+    val words = display.replace(Regex("[•\\d]"), " ").split(Regex("\\s+")).filter { it.isNotEmpty() }
+    val first = words.firstOrNull { it.replace(".", "").length > 1 } ?: words.firstOrNull() ?: ""
+    return first.removeSuffix(".")
+}
+
+/** What the result screen says: mark kind (ok, warn, bad), headline and text; [rupees] is the formatted amount. */
+data class Outcome(val kind: String, val icon: String, val title: String, val text: String)
+
+fun outcomeFor(status: String, detail: String?, rupees: String, payee: String, bill: Boolean): Outcome = when (status) {
+    "DONE" -> Outcome("ok", "check", "$rupees ${if (bill) "paid" else "sent"}", "to $payee")
+    "UNDER_REVIEW" -> Outcome("warn", "shieldClock", "We're double-checking this payment",
+        "$rupees to $payee is on hold while our team takes a quick look. Your money hasn't left your account.")
+    "AWAITING_VERIFICATION" -> Outcome("warn", "lock", "Waiting for you", "You haven't finished confirming it's you.")
+    "DECLINED" -> Outcome("bad", "ban", "We couldn't approve this",
+        "We couldn't confirm it was you, so nothing was sent. If you didn't try this, call us on 1800 000 0000." + (detail?.let { " ($it)" } ?: ""))
+    "EXPIRED" -> Outcome("bad", "ban", "This request timed out", "Nothing was sent. You can start again whenever you're ready.")
+    "CANCELLED" -> Outcome("bad", "close", "Cancelled", "Nothing was sent or changed.")
+    else -> Outcome("bad", "ban", "This didn't go through", "Nothing was sent." + (detail?.let { " ($it)" } ?: ""))
+}
+
+/** AMFA's reason codes for a rejected setup of any factor, in words. */
+fun setupReason(reason: String): String = when (reason) {
+    "NOT_ENOUGH_SPEECH" -> "That was too short. Please read the whole sentence clearly."
+    "TOO_NOISY" -> "Find a quieter place and try again."
+    "AUDIO_CLIPPED" -> "Hold the phone a little further away."
+    "INCONSISTENT_SPEAKER" -> "The three recordings didn't sound like the same voice. Try again."
+    "DUPLICATE_SAMPLES" -> "Those samples were identical. Please do each one for real."
+    "REJECTED_SPOOF" -> "We couldn't tell a live voice was speaking. Speak to the phone directly."
+    "KEYSTROKE_SAMPLES_MISSING", "NOT_ENOUGH_USABLE_SAMPLES" ->
+        "We couldn't use those typing samples. Type the phrase exactly, each letter yourself, with suggestions and autocorrect turned off."
+    "SHAPE_POINTER_MISMATCH", "SHAPE_POINTER_TYPES_INVALID", "INPUT_INVALID" -> "Trace the line with your finger and try again."
+    else -> faceSetupReason(reason)
+}

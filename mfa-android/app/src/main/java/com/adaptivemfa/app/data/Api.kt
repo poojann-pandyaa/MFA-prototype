@@ -21,26 +21,80 @@ private fun call(http: Http, method: String, url: String, body: JSONObject? = nu
 
 // ---------------------------------------------------------------- bank (the demo bank's own JSON API)
 
-data class Payee(val ref: String, val display: String)
+data class Payee(val ref: String, val display: String, val initials: String)
+data class Biller(val ref: String, val display: String)
 
 data class Me(
     val name: String,
+    val ref: String,
     val balanceMinor: Long,
     val payees: List<Payee>,
+    val recentPayees: List<Payee>,
+    val billers: List<Biller>,
     val faceEnrolled: Boolean,
+    val voiceEnrolled: Boolean,
+    val typingEnrolled: Boolean,
     val protection: String,
+    val have: List<String>,
+    val canAdd: List<String>,
     val frozen: Boolean,
+    val dailyLimitMinor: Long,
+    val sentTodayMinor: Long,
+    val codeTo: String,
 )
 
-data class ActivityItem(val id: String, val title: String, val amountMinor: Long, val status: String, val detail: String?, val payee: String)
+/** One payment or account change as the bank shows it to the customer (never the risk score or AMFA's decision). */
+data class ActivityItem(
+    val id: String,
+    val kind: String,
+    val title: String,
+    val amountMinor: Long,
+    val status: String,
+    val detail: String?,
+    val createdAt: Double,
+    val payee: String,
+    val initials: String,
+    val checks: List<String> = emptyList(),
+    val reason: String? = null,
+    val scamWarning: Boolean = false,
+    val reviewAfter: Boolean = false,
+    val confirmedWith: List<String> = emptyList(),
+    val canContinue: Boolean = false,
+    val reported: Boolean = false,
+)
 
 /** Where AMFA's own API lives for one approval or one enrolment, and the single-use token for it. */
 data class AmfaLink(val base: String, val token: String)
 
-/** The bank's [startTransfer] answer: [link] is null when AMFA needs no check for this payment. */
-data class Started(val actionId: String, val status: String, val link: AmfaLink?)
+/** The bank's answer to starting a payment: [link] is null when AMFA needs no check for it. */
+data class Started(val action: ActivityItem, val link: AmfaLink?) {
+    val actionId get() = action.id
+}
 
-data class Settled(val status: String, val detail: String?, val balanceMinor: Long)
+data class Settled(val action: ActivityItem, val balanceMinor: Long) {
+    val status get() = action.status
+    val detail get() = action.detail
+}
+
+private fun JSONObject.texts(key: String): List<String> =
+    optJSONArray(key)?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: emptyList()
+
+private fun JSONObject.optNullable(key: String): String? = if (isNull(key)) null else optString(key).ifEmpty { null }
+
+fun parseAction(a: JSONObject): ActivityItem {
+    val p = a.optJSONObject("payee")
+    return ActivityItem(
+        id = a.getString("id"), kind = a.optString("kind"), title = a.optString("title"),
+        amountMinor = a.optLong("amountMinor"), status = a.optString("status"), detail = a.optNullable("detail"),
+        createdAt = a.optDouble("createdAt", 0.0), payee = p?.optString("display") ?: "", initials = p?.optString("initials") ?: "",
+        checks = a.texts("checks"), reason = a.optNullable("reason"), scamWarning = a.optBoolean("scamWarning", false),
+        reviewAfter = a.optBoolean("reviewAfter", false), confirmedWith = a.texts("confirmedWith"),
+        canContinue = a.optBoolean("canContinue", false), reported = a.optBoolean("reported", false),
+    )
+}
+
+private fun parsePayees(arr: JSONArray?): List<Payee> =
+    arr?.let { (0 until it.length()).map { i -> it.getJSONObject(i).let { p -> Payee(p.getString("ref"), p.optString("display"), p.optString("initials")) } } } ?: emptyList()
 
 class BankApi(
     private val http: Http,
@@ -70,36 +124,45 @@ class BankApi(
 
     fun me(): Me {
         val j = call(http, "GET", url("/api/me?deviceId=" + deviceId()))
-        val payees = j.optJSONArray("payees") ?: JSONArray()
+        val prot = j.optJSONObject("protection")
+        val billers = j.optJSONArray("billers")
         return Me(
-            name = j.optString("name"),
-            balanceMinor = j.optLong("balance"),
-            payees = (0 until payees.length()).map { payees.getJSONObject(it).let { p -> Payee(p.getString("ref"), p.optString("display")) } },
+            name = j.optString("name"), ref = j.optString("ref"), balanceMinor = j.optLong("balance"),
+            payees = parsePayees(j.optJSONArray("payees")), recentPayees = parsePayees(j.optJSONArray("recentPayees")),
+            billers = billers?.let { (0 until it.length()).map { i -> it.getJSONObject(i).let { b -> Biller(b.getString("ref"), b.optString("display")) } } } ?: emptyList(),
             faceEnrolled = j.optJSONObject("enrolled")?.optString("FACE") == "ENROLLED",
-            protection = j.optJSONObject("protection")?.optString("level") ?: "",
-            frozen = j.optBoolean("frozen", false),
+            voiceEnrolled = j.optJSONObject("enrolled")?.optString("VOICE") == "ENROLLED",
+            typingEnrolled = j.optJSONObject("enrolled")?.optString("UEBA") == "ENROLLED",
+            protection = prot?.optString("level") ?: "", have = prot?.texts("have") ?: emptyList(), canAdd = prot?.texts("canAdd") ?: emptyList(),
+            frozen = j.optBoolean("frozen", false), dailyLimitMinor = j.optLong("dailyLimit"), sentTodayMinor = j.optLong("sentToday"),
+            codeTo = j.optString("codeTo"),
         )
     }
 
-    /** Asks the bank to have AMFA open a face enrolment for this customer. */
-    fun startFaceSetup(): AmfaLink =
-        parseAmfaLink(call(http, "POST", url("/api/amfa/enrol"), JSONObject().put("factors", JSONArray().put("FACE"))).getString("url"))
+    /** Asks the bank to have AMFA open an enrolment for this customer: "FACE", "VOICE" or "UEBA" (typing). */
+    fun startSetup(factor: String): AmfaLink =
+        parseAmfaLink(call(http, "POST", url("/api/amfa/enrol"), JSONObject().put("factors", JSONArray().put(factor))).getString("url"))
 
-    /** The phone cannot show a microphone or a keyboard-typing check, so it says so; AMFA plans around that. */
-    fun startTransfer(payeeRef: String, amountRupees: Double): Started {
-        val j = call(http, "POST", url("/api/actions/transfer"), JSONObject()
-            .put("payeeRef", payeeRef).put("amountRupees", amountRupees).put("deviceId", deviceId())
-            .put("camera", true).put("microphone", false).put("pointer", false).put("touch", true))
-        val action = j.getJSONObject("action")
+    fun startFaceSetup(): AmfaLink = startSetup("FACE")
+
+    /** A phone has a camera, a microphone and a touchscreen; it declares them so AMFA can plan face, voice and typing checks. */
+    private fun start(kind: String, body: JSONObject): Started {
+        val j = call(http, "POST", url("/api/actions/$kind"), body
+            .put("deviceId", deviceId()).put("camera", true).put("microphone", true).put("pointer", false).put("touch", true))
         val link = if (j.isNull("challengeUrl")) null else parseAmfaLink(j.getString("challengeUrl"))
-        return Started(action.getString("id"), action.optString("status"), link)
+        return Started(parseAction(j.getJSONObject("action")), link)
     }
+
+    fun startTransfer(payeeRef: String, amountRupees: Double) =
+        start("transfer", JSONObject().put("payeeRef", payeeRef).put("amountRupees", amountRupees))
+
+    fun startBill(billerRef: String, amountRupees: Double) =
+        start("bill", JSONObject().put("billerRef", billerRef).put("amountRupees", amountRupees))
 
     /** The bank asks AMFA how the approval ended, applies the payment only on a verified proof, and says what happened. */
     fun complete(actionId: String): Settled {
         val j = call(http, "POST", url("/api/actions/$actionId/complete"), JSONObject())
-        val a = j.getJSONObject("action")
-        return Settled(a.optString("status"), a.optString("detail").ifEmpty { null }, j.optLong("balance"))
+        return Settled(parseAction(j.getJSONObject("action")), j.optLong("balance"))
     }
 
     fun cancel(actionId: String) {
@@ -108,11 +171,7 @@ class BankApi(
 
     fun activity(): List<ActivityItem> {
         val arr = call(http, "GET", url("/api/activity")).optJSONArray("activity") ?: return emptyList()
-        return (0 until arr.length()).map {
-            val a = arr.getJSONObject(it)
-            ActivityItem(a.getString("id"), a.optString("title"), a.optLong("amountMinor"), a.optString("status"),
-                a.optString("detail").ifEmpty { null }, a.optJSONObject("payee")?.optString("display") ?: "")
-        }
+        return (0 until arr.length()).map { parseAction(arr.getJSONObject(it)) }
     }
 }
 
@@ -128,10 +187,26 @@ fun parseAmfaLink(url: String): AmfaLink {
 
 // ---------------------------------------------------------------- AMFA customer API (/c/v1)
 
-data class EnrollState(val consentRequired: Boolean, val consentVersion: String, val faceEnrolled: Boolean)
+/** What the customer still has to do for the factor this link asked for; [behaviour] is the typing phrase and trace. */
+data class EnrollState(
+    val consentRequired: Boolean, val consentVersion: String, val enrolled: Map<String, Boolean>, val behaviour: Behaviour?,
+) {
+    val faceEnrolled get() = enrolled["FACE"] == true
+}
 
-/** [action] is TURN_LEFT or TURN_RIGHT for a face check; [mode] is "totp" or "delivered" for a code; [sentTo] masks where it went. */
-data class AmfaChallenge(val id: String, val factor: String, val action: String?, val frames: Int, val intervalMs: Long, val mode: String?, val sentTo: String?)
+/** The typing setup script: type [phrase] [repetitions] times; on a phone also trace [shape] [tracesRequired] times. */
+data class Behaviour(val phrase: String, val repetitions: Int, val shape: List<Pair<Double, Double>>, val tracesRequired: Int)
+
+/**
+ * One check AMFA asks for. FACE: [action] (TURN_LEFT or TURN_RIGHT), [frames], [intervalMs]. OTP: [mode] ("totp" or
+ * "delivered"), [sentTo]. VOICE: [prompt] to read aloud for [minSeconds] to [maxSeconds]. UEBA: [phrase] to type and,
+ * when [shape] is given, a line to trace; [input] says which kind of device's template it is compared with.
+ */
+data class AmfaChallenge(
+    val id: String, val factor: String, val action: String?, val frames: Int, val intervalMs: Long, val mode: String?, val sentTo: String?,
+    val prompt: String? = null, val minSeconds: Int = 3, val maxSeconds: Int = 10,
+    val phrase: String? = null, val shape: List<Pair<Double, Double>>? = null, val input: String? = null,
+)
 
 data class SessionState(val status: String, val amount: String, val payee: String, val steps: List<String>, val challenge: AmfaChallenge?)
 
@@ -144,8 +219,11 @@ class AmfaApi(private val http: Http, private val link: AmfaLink) {
     fun enrollmentState(): EnrollState {
         val j = call(http, "GET", url("/enrollment"), token = link.token)
         val consent = j.optJSONObject("consent")
+        val done = j.optJSONObject("enrolled")
+        val b = j.optJSONObject("behaviour")
         return EnrollState(consent?.optBoolean("required", true) ?: true, consent?.optString("version") ?: "",
-            j.optJSONObject("enrolled")?.optBoolean("FACE", false) ?: false)
+            listOf("FACE", "VOICE", "UEBA").associateWith { done?.optBoolean(it, false) ?: false },
+            b?.let { Behaviour(it.optString("phrase"), it.optInt("repetitions", 10), parseShape(it.optJSONArray("shape")) ?: emptyList(), it.optInt("shapeTracesRequired", 4)) })
     }
 
     fun consent(version: String) {
@@ -155,6 +233,20 @@ class AmfaApi(private val http: Http, private val link: AmfaLink) {
     /** Returns null when the face was enrolled, otherwise AMFA's reason (for example LIVENESS_NOT_ESTABLISHED). */
     fun enrollFace(frames: List<String>): String? {
         val j = call(http, "POST", url("/enrollment/face"), JSONObject().put("frames", JSONArray(frames)), link.token)
+        return if (j.optBoolean("enrolled", false)) null else j.optString("reason", "REJECTED")
+    }
+
+    /** Voice setup: three clips as base64 WAV. Null when enrolled, otherwise AMFA's reason. */
+    fun enrollVoice(clips: List<String>): String? {
+        val j = call(http, "POST", url("/enrollment/voice"), JSONObject().put("samples", JSONArray(clips)), link.token)
+        return if (j.optBoolean("enrolled", false)) null else j.optString("reason", "REJECTED")
+    }
+
+    /** Typing setup: [samples] of key events, plus (on a phone) the traced lines and what drew them. */
+    fun enrollBehaviour(samples: List<JSONArray>, traces: List<JSONArray>, input: String): String? {
+        val body = JSONObject().put("keystrokeSamples", JSONArray(samples)).put("shapeTraces", JSONArray(traces)).put("input", input)
+            .put("shapePointerTypes", JSONArray(traces.map { if (input == "touch") "touch" else "mouse" }))
+        val j = call(http, "POST", url("/enrollment/behaviour"), body, link.token)
         return if (j.optBoolean("enrolled", false)) null else j.optString("reason", "REJECTED")
     }
 
@@ -186,7 +278,12 @@ fun parseSession(j: JSONObject): SessionState {
         challenge = ch?.let {
             AmfaChallenge(it.getString("challengeId"), it.optString("factor"), p?.optString("action")?.ifEmpty { null },
                 p?.optInt("frames", 20) ?: 20, p?.optLong("intervalMs", 150) ?: 150, p?.optString("mode")?.ifEmpty { null },
-                p?.optString("sentTo")?.ifEmpty { null })
+                p?.optString("sentTo")?.ifEmpty { null },
+                prompt = p?.optString("prompt")?.ifEmpty { null }, minSeconds = p?.optInt("minSeconds", 3) ?: 3, maxSeconds = p?.optInt("maxSeconds", 10) ?: 10,
+                phrase = p?.optString("phrase")?.ifEmpty { null }, shape = parseShape(p?.optJSONArray("shape")), input = p?.optString("input")?.ifEmpty { null })
         },
     )
 }
+
+private fun parseShape(a: JSONArray?): List<Pair<Double, Double>>? =
+    a?.let { arr -> (0 until arr.length()).map { arr.getJSONArray(it).let { pt -> pt.getDouble(0) to pt.getDouble(1) } } }

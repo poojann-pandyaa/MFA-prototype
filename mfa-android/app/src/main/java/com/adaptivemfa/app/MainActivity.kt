@@ -12,15 +12,12 @@ import com.adaptivemfa.app.data.AmfaApi
 import com.adaptivemfa.app.data.BankApi
 import com.adaptivemfa.app.data.Store
 import com.adaptivemfa.app.data.UrlConnectionHttp
-import com.adaptivemfa.app.ui.AppViewModel
-import com.adaptivemfa.app.ui.DashboardScreen
-import com.adaptivemfa.app.ui.FaceSetupScreen
-import com.adaptivemfa.app.ui.LoginScreen
-import com.adaptivemfa.app.ui.RegisterScreen
-import com.adaptivemfa.app.ui.MfaTheme
-import com.adaptivemfa.app.ui.Screen
-import com.adaptivemfa.app.ui.SettingsScreen
-import com.adaptivemfa.app.ui.VerifyScreen
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.ui.Modifier
+import com.adaptivemfa.app.ui.*
 
 class MainActivity : ComponentActivity() {
     private val vm: AppViewModel by viewModels {
@@ -39,14 +36,30 @@ class MainActivity : ComponentActivity() {
         setContent {
             MfaTheme {
                 val screen = vm.screen
-                BackHandler(enabled = screen != Screen.Login && screen != Screen.Dashboard) { vm.back() }
-                when (screen) {
-                    Screen.Login -> LoginScreen(vm)
-                    Screen.Register -> RegisterScreen(vm)
-                    is Screen.FaceSetup -> FaceSetupScreen(vm, screen)
-                    is Screen.Verify -> VerifyScreen(vm, screen)
-                    Screen.Dashboard -> DashboardScreen(vm)
-                    Screen.Settings -> SettingsScreen(vm)
+                val tab = when (screen) { Screen.Home -> "home"; is Screen.Pay -> "pay"; Screen.Activity -> "activity"; Screen.Profile -> "profile"; else -> null }
+                BackHandler(enabled = screen != Screen.Welcome && screen != Screen.Home) { vm.back() }
+                Column(Modifier.fillMaxSize().then(if (tab == null) Modifier.navigationBarsPadding() else Modifier)) {
+                    androidx.compose.foundation.layout.Box(Modifier.weight(1f)) {
+                        when (screen) {
+                            Screen.Welcome -> WelcomeScreen(vm)
+                            Screen.SignIn -> SignInScreen(vm)
+                            Screen.SignUp -> SignUpScreen(vm)
+                            Screen.Setup -> SetupScreen(vm)
+                            is Screen.FaceSetup -> FaceSetupScreen(vm, screen)
+                            is Screen.VoiceSetup -> VoiceSetupScreen(vm, screen)
+                            is Screen.TypingSetup -> TypingSetupScreen(vm, screen)
+                            Screen.Home -> HomeScreen(vm)
+                            is Screen.Pay -> PayScreen(vm, screen)
+                            is Screen.Amount -> AmountScreen(vm, screen)
+                            is Screen.Review -> ReviewScreen(vm, screen)
+                            is Screen.Verify -> VerifyScreen(vm, screen)
+                            is Screen.Result -> ResultScreen(vm, screen)
+                            Screen.Activity -> ActivityScreen(vm)
+                            Screen.Profile -> ProfileScreen(vm)
+                            Screen.Settings -> SettingsScreen(vm)
+                        }
+                    }
+                    if (tab != null) TabBar(tab) { vm.tab(it) }
                 }
             }
         }
