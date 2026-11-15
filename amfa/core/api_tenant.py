@@ -18,6 +18,7 @@ from amfa.common.web import ApiError
 from amfa.core import audit, bypass, db, factors, orchestrator, phase, proofs, webhooks
 from amfa.core.auth import TenantCaller, require_scope
 from amfa.core.context_builder import TxnInput, assemble, device_key
+from amfa.core.context_builder import payee_key as context_builder_payee_key
 from amfa.engine.agent import build_agent
 from amfa.engine.context import Segment, TxnType
 from amfa.engine.decide import MonotonicityViolation, decide
@@ -148,6 +149,18 @@ def patch_user(user_id: str, body: PatchUser, caller: TenantCaller = Depends(req
 class SetBypass(Strict):
     amountMinor: int = Field(ge=1)
     transactionId: str = Field(max_length=40)
+
+
+@router.get("/payees/reputation")
+def payee_reputation_view(payeeRef: str = Query(pattern=ID_PATTERN),
+                          caller: TenantCaller = Depends(require_scope("transactions:read"))):
+    """What the bank's other customers tell us about a payee: how many have paid it lately, how old it is, whether it has been reported,
+    and whether that makes it a mule suspect (see amfa/core/payee_reputation.py). For reviewers; the customer is never shown this."""
+    from amfa.core import payee_reputation
+    policy = TenantPolicy.model_validate(caller.tenant.policy)
+    with db.session() as s:
+        return payee_reputation.evaluate(s, caller.tenant.id, policy, "", payeeRef, context_builder_payee_key(caller.tenant.id, payeeRef),
+                                         time.time()) | {"enabled": policy.payeeReputation.enabled}
 
 
 @router.get("/users/{user_id}/phase")

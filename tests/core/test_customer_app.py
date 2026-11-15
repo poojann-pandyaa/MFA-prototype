@@ -1056,3 +1056,59 @@ def test_the_bank_can_show_how_far_the_model_is_from_knowing_the_customer(stack,
 def test_the_phones_own_key_is_listed_among_the_ways_the_customer_can_confirm(stack, learning):
     me = learning.get("/api/me", params={"deviceId": PHONE_DEVICE}).json()
     assert "Fingerprint or screen lock" in me["protection"]["have"] and "Fingerprint or screen lock" not in me["protection"]["canAdd"]
+
+
+# ---- payee reputation: what the bank's other customers say about the payee ---------------------------------------
+
+@pytest.fixture
+def reputation_on(stack):
+    _policy_patch(stack, payeeReputation={"enabled": True})
+    yield
+    with db.session() as s:
+        t = s.get(db.Tenant, stack.tenant["id"])
+        p = dict(t.policy)
+        p.pop("payeeReputation", None)
+        t.policy = p
+
+
+def _saved_payee(stack, app, account):
+    started = act(app, "payee", name="Ravi Kumar", account=account, ifsc="HDFC0001234").json()
+    verify(stack, started["challengeUrl"])
+    app.post(f"/api/actions/{started['action']['id']}/complete").raise_for_status()
+    return _ref("HDFC0001234", account)
+
+
+def _others_paid(stack, ref, n, first_ago_days=3):
+    from amfa.core.context_builder import payee_key
+    key = payee_key(stack.tenant["id"], ref)
+    with db.session() as s:
+        for _ in range(n):
+            cid = f"cu_{uuid.uuid4().hex[:12]}"
+            s.add(db.Customer(id=cid, tenant_id=stack.tenant["id"], external_ref=uuid.uuid4().hex[:12]))
+            s.flush()
+            s.add(db.KnownPayee(customer_id=cid, payee_key=key, first_seen=time.time() - first_ago_days * 86400, count=1))
+
+
+def test_a_payee_that_many_other_customers_paid_this_week_is_held_and_explained(stack, app, reputation_on):
+    LEVEL["now"] = "T1"
+    ref = _saved_payee(stack, app, "123456780777")
+    quiet = act(app, "transfer", payeeRef=ref, amountRupees=20_000).json()["action"]
+    assert not quiet["reviewAfter"]                                           # nobody else has paid it: an ordinary new payee
+    _others_paid(stack, ref, 7)
+    flagged = act(app, "transfer", payeeRef=ref, amountRupees=20_000).json()["action"]
+    assert flagged["reviewAfter"] and "drawn warnings from other customers" in (flagged["reason"] or "")
+
+
+def test_a_bank_that_has_not_turned_it_on_sees_no_difference(stack, app):
+    LEVEL["now"] = "T1"
+    ref = _saved_payee(stack, app, "123456780888")
+    _others_paid(stack, ref, 7)
+    assert not act(app, "transfer", payeeRef=ref, amountRupees=20_000).json()["action"]["reviewAfter"]
+
+
+def test_a_reviewer_can_see_why_a_payee_is_flagged(stack, app, reputation_on):
+    ref = _saved_payee(stack, app, "123456780999")
+    _others_paid(stack, ref, 6)
+    seen = stack.bank.AMFA.request("GET", f"/v1/payees/reputation?payeeRef={ref}")
+    assert seen["enabled"] and seen["flag"] and seen["senders7d"] == 7 and seen["reports"] == 0     # the six, and the customer who saved it
+    assert not stack.bank.AMFA.request("GET", "/v1/payees/reputation?payeeRef=NOBODY-HAS-PAID-THIS")["flag"]

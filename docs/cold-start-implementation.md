@@ -370,3 +370,34 @@ Left as it is:
   for review. The same customers on the phone get code and typing.
 - The web bank's sign-up still asks for a face: a browser cannot hold the phone's key, so the learning phase is a phone feature for now.
 - The progress estimate can go up as well as down: a large unusual payment widens the customer's spread, so more payments are needed.
+
+---
+
+## Status: step 2, payee reputation (mule detection)
+
+**Built (server, tested; opt in with `payeeReputation.enabled`, and `seed_demo.py --learning` turns it on for the demo):**
+- `amfa/core/payee_reputation.py` looks across the bank's other customers, with no history of the payer needed, so it protects a new
+  customer in the weeks the model knows nothing about them. It uses data AMFA already keeps: `known_payee` (one row per customer and
+  payee, with when they first paid it) gives a payee's senders and when each arrived; `risk_label` and `txn` give the fraud reports.
+- A payee is flagged when any of these holds:
+  - another customer has reported a payment to it as fraud (in the last 90 days);
+  - it is new (first seen in the last 14 days) and 5 or more different customers paid it this week;
+  - it is not yet established and 10 or more different customers paid it in the last day.
+- A payee older than 60 days with no reports (a shop, a utility) is never flagged however many customers pay it. The bank's own registry
+  age counts as evidence of age, so the demo's long-registered payee is exempt from the fan-in rules.
+- A flag is the risk model's existing "payee on a risk list" sign, so no retraining: it keeps the model's level whatever the size or the
+  customer's habit, and a payment to it waits for a person. The customer is told, "this payee has recently drawn warnings from other
+  customers", and never anything about mules or other customers.
+- `GET /v1/payees/reputation?payeeRef=` shows a reviewer the numbers behind a flag.
+- Thresholds are in the policy (`newPayeeDays`, `minSenders`, `burstSenders`, `establishedDays`, `reportsFlag`).
+
+**Worth knowing:**
+- A fraud report on one payment flags that payee for every customer. In the demo, reporting a payment to the shared demo payee ("V.
+  Mehta") makes later payments to him wait for review. That is the feature working.
+- Saving a payee counts as a sender (the bank cannot tell a saved payee from a first payment in `known_payee`).
+- A mule paid by one victim at a time, slowly, stays under the fan-in rules until a victim reports it; the report is what flags it.
+
+**Not built yet:**
+- Numeric reputation inputs to the model (needs a simulator with the same payee paid by many simulated customers, then a retrain).
+- The sender-payee graph that finds rings: payees that share senders with a known mule, accounts that receive and immediately send on.
+- Sharing reputation between banks (a privacy and legal question).

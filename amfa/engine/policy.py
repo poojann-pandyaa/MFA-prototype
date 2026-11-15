@@ -96,6 +96,17 @@ class LearningPolicy(BaseModel):
     offerBiometricsAfter: int = Field(default=5, ge=1, le=100)   # verified payments before face/voice setup is offered, optionally
 
 
+class PayeeReputation(BaseModel):
+    """Flag a payee that takes money from many customers at once, or that customers have reported (see core/payee_reputation.py)."""
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = False
+    newPayeeDays: int = Field(default=14, ge=1, le=90)         # "new" for the sudden-fan-in rule
+    minSenders: int = Field(default=5, ge=2, le=1000)          # different customers in a week
+    burstSenders: int = Field(default=10, ge=2, le=1000)       # different customers in a day, for a payee not yet established
+    establishedDays: int = Field(default=60, ge=7, le=3650)    # older than this and unreported: a shop or a utility, never flagged
+    reportsFlag: int = Field(default=1, ge=1, le=100)          # fraud reports by other customers that flag it
+
+
 class TxnRule(BaseModel):
     model_config = ConfigDict(extra="forbid")
     type: TxnType
@@ -212,6 +223,7 @@ class TenantPolicy(BaseModel):
     lowTouch: bool = True
     customerBypass: CustomerBypass = Field(default_factory=CustomerBypass)
     learning: LearningPolicy = Field(default_factory=LearningPolicy)
+    payeeReputation: PayeeReputation = Field(default_factory=PayeeReputation)
     deviceTrustDays: int = Field(default=0, ge=0, le=90)
     dormancyDays: int = Field(default=180, ge=30, le=1095)
     quietHours: QuietHours = Field(default_factory=QuietHours)

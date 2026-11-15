@@ -13,7 +13,7 @@ from sqlalchemy import select
 from amfa.common import crypto, geo
 from amfa.common.contract import FAILED, SPOOF_DETECTED
 from amfa.common.crypto import keyed_hash
-from amfa.core import bypass, db, factors, phase
+from amfa.core import bypass, db, factors, payee_reputation, phase
 from amfa.engine.context import (Band, BehaviouralCtx, Capability, Context, DeviceCtx, Enrollment,
                                  Policy, Segment, TransactionCtx, TxnType)
 from amfa.engine.policy import TenantPolicy
@@ -225,13 +225,18 @@ def assemble(s, tenant: db.Tenant, customer: db.Customer, txn_id: str, t: TxnInp
     cur = risk_features.Event(at=now, hour=local.hour, amount=t.amount_minor / 100.0, type=t.type.value,
                               channel=t.channel, payee=pkey, device=dkey, network=place.network,
                               place=place.place_key, country=place.country)
+    rep = None
+    if policy.payeeReputation.enabled and t.type.value in risk_features.PAYEE_TYPES:
+        rep = payee_reputation.evaluate(s, tenant.id, policy, customer.id, t.payee_ref, pkey, now, t.payee_created_at)
+        derived["payeeReputation"] = rep
     profile = risk_features.Profile(
         segment=customer.segment, account_created_at=customer.created_at,
         enrolled_factors=_factors_enrolled(ctx.enrollment),
         device_key_bound=derived["device"]["keyBound"],
         ueba_risk=None if preview.get("riskScore") is None else float(preview["riskScore"]),
         sim_changed_at=ev.get("simChangedAt"), contact_changed_at=ev.get("contactChangedAt"),
-        password_reset_at=ev.get("passwordResetAt"), payee_risk_flag=bool(ev.get("payeeRiskFlag")))
+        password_reset_at=ev.get("passwordResetAt"),
+        payee_risk_flag=bool(ev.get("payeeRiskFlag")) or bool(rep and rep["flag"]))
     history = risk_history(s, customer, now, ZoneInfo(policy.timezone))
     features = risk_features.build(cur, history, profile)
     if policy.routineEasesHighValue and band is Band.HIGH and not new_payee and is_routine(features):

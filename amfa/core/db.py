@@ -221,7 +221,7 @@ class KnownPayee(Base):
     __tablename__ = "known_payee"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     customer_id: Mapped[str] = mapped_column(ForeignKey("customer.id"), index=True)
-    payee_key: Mapped[str] = mapped_column(String(64))
+    payee_key: Mapped[str] = mapped_column(String(64), index=True)
     first_seen: Mapped[float] = mapped_column(Float, default=now)
     count: Mapped[int] = mapped_column(Integer, default=0)
     __table_args__ = (UniqueConstraint("customer_id", "payee_key"),)

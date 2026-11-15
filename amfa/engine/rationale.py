@@ -71,6 +71,7 @@ CUSTOMER_REASONS = {
     "is_night": "this is an unusual time for you", "sim_changed_hours": "your SIM was changed recently",
     "contact_changed_hours": "your contact details were changed recently",
     "password_reset_hours": "your password was changed recently",
+    "payee_risk_flag": "this payee has recently drawn warnings from other customers",
 }
 SCAM_WARNING_FROM = "T2"
 MONEY_TYPES = {TxnType.TRANSFER, TxnType.PAYMENT, TxnType.CARD_NOT_PRESENT}
@@ -88,6 +89,7 @@ def _holds(key: str, f: dict) -> bool:
         "network_seen": v == 0, "place_seen": v == 0, "place_changed": v == 1, "country_changed": v == 1,
         "hour_deviation": v >= 3, "is_night": v == 1,
         "sim_changed_hours": v < 48, "contact_changed_hours": v < 24, "password_reset_hours": v < 24,
+        "payee_risk_flag": v == 1,
     }.get(key, True)
 
 
@@ -105,6 +107,8 @@ def customer_notice(plan: Plan, txn_type: TxnType, features: Optional[dict] = No
         return {"reason": reason, "scamWarning": warn, "underReview": plan.escalate == "MANUAL_REVIEW"}
     why = list(dict.fromkeys(CUSTOMER_REASONS[k] for k, _ in plan.riskReasons
                              if k in CUSTOMER_REASONS and (features is None or _holds(k, features))))
+    if features and features.get("payee_risk_flag") == 1:       # a hard sign is always worth saying, whatever the model ranked first
+        why.insert(0, CUSTOMER_REASONS["payee_risk_flag"])
     reason = ("We need a quick extra check because " + " and ".join(why[:2]) + "." if why
               else "This is a routine check to keep your account safe.")
     warn = txn_type in MONEY_TYPES and (plan.scamRisk or (plan.threatLevel is not None
