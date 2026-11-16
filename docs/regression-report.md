@@ -1,41 +1,9 @@
 # Regression report
 
-Run 2026-11-14 17:42. Friction counts a code as 1, typing as 0.5, face or voice as 2, a person's review as 4.
+Run 2026-11-16 09:35. Friction counts a code as 1, typing as 0.5, face or voice as 2, a person's review as 4.
 
 ## Asha Rao (asha)
 *Everyday small payments: groceries, milk, the odd bill. Same phone, same hours.*
-
-| Situation | Threat | Risk | Checks asked | Friction | Fraud-like |
-|---|---|---|---|---|---|
-| routine | T0 | 0.00 | OTP, UEBA | 1.5 |  |
-| tiny to usual payee | T0 | 0.00 | OTP, UEBA | 1.5 |  |
-| bigger than usual | T2 | 0.00 | OTP, UEBA | 1.5 |  |
-| new payee, modest | T1 | 0.00 | OTP, UEBA | 1.5 |  |
-| new device | T1 | 0.00 | OTP, UEBA | 1.5 |  |
-| other network | T0 | 0.00 | OTP, UEBA | 1.5 |  |
-| new payee, large, 3 am | T4 | 0.33 | OTP, UEBA | 1.5 | yes |
-| account takeover | T4 | 1.00 | OTP, UEBA + review | 5.5 | yes |
-| contact changed, then a big payment | T3 | 0.05 | OTP, UEBA + review | 5.5 | yes |
-| small takeover payment | T4 | 1.00 | OTP, UEBA | 1.5 | yes |
-
-## Rohan Das (rohan)
-*Gig worker: many small payments late into the evening, two phones.*
-
-| Situation | Threat | Risk | Checks asked | Friction | Fraud-like |
-|---|---|---|---|---|---|
-| routine | T0 | 0.00 | OTP, UEBA | 1.5 |  |
-| tiny to usual payee | T0 | 0.00 | OTP, UEBA | 1.5 |  |
-| bigger than usual | T0 | 0.00 | OTP, UEBA | 1.5 |  |
-| new payee, modest | T1 | 0.00 | OTP, UEBA | 1.5 |  |
-| new device | T1 | 0.00 | OTP, UEBA | 1.5 |  |
-| other network | T0 | 0.00 | OTP, UEBA | 1.5 |  |
-| new payee, large, 3 am | T4 | 0.06 | OTP, UEBA | 1.5 | yes |
-| account takeover | T4 | 1.00 | OTP, UEBA + review | 5.5 | yes |
-| contact changed, then a big payment | T3 | 0.00 | OTP, UEBA + review | 5.5 | yes |
-| small takeover payment | T4 | 1.00 | OTP, UEBA | 1.5 | yes |
-
-## Meera Iyer (meera)
-*Salaried and careful: a few payments, and the rent to the same landlord every month.*
 
 | Situation | Threat | Risk | Checks asked | Friction | Fraud-like |
 |---|---|---|---|---|---|
@@ -45,10 +13,42 @@ Run 2026-11-14 17:42. Friction counts a code as 1, typing as 0.5, face or voice 
 | new payee, modest | T1 | 0.00 | OTP, UEBA | 1.5 |  |
 | new device | T1 | 0.00 | OTP, UEBA | 1.5 |  |
 | other network | T0 | 0.00 | OTP, UEBA | 1.5 |  |
-| new payee, large, 3 am | T4 | 0.27 | OTP, UEBA, FACE | 3.5 | yes |
+| new payee, large, 3 am | T4 | 0.35 | OTP, UEBA | 1.5 | yes |
+| account takeover | T4 | 1.00 | OTP, UEBA + review | 5.5 | yes |
+| contact changed, then a big payment | T4 | 0.09 | OTP, UEBA + review | 5.5 | yes |
+| small takeover payment | T4 | 1.00 | OTP, UEBA | 1.5 | yes |
+
+## Rohan Das (rohan)
+*Gig worker: many small payments late into the evening, two phones.*
+
+| Situation | Threat | Risk | Checks asked | Friction | Fraud-like |
+|---|---|---|---|---|---|
+| routine | T0 | 0.00 | OTP, UEBA | 1.5 |  |
+| tiny to usual payee | T0 | 0.00 | OTP, UEBA | 1.5 |  |
+| bigger than usual | T1 | 0.00 | OTP, UEBA | 1.5 |  |
+| new payee, modest | T1 | 0.00 | OTP, UEBA | 1.5 |  |
+| new device | T1 | 0.02 | OTP, UEBA | 1.5 |  |
+| other network | T0 | 0.00 | OTP, UEBA | 1.5 |  |
+| new payee, large, 3 am | T3 | 0.07 | OTP, UEBA | 1.5 | yes |
+| account takeover | T4 | 1.00 | OTP, UEBA + review | 5.5 | yes |
+| contact changed, then a big payment | T3 | 0.07 | OTP, UEBA + review | 5.5 | yes |
+| small takeover payment | T4 | 1.00 | OTP, UEBA | 1.5 | yes |
+
+## Meera Iyer (meera)
+*Salaried and careful: a few payments, and the rent to the same landlord every month.*
+
+| Situation | Threat | Risk | Checks asked | Friction | Fraud-like |
+|---|---|---|---|---|---|
+| routine | T1 | 0.00 | OTP, UEBA | 1.5 |  |
+| tiny to usual payee | T1 | 0.00 | OTP, UEBA | 1.5 |  |
+| bigger than usual | T1 | 0.00 | OTP, UEBA | 1.5 |  |
+| new payee, modest | T1 | 0.00 | OTP, UEBA | 1.5 |  |
+| new device | T1 | 0.00 | OTP, UEBA | 1.5 |  |
+| other network | T1 | 0.00 | OTP, UEBA | 1.5 |  |
+| new payee, large, 3 am | T4 | 0.22 | OTP, UEBA, FACE | 3.5 | yes |
 | account takeover | T4 | 1.00 | OTP, UEBA, FACE + review | 7.5 | yes |
-| contact changed, then a big payment | T3 | 0.02 | OTP, UEBA, FACE + review | 7.5 | yes |
-| small takeover payment | T4 | 0.93 | OTP, UEBA, FACE | 3.5 | yes |
+| contact changed, then a big payment | T4 | 0.09 | OTP, UEBA, FACE + review | 7.5 | yes |
+| small takeover payment | T4 | 0.53 | OTP, UEBA, FACE | 3.5 | yes |
 | rent as usual | T1 | 0.00 | OTP, UEBA | 1.5 |  |
 
 ## Suresh Pillai (suresh)
@@ -62,11 +62,11 @@ Run 2026-11-14 17:42. Friction counts a code as 1, typing as 0.5, face or voice 
 | new payee, modest | T1 | 0.00 | OTP + review | 5 |  |
 | new device | T1 | 0.00 | OTP + review | 5 |  |
 | other network | T1 | 0.00 | OTP + review | 5 |  |
-| new payee, large, 3 am | T4 | 0.33 | OTP + review | 5 | yes |
-| account takeover | T4 | 0.69 | OTP + review | 5 | yes |
-| contact changed, then a big payment | T4 | 0.19 | OTP + review | 5 | yes |
-| small takeover payment | T3 | 0.05 | OTP + review | 5 | yes |
-| coached scam payment | T4 | 0.06 | OTP + review | 5 | yes |
+| new payee, large, 3 am | T4 | 0.35 | OTP + review | 5 | yes |
+| account takeover | T4 | 0.60 | OTP + review | 5 | yes |
+| contact changed, then a big payment | T4 | 0.22 | OTP + review | 5 | yes |
+| small takeover payment | T4 | 0.07 | OTP + review | 5 | yes |
+| coached scam payment | T3 | 0.07 | OTP + review | 5 | yes |
 
 ## Priya Sharma (priya)
 *Small business: many payees, many payments a day, larger amounts, in working hours.*
@@ -77,7 +77,7 @@ Run 2026-11-14 17:42. Friction counts a code as 1, typing as 0.5, face or voice 
 | tiny to usual payee | T0 | 0.00 | OTP, UEBA | 1.5 |  |
 | bigger than usual | T0 | 0.00 | OTP, UEBA | 1.5 |  |
 | new payee, modest | T1 | 0.00 | OTP, UEBA | 1.5 |  |
-| new device | T1 | 0.00 | OTP, UEBA | 1.5 |  |
+| new device | T2 | 0.00 | OTP, UEBA, FACE | 3.5 |  |
 | other network | T0 | 0.00 | OTP, UEBA | 1.5 |  |
 | new payee, large, 3 am | T3 | 0.04 | OTP, UEBA, FACE | 3.5 | yes |
 | account takeover | T4 | 1.00 | OTP, UEBA, FACE + review | 7.5 | yes |
@@ -93,13 +93,13 @@ Run 2026-11-14 17:42. Friction counts a code as 1, typing as 0.5, face or voice 
 | routine | T1 | 0.00 | OTP, UEBA, FACE | 3.5 |  |
 | tiny to usual payee | T1 | 0.00 | OTP, UEBA, FACE | 3.5 |  |
 | bigger than usual | T1 | 0.00 | OTP, UEBA, FACE | 3.5 |  |
-| new payee, modest | T3 | 0.02 | OTP, UEBA, FACE, VOICE | 5.5 |  |
-| new device | T2 | 0.00 | OTP, UEBA, FACE | 3.5 |  |
+| new payee, modest | T3 | 0.01 | OTP, UEBA, FACE, VOICE | 5.5 |  |
+| new device | T3 | 0.01 | OTP, UEBA, FACE, VOICE | 5.5 |  |
 | other network | T1 | 0.00 | OTP, UEBA, FACE | 3.5 |  |
-| new payee, large, 3 am | T4 | 0.18 | OTP, UEBA, FACE, VOICE | 5.5 | yes |
-| account takeover | T4 | 0.99 | OTP, UEBA, FACE, VOICE + review | 9.5 | yes |
+| new payee, large, 3 am | T4 | 0.08 | OTP, UEBA, FACE, VOICE | 5.5 | yes |
+| account takeover | T4 | 0.98 | OTP, UEBA, FACE, VOICE + review | 9.5 | yes |
 | contact changed, then a big payment | T3 | 0.04 | OTP, UEBA, FACE, VOICE + review | 9.5 | yes |
-| small takeover payment | T4 | 0.77 | OTP, UEBA, FACE, VOICE + review | 9.5 | yes |
+| small takeover payment | T4 | 0.71 | OTP, UEBA, FACE, VOICE + review | 9.5 | yes |
 | routine large transfer | T1 | 0.00 | OTP, UEBA, FACE | 3.5 |  |
 
 ## Kiran Shah (kiran)
@@ -107,18 +107,18 @@ Run 2026-11-14 17:42. Friction counts a code as 1, typing as 0.5, face or voice 
 
 | Situation | Threat | Risk | Checks asked | Friction | Fraud-like |
 |---|---|---|---|---|---|
-| routine | T0 | 0.00 | OTP, UEBA | 1.5 |  |
+| routine | T1 | 0.00 | OTP, UEBA | 1.5 |  |
 | tiny to usual payee | T0 | 0.00 | OTP, UEBA | 1.5 |  |
 | bigger than usual | T3 | 0.00 | OTP, UEBA, FACE | 3.5 |  |
 | new payee, modest | T1 | 0.00 | OTP, UEBA | 1.5 |  |
-| new device | T1 | 0.00 | OTP, UEBA | 1.5 |  |
-| other network | T0 | 0.00 | OTP, UEBA | 1.5 |  |
-| new payee, large, 3 am | T4 | 0.06 | OTP, UEBA, FACE | 3.5 | yes |
+| new device | T1 | 0.02 | OTP, UEBA | 1.5 |  |
+| other network | T1 | 0.00 | OTP, UEBA | 1.5 |  |
+| new payee, large, 3 am | T4 | 0.07 | OTP, UEBA, FACE | 3.5 | yes |
 | account takeover | T4 | 1.00 | OTP, UEBA, FACE + review | 7.5 | yes |
-| contact changed, then a big payment | T3 | 0.02 | OTP, UEBA, FACE + review | 7.5 | yes |
-| small takeover payment | T4 | 0.99 | OTP, UEBA, FACE | 3.5 | yes |
+| contact changed, then a big payment | T4 | 0.08 | OTP, UEBA, FACE + review | 7.5 | yes |
+| small takeover payment | T4 | 1.00 | OTP, UEBA, FACE | 3.5 | yes |
 | ten thousand to a regular payee | T3 | 0.00 | OTP, UEBA, FACE | 3.5 |  |
-| a lakh to a regular payee | T3 | 0.02 | OTP, UEBA, FACE | 3.5 |  |
+| a lakh to a regular payee | T4 | 0.08 | OTP, UEBA, FACE | 3.5 |  |
 
 ## Anil Kapoor (anil)
 *Runs a trading business: a few thousand a day to many small suppliers, and about a lakh every Monday to the same wholesaler. A lakh is a normal Monday for Anil; five lakh would not be.*
@@ -127,11 +127,11 @@ Run 2026-11-14 17:42. Friction counts a code as 1, typing as 0.5, face or voice 
 |---|---|---|---|---|---|
 | routine | T0 | 0.00 | OTP, UEBA | 1.5 |  |
 | tiny to usual payee | T0 | 0.00 | OTP, UEBA | 1.5 |  |
-| bigger than usual | T2 | 0.00 | OTP, UEBA, FACE | 3.5 |  |
+| bigger than usual | T3 | 0.00 | OTP, UEBA, FACE, VOICE | 5.5 |  |
 | new payee, modest | T1 | 0.00 | OTP, UEBA | 1.5 |  |
 | new device | T1 | 0.00 | OTP, UEBA | 1.5 |  |
 | other network | T0 | 0.00 | OTP, UEBA | 1.5 |  |
-| new payee, large, 3 am | T4 | 0.06 | OTP, UEBA, FACE, VOICE | 5.5 | yes |
+| new payee, large, 3 am | T4 | 0.07 | OTP, UEBA, FACE, VOICE | 5.5 | yes |
 | account takeover | T4 | 1.00 | OTP, UEBA, FACE, VOICE + review | 9.5 | yes |
 | contact changed, then a big payment | T3 | 0.02 | OTP, UEBA, FACE, VOICE + review | 9.5 | yes |
 | small takeover payment | T4 | 1.00 | OTP, UEBA, FACE, VOICE | 5.5 | yes |
@@ -144,18 +144,18 @@ Run 2026-11-14 17:42. Friction counts a code as 1, typing as 0.5, face or voice 
 
 | Situation | Threat | Risk | Checks asked | Friction | Fraud-like |
 |---|---|---|---|---|---|
-| routine | T1 | 0.02 | OTP + review | 5 |  |
-| tiny to usual payee | T1 | 0.05 | OTP + review | 5 |  |
-| bigger than usual | T1 | 0.02 | OTP + review | 5 |  |
-| new payee, modest | T1 | 0.02 | OTP + review | 5 |  |
-| new device | T1 | 0.02 | OTP + review | 5 |  |
-| other network | T1 | 0.02 | OTP + review | 5 |  |
-| new payee, large, 3 am | T2 | 0.68 | OTP + review | 5 | yes |
-| account takeover | T4 | 0.77 | OTP + review | 5 | yes |
-| contact changed, then a big payment | T4 | 0.54 | OTP + review | 5 | yes |
-| small takeover payment | T3 | 0.04 | OTP + review | 5 | yes |
-| first payment, small | T1 | 0.02 | OTP + review | 5 |  |
-| first payment, large | T2 | 0.68 | OTP + review | 5 | yes |
+| routine | T1 | 0.04 | OTP + review | 5 |  |
+| tiny to usual payee | T1 | 0.08 | OTP + review | 5 |  |
+| bigger than usual | T1 | 0.04 | OTP + review | 5 |  |
+| new payee, modest | T1 | 0.04 | OTP + review | 5 |  |
+| new device | T1 | 0.04 | OTP + review | 5 |  |
+| other network | T1 | 0.04 | OTP + review | 5 |  |
+| new payee, large, 3 am | T2 | 0.51 | OTP + review | 5 | yes |
+| account takeover | T4 | 0.51 | OTP + review | 5 | yes |
+| contact changed, then a big payment | T4 | 0.51 | OTP + review | 5 | yes |
+| small takeover payment | T3 | 0.05 | OTP + review | 5 | yes |
+| first payment, small | T1 | 0.04 | OTP + review | 5 |  |
+| first payment, large | T2 | 0.51 | OTP + review | 5 | yes |
 
 ## Expectations
 

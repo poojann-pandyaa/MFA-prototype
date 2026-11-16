@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import time
 import uuid
 from typing import Any, Literal, Optional
@@ -15,7 +16,7 @@ from amfa import config
 from amfa.common import crypto
 from amfa.common.contract import ID_PATTERN
 from amfa.common.web import ApiError
-from amfa.core import audit, bypass, db, factors, orchestrator, phase, proofs, webhooks
+from amfa.core import audit, bypass, db, factors, helpers, orchestrator, peers, phase, proofs, webhooks
 from amfa.core.auth import TenantCaller, require_scope
 from amfa.core.context_builder import TxnInput, assemble, device_key
 from amfa.core.context_builder import payee_key as context_builder_payee_key
@@ -146,6 +147,16 @@ def patch_user(user_id: str, body: PatchUser, caller: TenantCaller = Depends(req
     return view
 
 
+class InviteHelper(Strict):
+    label: str = Field(default="Family", max_length=24, pattern=r"^[\w .,'&()-]*$")
+    transactionId: str = Field(max_length=40)
+
+
+class RedeemHelper(Strict):
+    code: str = Field(pattern=r"^\d{8}$")
+    deviceId: str = Field(min_length=8, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$")
+
+
 class SetBypass(Strict):
     amountMinor: int = Field(ge=1)
     transactionId: str = Field(max_length=40)
@@ -161,6 +172,49 @@ def payee_reputation_view(payeeRef: str = Query(pattern=ID_PATTERN),
     with db.session() as s:
         return payee_reputation.evaluate(s, caller.tenant.id, policy, "", payeeRef, context_builder_payee_key(caller.tenant.id, payeeRef),
                                          time.time()) | {"enabled": policy.payeeReputation.enabled}
+
+
+class SetProfile(Strict):
+    """What the customer chose to tell us at sign-up. Every part is optional. [regularPayees] are payee refs the bank has checked against
+    the account holder's name; AMFA keeps only their hashes."""
+    monthBand: Optional[int] = Field(default=None, ge=0, le=4)
+    typicalBand: Optional[int] = Field(default=None, ge=0, le=4)
+    regularPayees: list[str] = Field(default_factory=list, max_length=peers.MAX_REGULAR_PAYEES)
+
+
+@router.put("/users/{user_id}/profile")
+def put_profile(user_id: str, body: SetProfile, caller: TenantCaller = Depends(require_scope("users:write"))):
+    """The customer's answers to the sign-up questions (see amfa/core/peers.py). They only give the model something to compare with until
+    the customer's own history is long enough; they never lower a check."""
+    for ref in body.regularPayees:
+        if not re.match(ID_PATTERN, ref):
+            raise ApiError(422, "INVALID_BODY", "a payee reference is not valid")
+    with db.session() as s:
+        c = _customer(s, caller.tenant.id, user_id)
+        row = peers.save(s, c, month_band=body.monthBand, typical_band=body.typicalBand,
+                         regular_payee_keys=[context_builder_payee_key(caller.tenant.id, r) for r in body.regularPayees])
+        out = peers.view(row)
+    audit.record(f"apikey:{caller.key_id}", "customer.profile", user_id,
+                 {"monthBand": body.monthBand, "typicalBand": body.typicalBand, "regularPayees": len(body.regularPayees)}, caller.tenant.id)
+    return out
+
+
+@router.get("/users/{user_id}/profile")
+def get_profile(user_id: str, caller: TenantCaller = Depends(require_scope("users:read"))):
+    with db.session() as s:
+        c = _customer(s, caller.tenant.id, user_id)
+        return peers.view(s.get(db.CustomerProfile, c.id))
+
+
+@router.delete("/users/{user_id}/profile")
+def delete_profile(user_id: str, caller: TenantCaller = Depends(require_scope("users:write"))):
+    """The customer takes their answers back."""
+    with db.session() as s:
+        c = _customer(s, caller.tenant.id, user_id)
+        peers.clear(s, c.id)
+        out = peers.view(None)
+    audit.record(f"apikey:{caller.key_id}", "customer.profile_removed", user_id, {}, caller.tenant.id)
+    return out
 
 
 @router.get("/users/{user_id}/phase")
@@ -205,6 +259,47 @@ def delete_bypass(user_id: str, caller: TenantCaller = Depends(require_scope("us
     return out
 
 
+@router.get("/users/{user_id}/helpers")
+def get_helpers(user_id: str, caller: TenantCaller = Depends(require_scope("users:read"))):
+    policy = TenantPolicy.model_validate(caller.tenant.policy)
+    with db.session() as s:
+        return helpers.view(s, _customer(s, caller.tenant.id, user_id).id, policy, time.time())
+
+
+@router.post("/users/{user_id}/helpers", status_code=201)
+def add_helper(user_id: str, body: InviteHelper, caller: TenantCaller = Depends(require_scope("users:write"))):
+    """Start letting a family member's phone help (optional). Only against a verified CHANGE_LIMIT transaction for payee HELPER;
+    returns a single-use code to show on the customer's own phone. See amfa/core/helpers.py."""
+    policy = TenantPolicy.model_validate(caller.tenant.policy)
+    with db.session() as s:
+        c = _customer(s, caller.tenant.id, user_id)
+        txn = s.get(db.Transaction, body.transactionId)
+        if txn is None or txn.tenant_id != caller.tenant.id:
+            raise ApiError(404, "TXN_NOT_FOUND", "no such transaction")
+        out = helpers.invite(s, c, policy, body.label, txn, time.time())
+    audit.record(f"apikey:{caller.key_id}", "customer.helper_invited", user_id, {"transactionId": body.transactionId}, caller.tenant.id)
+    return out
+
+
+@router.post("/users/{user_id}/helpers/redeem")
+def redeem_helper(user_id: str, body: RedeemHelper, caller: TenantCaller = Depends(require_scope("users:write"))):
+    policy = TenantPolicy.model_validate(caller.tenant.policy)
+    with db.session() as s:
+        out = helpers.redeem(s, _customer(s, caller.tenant.id, user_id), policy, body.code,
+                             device_key(caller.tenant.id, body.deviceId), time.time())
+    audit.record(f"apikey:{caller.key_id}", "customer.helper_added", user_id, {}, caller.tenant.id)
+    return out
+
+
+@router.delete("/users/{user_id}/helpers/{helper_id}")
+def delete_helper(user_id: str, helper_id: str, caller: TenantCaller = Depends(require_scope("users:write"))):
+    policy = TenantPolicy.model_validate(caller.tenant.policy)
+    with db.session() as s:
+        out = helpers.remove(s, _customer(s, caller.tenant.id, user_id).id, helper_id, policy, time.time())
+    audit.record(f"apikey:{caller.key_id}", "customer.helper_removed", user_id, {}, caller.tenant.id)
+    return out
+
+
 @router.delete("/users/{user_id}")
 def erase_user(user_id: str, caller: TenantCaller = Depends(require_scope("users:write"))):
     with db.session() as s:
@@ -212,7 +307,7 @@ def erase_user(user_id: str, caller: TenantCaller = Depends(require_scope("users
         results = {f: factors.erase(f, caller.tenant.id, c.id) for f in ("FACE", "VOICE", "UEBA")}
         if not all(results.values()):
             raise ApiError(503, "ERASURE_INCOMPLETE", "a factor service could not be reached; retry")
-        for model in (db.Enrollment, db.Device, db.KnownNetwork, db.KnownPayee, db.BypassLimit):
+        for model in (db.Enrollment, db.Device, db.KnownNetwork, db.KnownPayee, db.BypassLimit, db.CustomerProfile, db.CustomerPhase, db.TrustedHelper):
             for row in s.execute(select(model).where(model.customer_id == c.id)).scalars():
                 s.delete(row)
         totp = s.get(db.TotpCredential, c.id)

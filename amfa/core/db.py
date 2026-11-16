@@ -146,6 +146,21 @@ class BypassLimit(Base):
     updated_at: Mapped[float] = mapped_column(Float, default=now)
 
 
+class TrustedHelper(Base):
+    """A family member's phone the customer chose to let help with payments (optional). Created as an invite the customer shows on
+    their own phone; the helper's phone redeems it, which sets device_key. It counts from active_from (after the cooling-off).
+    Holds a label the customer typed and a keyed hash of the device, nothing else."""
+    __tablename__ = "trusted_helper"
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    customer_id: Mapped[str] = mapped_column(ForeignKey("customer.id"), index=True)
+    label: Mapped[str] = mapped_column(String(24))
+    invite_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    invite_expires: Mapped[float] = mapped_column(Float, default=0.0)
+    device_key: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[float] = mapped_column(Float, default=now)
+    active_from: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+
 class CustomerPhase(Base):
     """Whether the model knows this customer yet. `evidence` is derived marks only (see engine/risk/readiness.Tracker), never
     transactions. Trimmed with the retention window."""
@@ -156,6 +171,30 @@ class CustomerPhase(Base):
     evidence: Mapped[dict] = mapped_column(JSON, default=dict)
     verified_payments: Mapped[int] = mapped_column(Integer, default=0)
     updated_at: Mapped[float] = mapped_column(Float, default=now)
+
+
+class CustomerProfile(Base):
+    """What the customer chose to tell us at sign-up (bands, never exact figures), so the model has something to compare with before
+    it has any history. Optional; erased with the customer. `regular_payees` are payees the bank vouches for (it checked the name)."""
+    __tablename__ = "customer_profile"
+    customer_id: Mapped[str] = mapped_column(ForeignKey("customer.id"), primary_key=True)
+    month_band: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    typical_band: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    regular_payees: Mapped[list] = mapped_column(JSON, default=list)       # hashed payee keys
+    declared_at: Mapped[float] = mapped_column(Float, default=now)
+
+
+class PeerGroupStat(Base):
+    """How customers who answered the same way actually pay, once enough of them are known (see core/peers.py)."""
+    __tablename__ = "peer_group_stat"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(40), index=True)
+    group_key: Mapped[str] = mapped_column(String(40))
+    n_customers: Mapped[int] = mapped_column(Integer)
+    centre_log: Mapped[float] = mapped_column(Float)
+    spread_log: Mapped[float] = mapped_column(Float)
+    computed_at: Mapped[float] = mapped_column(Float, default=now)
+    __table_args__ = (UniqueConstraint("tenant_id", "group_key"),)
 
 
 class Enrollment(Base):

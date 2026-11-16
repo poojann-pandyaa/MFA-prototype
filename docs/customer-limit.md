@@ -72,8 +72,12 @@ The bank may keep a customer's transactions for 90 days at most, so the system r
 
 ## 4. Not done
 
-- **Fairness gate still fails**: customers over 60 are stepped up 2.5 to 3 times as often as average on genuine payments (75 and over about 3 times, the senior segment 2.78 times, against a limit of 1.25; the
-  gate stays failed). The cause is in the simulated data (older customers make more genuine one-off large and assisted payments) and was not fixed.
+- **Fairness gate still fails**: customers over 60 are stepped up 2.5 to 3 times as often as average on genuine payments (the senior segment 2.71 times, against a limit of 1.25; the
+  gate stays failed). Training now reweights: genuine payments of a segment that is stepped up too often count more (up to 8x, up to 4 rounds, `fairnessBoost` in the model card).
+  That brought the senior segment from 2.71 to 2.30 and PREMIUM from 1.26 to inside the limit, with the same fraud caught (T3+ 85.0% to 84.8%) and PR-AUC 0.923 to 0.914. It stops there
+  because the cause is behaviour, not the segment label (forcing the segment to STANDARD does not lower it): ordinary payments by seniors (4.9% vs 1.9%), assisted payments by a family
+  member's phone, wedding and one-off large payments. Closing the rest needs a lower cut-off for seniors; at T2 that costs little (fraud caught 100% to 95%), at T3 it costs a lot (94% to 75%, 89 cases). Not applied: it weakens detection for the most attacked group.
+- **Family helper** ([family-helper.md](family-helper.md)): an optional way to register the family member's phone that helps a customer pay. Built end to end (server, demo bank, Android), but measured effect on the gate is small (senior ratio 2.23 to 2.21 if everyone used it), because assisted payments are only about a tenth of seniors' genuine payments.
 - A small payment on a new phone at 3 am stays at the light level by design (the small-payment cap); only the bank's hard-hold rules stop it.
 - No real fraud labels yet: all numbers are on simulated customers.
 - The seeded demo customers have no face or voice enrolled (a face cannot be faked into a demo), so in the live demo the plan for a large

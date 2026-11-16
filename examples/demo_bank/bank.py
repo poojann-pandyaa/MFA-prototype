@@ -239,14 +239,16 @@ def _embed(url: str) -> str:
 @app.get("/api/me")
 def me(request: Request, deviceId: str = ""):
     c = customer(request)
-    enrolled, learning = None, None
+    enrolled, learning, profile, helpers = None, None, None, None
     if c["amfaUser"]:
+        helpers = AMFA.request("GET", f"/v1/users/{c['amfaUser']}/helpers")
         enrolled = AMFA.request("GET", f"/v1/users/{c['amfaUser']}")["enrollment"]
         learning = AMFA.request("GET", f"/v1/users/{c['amfaUser']}/phase")
+        profile = AMFA.request("GET", f"/v1/users/{c['amfaUser']}/profile")
     return {"name": c["name"], "ref": c["ref"], "balance": c["balance"], "enrolled": enrolled,
             "protection": protection(enrolled or {}, code_label(c)), "frozen": c.get("frozen", False),
             "codeTo": code_to(c),
-            "dailyLimit": c["dailyLimit"], "sentToday": sent_today(c), "noCheck": c.get("noCheck"), "learning": learning,
+            "dailyLimit": c["dailyLimit"], "sentToday": sent_today(c), "noCheck": c.get("noCheck"), "learning": learning, "profile": profile, "helpers": helpers,
             "phone": _mask(c["phone"]), "email": _mask(c["email"]),
             "deviceTrusted": deviceId in c["devices"], "devices": len(c["devices"]), "demoTools": DEMO_TOOLS,
             "payees": [{"ref": k, "display": p["display"], "initials": initials(p["display"]),
@@ -282,6 +284,64 @@ def enrol(request: Request, body: Optional[Enrol] = None):
             _save()
     factors = (body or Enrol()).factors
     return {"url": _embed(AMFA.enrollment_link(c["amfaUser"], factors=factors)["url"])}
+
+
+# ---------- optional family helpers ----------
+
+class Redeem(BaseModel):
+    code: str = Field(pattern=r"^\d{8}$")
+    deviceId: str = Field(pattern=DEVICE_ID)
+
+
+@app.post("/api/helpers/redeem")
+def redeem_helper(body: Redeem, request: Request):
+    """Run on the family member's phone, signed in as the customer: the code shown on the customer's own phone makes this phone a helper."""
+    c = customer(request)
+    try:
+        return AMFA.request("POST", f"/v1/users/{_amfa_user(c)}/helpers/redeem", {"code": body.code, "deviceId": body.deviceId})
+    except AmfaError as e:
+        raise HTTPException(409 if e.code != "INVITE_INVALID" else 404,
+                            "that code is wrong or has expired" if e.code == "INVITE_INVALID" else "could not add this phone") from None
+
+
+@app.delete("/api/helpers/{helper_id}")
+def remove_helper(helper_id: str, request: Request):
+    """Removing a helper only lowers trust, so being signed in is enough."""
+    c = customer(request)
+    return AMFA.request("DELETE", f"/v1/users/{_amfa_user(c)}/helpers/{helper_id}")
+
+
+# ---------- what the customer chooses to tell us at sign-up ----------
+
+class Profile(BaseModel):
+    """Two optional questions, each a band: roughly how much they send in a month, and what a typical payment is."""
+    monthBand: Optional[int] = Field(default=None, ge=0, le=4)
+    typicalBand: Optional[int] = Field(default=None, ge=0, le=4)
+    regularPayees: list[str] = Field(default_factory=list, max_length=3)
+
+
+def _amfa_user(c: dict) -> str:
+    with _lock:
+        if not c["amfaUser"]:
+            c["amfaUser"] = AMFA.create_user(c["ref"], contact=code_contact(c))["id"]
+            _save()
+    return c["amfaUser"]
+
+
+@app.post("/api/profile")
+def set_profile(body: Profile, request: Request):
+    """Passed to AMFA, which only uses it to give the model something to compare with until the customer's own history is long enough.
+    A regular payee counts only if it is in this customer's own payee list (the bank has already checked the account name)."""
+    c = customer(request)
+    refs = [r for r in body.regularPayees if r in c["payees"]]
+    return AMFA.request("PUT", f"/v1/users/{_amfa_user(c)}/profile",
+                        {"monthBand": body.monthBand, "typicalBand": body.typicalBand, "regularPayees": refs})
+
+
+@app.delete("/api/profile")
+def remove_profile(request: Request):
+    c = customer(request)
+    return AMFA.request("DELETE", f"/v1/users/{_amfa_user(c)}/profile")
 
 
 # ---------- protected actions ----------
@@ -325,6 +385,10 @@ class Limit(Device):
 
 class NoCheckLimit(Device):
     limitRupees: float = Field(ge=500, le=50_000)
+
+
+class HelperAdd(Device):
+    label: str = Field(default="Family", max_length=24, pattern=r"^[\w .,'&()-]*$")
 
 
 class Contact(Device):
@@ -422,6 +486,23 @@ def apply_nocheck(c: dict, a: dict) -> Optional[str]:
     return None
 
 
+def start_helper(c: dict, b: HelperAdd) -> dict:
+    """Optional. Letting a family member's phone help is checked like any account change, because it is what a fraudster would add."""
+    return {"title": f"Allow {b.label.strip() or 'a family member'} to help with payments", "amountMinor": 0, "payeeRef": "HELPER",
+            "payeeDisplay": "Family helper", "params": {"label": b.label}}
+
+
+def apply_helper(c: dict, a: dict) -> Optional[str]:
+    """AMFA accepts it only against this very action's verified CHANGE_LIMIT, once, and returns a short-lived code for the helper's phone."""
+    try:
+        out = AMFA.request("POST", f"/v1/users/{c['amfaUser']}/helpers",
+                           {"label": a["params"].get("label") or "Family", "transactionId": a["amfaTxn"]})
+    except AmfaError as e:
+        return f"the helper could not be added ({e.code})"
+    a["helperCode"], a["helperCodeExpires"] = out["code"], out["expiresAt"]
+    return None
+
+
 def start_contact(c: dict, b: Contact) -> dict:
     if not re.match(PHONE if b.field == "phone" else EMAIL, b.value):
         raise HTTPException(422, f"that is not a valid {b.field}")
@@ -464,6 +545,7 @@ KINDS = {
     "payee": Kind(AddPayee, "ADD_BENEFICIARY", start_add_payee, apply_add_payee),
     "limit": Kind(Limit, "CHANGE_LIMIT", start_limit, lambda c, a: c.update(dailyLimit=a["amountMinor"])),
     "nocheck": Kind(NoCheckLimit, "CHANGE_LIMIT", start_nocheck, apply_nocheck),
+    "helper": Kind(HelperAdd, "CHANGE_LIMIT", start_helper, apply_helper),
     "contact": Kind(Contact, "PROFILE_CHANGE", start_contact, apply_contact),
     "password": Kind(Password, "PROFILE_CHANGE", start_password, apply_password),
     "device": Kind(Device, "DEVICE_BINDING", start_device,
@@ -477,6 +559,8 @@ def public(a: dict) -> dict:
                                  "checks", "reason", "scamWarning", "reviewAfter", "reported")}
     out["payee"] = {"display": a.get("payeeDisplay"), "initials": initials(a.get("payeeDisplay") or "")}
     out["confirmedWith"] = a.get("confirmedWith", [])
+    if a.get("helperCode") and a["status"] == "DONE" and a.get("helperCodeExpires", 0) > time.time():
+        out["helperCode"], out["helperCodeExpires"] = a["helperCode"], a["helperCodeExpires"]
     out["canContinue"] = a["status"] == "AWAITING_VERIFICATION" and bool(a.get("challengeUrl"))
     return out
 

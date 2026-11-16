@@ -28,6 +28,9 @@ SEARCH = [dict(num_leaves=nl, min_child_samples=mcs, lambda_l2=l2)
 ENSEMBLE_SEEDS = 5
 FAIRNESS_MAX_RATIO = 1.25
 FAIRNESS_MIN_ROWS = 300
+FAIR_ROUNDS = 4          # reweighting rounds: genuine payments of an over-stepped-up segment count more in training
+FAIR_TARGET = 1.15       # aim under the gate's 1.25 so the held-out test has room
+FAIR_MAX_BOOST = 8.0
 
 
 def _base_params(seed: int) -> dict:
@@ -162,10 +165,37 @@ def run(customers: int = 20000, days: int = 150, seed: int = 7, activate: bool =
         if best is None or ap > best[0]:
             best = (ap, grid)
     params = best[1]
-    boosters = [_fit(lgb, _base_params(seed + k) | params, dtr, dva) for k in range(seeds)]
+    seg_va, gen_tr, gen_va = segment[va], y[tr] == 0, y[va] == 0
 
-    def raw_of(m):
-        return np.mean([b.predict(X[m], num_iteration=b.best_iteration) for b in boosters], axis=0)
+    def fit_all(boost):
+        # genuine rows of a boosted segment count more, so the model needs stronger evidence before it flags that segment.
+        # Segment is used only to weight training rows; it is never a model input.
+        f = np.array([boost.get(s, 1.0) for s in segment[tr]]) * gen_tr + (~gen_tr)
+        d = lgb.Dataset(X[tr], y[tr], weight=w[tr] * f, feature_name=FEATURES, categorical_feature=cat, free_raw_data=False)
+        return [_fit(lgb, _base_params(seed + k) | params, d, dva) for k in range(seeds)]
+
+    def raw_of(m, bs=None):
+        return np.mean([b.predict(X[m], num_iteration=b.best_iteration) for b in (bs or boosters)], axis=0)
+
+    def segment_ratios(bs):  # per segment: share of genuine validation payments at T2+ over the overall share
+        rv = raw_of(va, bs)
+        cut = [wquantile(rv[gen_va], w[va][gen_va], 1 - GENUINE_SHARE_AT_OR_ABOVE[l]) for l in LEVELS[1:]]
+        hit = np.array([level(r, cut) in LEVELS[2:] for r in rv])
+        overall = np.average(hit[gen_va], weights=w[va][gen_va])
+        return {s: np.average(hit[m], weights=w[va][m]) / overall
+                for s in CATEGORICAL["segment"] for m in [gen_va & (seg_va == s)] if m.sum() >= FAIRNESS_MIN_ROWS // 3}
+
+    boost: dict[str, float] = {}
+    boosters = fit_all(boost)
+    for rnd in range(FAIR_ROUNDS):
+        ratios = segment_ratios(boosters)
+        print(f"  fairness round {rnd}: " + ", ".join(f"{s} {r:.2f}" for s, r in ratios.items()) + f"  boost {boost}")
+        over = {s: r for s, r in ratios.items() if r > FAIR_TARGET}
+        if not over:
+            break
+        for s, r in over.items():
+            boost[s] = min(FAIR_MAX_BOOST, boost.get(s, 1.0) * r)
+        boosters = fit_all(boost)
 
     iso = IsotonicRegression(y_min=0.0, y_max=1.0, out_of_bounds="clip").fit(raw_of(va), y[va], sample_weight=w[va])
     gv = y[va] == 0
@@ -213,6 +243,7 @@ def run(customers: int = 20000, days: int = 150, seed: int = 7, activate: bool =
         "boosters": names, "params": params, "trees": [b.best_iteration for b in boosters],
         "cutoffs": cutoffs, "frictionTargets": GENUINE_SHARE_AT_OR_ABOVE,
         "habit": {"cutoffs": habit_cutoffs, "genuineShare": HABIT_SHARE_AT_OR_ABOVE},
+        "fairnessBoost": boost,
         "data": {"source": "synthetic (amfa.engine.risk.scenarios)", "customers": customers, "days": days,
                  "seed": seed, "rows": len(rows), "fraudRows": int(y.sum()),
                  "scenarioRows": dict(sorted(Counter(scenario).items())),

@@ -84,6 +84,17 @@ class CustomerBypass(BaseModel):
     coolingOffHours: int = Field(default=24, ge=0, le=168)
 
 
+class FamilyHelpers(BaseModel):
+    """Optional: a customer may let a family member's phone help them pay (see core/helpers.py). Off unless the bank turns it on."""
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = False
+    maxHelpers: int = Field(default=2, ge=1, le=5)
+    # a newly added helper phone counts only after this many hours, so a fraudster who adds their own phone cannot use it at once;
+    # removing a helper is immediate
+    coolingOffHours: int = Field(default=24, ge=0, le=168)
+    inviteMinutes: int = Field(default=15, ge=1, le=120)
+
+
 class LearningPolicy(BaseModel):
     """New customers: until the model knows them (see engine/risk/readiness.py) they confirm payments with the phone's own
     fingerprint or screen lock, not a face or voice check, and these limits and the hard warning signs are the safety net."""
@@ -224,6 +235,7 @@ class TenantPolicy(BaseModel):
     customerBypass: CustomerBypass = Field(default_factory=CustomerBypass)
     learning: LearningPolicy = Field(default_factory=LearningPolicy)
     payeeReputation: PayeeReputation = Field(default_factory=PayeeReputation)
+    familyHelpers: FamilyHelpers = Field(default_factory=FamilyHelpers)
     deviceTrustDays: int = Field(default=0, ge=0, le=90)
     dormancyDays: int = Field(default=180, ge=30, le=1095)
     quietHours: QuietHours = Field(default_factory=QuietHours)

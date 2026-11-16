@@ -13,10 +13,11 @@ from sqlalchemy import select
 from amfa.common import crypto, geo
 from amfa.common.contract import FAILED, SPOOF_DETECTED
 from amfa.common.crypto import keyed_hash
-from amfa.core import bypass, db, factors, payee_reputation, phase
+from amfa.core import bypass, db, factors, helpers, payee_reputation, peers, phase
 from amfa.engine.context import (Band, BehaviouralCtx, Capability, Context, DeviceCtx, Enrollment,
                                  Policy, Segment, TransactionCtx, TxnType)
 from amfa.engine.policy import TenantPolicy
+from amfa.engine.risk import declared
 from amfa.engine.risk import features as risk_features
 from amfa.engine.risk.threat import is_routine
 
@@ -130,10 +131,12 @@ def assemble(s, tenant: db.Tenant, customer: db.Customer, txn_id: str, t: TxnInp
     trust_s = policy.deviceTrustDays * 86_400
     ours = bool(dev and dev.verified_count >= 1 and now - dev.first_seen >= trust_s)
     bank = bool(t.device_first_seen and now - t.device_first_seen >= max(trust_s, 86_400))
-    device_known = ours or bank
+    helper_keys = helpers.active_keys(s, customer.id, now) if policy.familyHelpers.enabled else frozenset()
+    helper_device = dkey in helper_keys
+    device_known = ours or bank or helper_device   # a family member's phone the customer chose is not a stranger's
     derived["device"] = {"registered": dev is not None, "verifiedUses": dev.verified_count if dev else 0,
                          "ageDays": round((now - dev.first_seen) / 86_400, 1) if dev else None,
-                         "bankRegistry": t.device_first_seen is not None, "known": device_known,
+                         "bankRegistry": t.device_first_seen is not None, "known": device_known, "helper": helper_device,
                          "keyBound": bool(dev and dev.public_jwk)}
 
     nets = s.execute(select(db.KnownNetwork).where(db.KnownNetwork.customer_id == customer.id)).scalars().all()
@@ -164,6 +167,11 @@ def assemble(s, tenant: db.Tenant, customer: db.Customer, txn_id: str, t: TxnInp
         basis = "authorised history" if kp else "never paid before"
     new_payee = age_days < policy.newPayeeDays if t.type in (TxnType.TRANSFER, TxnType.PAYMENT,
                                                              TxnType.ADD_BENEFICIARY) else False
+    declared_row = s.get(db.CustomerProfile, customer.id)
+    if new_payee and declared_row is not None and pkey in (declared_row.regular_payees or []) and t.type is not TxnType.ADD_BENEFICIARY:
+        # a payee the customer named at sign-up and the bank vouched for: known from day one. It never softens a hard sign or a
+        # reported payee (those are judged separately); it only stops it counting as a stranger.
+        new_payee, basis = False, "declared at sign-up"
     derived["payee"] = {"basis": basis, "ageDays": age_days, "new": new_payee}
 
     dormant = bool(customer.last_verified_at and
@@ -236,7 +244,10 @@ def assemble(s, tenant: db.Tenant, customer: db.Customer, txn_id: str, t: TxnInp
         ueba_risk=None if preview.get("riskScore") is None else float(preview["riskScore"]),
         sim_changed_at=ev.get("simChangedAt"), contact_changed_at=ev.get("contactChangedAt"),
         password_reset_at=ev.get("passwordResetAt"),
-        payee_risk_flag=bool(ev.get("payeeRiskFlag")) or bool(rep and rep["flag"]))
+        payee_risk_flag=bool(ev.get("payeeRiskFlag")) or bool(rep and rep["flag"]),
+        declared_typical=declared.typical_of(declared_row.typical_band) if declared_row else None,
+        declared_month=declared.month_of(declared_row.month_band) if declared_row else None,
+        peer=peers.prior(s, tenant.id, declared_row), helpers=helper_keys)
     history = risk_history(s, customer, now, ZoneInfo(policy.timezone))
     features = risk_features.build(cur, history, profile)
     if policy.routineEasesHighValue and band is Band.HIGH and not new_payee and is_routine(features):

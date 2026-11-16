@@ -14,7 +14,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from amfa import config
 from amfa.common import logs, web
-from amfa.core import api_admin, api_client, api_tenant, db, factors, orchestrator, proofs, retention, webhooks
+from amfa.core import api_admin, api_client, api_tenant, db, factors, orchestrator, peers, proofs, retention, webhooks
 from amfa.engine.agent import backend_status, build_agent
 
 log = logging.getLogger("amfa.core")
@@ -94,7 +94,7 @@ class Sweeper(threading.Thread):
         self._stop = threading.Event()
 
     def run(self) -> None:
-        last_purge = 0.0
+        last_purge = last_peers = 0.0
         while not self._stop.wait(15):
             try:
                 with db.session() as s:
@@ -108,6 +108,13 @@ class Sweeper(threading.Thread):
                         retention.purge(s)
                 except Exception:
                     log.exception("retention purge failed")
+            if time.time() - last_peers > 86_400:    # how customers who answered the same way really pay: nightly
+                last_peers = time.time()
+                try:
+                    with db.session() as s:
+                        peers.refresh(s)
+                except Exception:
+                    log.exception("peer group refresh failed")
 
     def stop(self) -> None:
         self._stop.set()

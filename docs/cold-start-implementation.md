@@ -401,3 +401,41 @@ Left as it is:
 - Numeric reputation inputs to the model (needs a simulator with the same payee paid by many simulated customers, then a retrain).
 - The sender-payee graph that finds rings: payees that share senders with a known mule, accounts that receive and immediately send on.
 - Sharing reputation between banks (a privacy and legal question).
+
+---
+
+## Status: step 3, sign-up questions and peer groups
+
+**Built (server, app and bank; tested):**
+- Two optional questions with five answers each: roughly how much the customer sends a month, and what a typical payment is. Only
+  bands are stored (`customer_profile`), never figures, and the customer can remove them (`DELETE /v1/users/{id}/profile`, and "Remove my
+  answers" in the app). A customer who skips them is simply not judged against a declaration. The app asks after sign-up on a bank that
+  learns its customers first; Profile has "About you" to change them.
+- A declaration is worth something only until the customer's own payments are enough: the model's "how unusual is this" is pulled towards the
+  typical payment they named with the weight of 8 payments (`PEER_K`), which their own payments outweigh within a few weeks. It works from the
+  first payment. Two new model inputs: `amount_vs_declared` and `declared_gap` (this month's total against what they said).
+- Peer groups (`peer_group_stat`, refreshed nightly by `amfa/core/peers.py`): once 50 or more customers who gave the same typical-payment
+  answer are READY, how they really pay replaces the declared figure as the starting point. Smaller groups are never used, so nobody in one can be
+  picked out; until then the declared figure stands.
+- Regular payees the bank vouches for (it checked the name; up to three, `PUT /v1/users/{id}/profile`) are not "a stranger" from day one. A
+  vouched payee never softens a hard warning sign or a payee reported by other customers.
+- The simulator now gives each simulated customer answers: 30% skip, the rest answer from their true behaviour with noise, and accounts a
+  fraudster opened say they are small ones and then move a lot. The model was retrained on it (risk-20261116-031301).
+
+**Measured** (simulated customers; the same 7,500 sign-ups scored with their answers shown and hidden, `scripts/measure_readiness.py --hide-declared`):
+
+| | Answers hidden | Answers shown |
+|---|---|---|
+| First five payments of a customer who answered: genuine payments that would get a face check or more | about 22% | **16.5%** |
+| Whole learning phase, 3-7 payments a week | 13% | 12% |
+| Whole learning phase, 7-20 payments a week | 12% | 11% |
+| Payments to become ready | 1 to 3 more | 1 to 3 fewer |
+| Fraud caught after ready; overall PR-AUC | the same | the same (0.923 against 0.921) |
+
+So the answers help most at the very start, where the amount is the only thing the model can compare. Later false alarms come from an unfamiliar
+payee, phone or place, which a declaration says nothing about. The fairness gate still fails for older customers (senior ratio 2.71, limit 1.25).
+
+**Worth knowing:**
+- A declaration never lowers a check. It gives the model something to compare with; a customer who says "small" and then moves a lot is a signal.
+- The web bank has no questions screen yet; its endpoint is the same (`POST /api/profile`).
+- Payee names are not checked by AMFA; the bank vouches for them. A bank that does not check should send none.

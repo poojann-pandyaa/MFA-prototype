@@ -101,8 +101,12 @@ def customer_notice(plan: Plan, txn_type: TxnType, features: Optional[dict] = No
     if plan.source == "learning":
         # while the model is learning a customer everything about them is new, so the model's reasons would only confuse: say what is happening
         extra = len(plan.required) > 1
-        reason = ("We're getting to know how you pay, so we confirm each payment with your phone's fingerprint or screen lock"
-                  + (" and a one-time code, because it is more than usual while we do" if extra else "") + ".")
+        if txn_type in MONEY_TYPES:
+            reason = ("We're getting to know how you pay, so we confirm each payment with your phone's fingerprint or screen lock"
+                      + (" and a one-time code, because it is more than usual while we do" if extra else "") + ".")
+        else:   # a change to the account, not a payment: say so, and why more than the phone's own lock is asked
+            reason = ("We confirm changes to your account with your phone's fingerprint or screen lock"
+                      + (" and a one-time code, because this is a sensitive change" if extra else "") + ".")
         warn = txn_type in MONEY_TYPES and (plan.scamRisk or extra)
         return {"reason": reason, "scamWarning": warn, "underReview": plan.escalate == "MANUAL_REVIEW"}
     why = list(dict.fromkeys(CUSTOMER_REASONS[k] for k, _ in plan.riskReasons

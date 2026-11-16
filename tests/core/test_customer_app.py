@@ -888,6 +888,116 @@ def test_a_bank_cannot_set_a_maximum_above_the_platform_ceiling(stack):
         TenantPolicy.model_validate({**base, "customerBypass": {"enabled": True, "maxMinor": 99_999_999}})
 
 
+# ---- optional family helpers -------------------------------------------------------------------------------------------
+
+HELPER_DEVICE = "helper-phone-aaaaaaaaaaaaaaaa"
+
+
+def _helpers_policy(stack, **fh):
+    with db.session() as s:
+        t = s.get(db.Tenant, stack.tenant["id"])
+        t.policy = {**(t.policy or {}), "familyHelpers": fh}
+
+
+@pytest.fixture
+def helpers_on(stack):
+    _helpers_policy(stack, enabled=True, coolingOffHours=0, maxHelpers=2)
+    yield
+    _helpers_policy(stack, enabled=False)
+
+
+def _add_helper(stack, app, label="Son"):
+    started = act(app, "helper", label=label)
+    assert started.status_code == 201, started.text
+    verify(stack, started.json()["challengeUrl"])
+    return app.post(f"/api/actions/{started.json()['action']['id']}/complete").json()["action"]
+
+
+def _active_helpers(stack, app):
+    from amfa.core import helpers
+    with db.session() as s:
+        return helpers.active_keys(s, stack.bank.CUSTOMERS[app.user]["amfaUser"], time.time() + 1)
+
+
+def test_a_helper_is_added_only_after_the_checks_and_the_helper_phone_redeems_the_code(stack, app, helpers_on):
+    from amfa.core.context_builder import device_key
+    done = _add_helper(stack, app)
+    assert done["status"] == "DONE", done["detail"]
+    code = done["helperCode"]
+    assert len(code) == 8 and _active_helpers(stack, app) == frozenset()          # an invite alone trusts nothing
+    me = app.get("/api/me", params={"deviceId": PHONE_DEVICE}).json()["helpers"]
+    assert [h["state"] for h in me["helpers"]] == ["INVITED"]
+    wrong = app.post("/api/helpers/redeem", json={"code": "00000000" if code != "00000000" else "11111111", "deviceId": HELPER_DEVICE})
+    assert wrong.status_code == 404
+    ok = app.post("/api/helpers/redeem", json={"code": code, "deviceId": HELPER_DEVICE})
+    assert ok.status_code == 200 and [h["state"] for h in ok.json()["helpers"]] == ["ACTIVE"]
+    assert _active_helpers(stack, app) == {device_key(stack.tenant["id"], HELPER_DEVICE)}
+    again = app.post("/api/helpers/redeem", json={"code": code, "deviceId": "another-phone-bbbbbbbbbbbbbb"})
+    assert again.status_code == 404                                               # a code works once
+
+
+def test_a_new_helper_waits_out_the_cooling_off_and_removing_one_is_immediate(stack, app):
+    _helpers_policy(stack, enabled=True, coolingOffHours=24, maxHelpers=2)
+    try:
+        code = _add_helper(stack, app)["helperCode"]
+        waiting = app.post("/api/helpers/redeem", json={"code": code, "deviceId": HELPER_DEVICE}).json()["helpers"]
+        assert waiting[0]["state"] == "WAITING" and waiting[0]["activeFrom"] - time.time() > 23 * 3600
+        assert _active_helpers(stack, app) == frozenset()
+        with db.session() as s:
+            s.get(db.TrustedHelper, waiting[0]["id"]).active_from = time.time() - 1
+        assert len(_active_helpers(stack, app)) == 1
+        assert app.delete(f"/api/helpers/{waiting[0]['id']}").json()["helpers"] == []
+        assert _active_helpers(stack, app) == frozenset()
+    finally:
+        _helpers_policy(stack, enabled=False)
+
+
+def test_a_helper_cannot_be_added_with_some_other_approval_or_the_same_one_twice(stack, app, helpers_on):
+    AmfaError = stack.bank.AmfaError
+    amfa_user = stack.bank.CUSTOMERS[app.user]["amfaUser"]
+    done = _add_helper(stack, app)
+    with db.session() as s:
+        used = _txn(s, done["id"]).id
+    post = lambda txn: stack.bank.AMFA.request("POST", f"/v1/users/{amfa_user}/helpers", {"label": "x", "transactionId": txn})
+    with pytest.raises(AmfaError) as e:
+        post(used)
+    assert e.value.code == "HELPER_NOT_AUTHORISED"
+    other = act(app, "limit", limitRupees=200_000).json()      # an approved limit change is not a helper approval
+    verify(stack, other["challengeUrl"])
+    app.post(f"/api/actions/{other['action']['id']}/complete").raise_for_status()
+    with db.session() as s:
+        other_txn = _txn(s, other["action"]["id"]).id
+    with pytest.raises(AmfaError) as e:
+        post(other_txn)
+    assert e.value.code == "HELPER_NOT_AUTHORISED"
+
+
+def test_helpers_are_optional_limited_and_off_unless_the_bank_turns_them_on(stack, app, helpers_on):
+    assert app.get("/api/me", params={"deviceId": PHONE_DEVICE}).json()["helpers"]["helpers"] == []   # nobody has to add one
+    for who in ("A", "B"):
+        assert _add_helper(stack, app, who)["status"] == "DONE"
+    assert "HELPERS_FULL" in _add_helper(stack, app, "C")["detail"]
+    _helpers_policy(stack, enabled=False)
+    assert "HELPERS_DISABLED" in _add_helper(stack, app, "D")["detail"]
+
+
+def test_a_payment_from_a_helper_phone_is_read_as_a_known_helper_by_the_risk_model(stack, app, helpers_on):
+    from amfa.core.context_builder import TxnInput, assemble, device_key
+    from amfa.engine.context import TxnType
+    code = _add_helper(stack, app)["helperCode"]
+    app.post("/api/helpers/redeem", json={"code": code, "deviceId": HELPER_DEVICE}).raise_for_status()
+    amfa_user = stack.bank.CUSTOMERS[app.user]["amfaUser"]
+
+    def asm(device):
+        with db.session() as s:
+            t, c = s.get(db.Tenant, stack.tenant["id"]), s.get(db.Customer, amfa_user)
+            return assemble(s, t, c, "t1", TxnInput(type=TxnType.TRANSFER, amount_minor=500_00, currency="INR", payee_ref="BEN-42",
+                                                    channel="MOBILE", device_id=device, ip="203.0.113.9"))
+    helper, stranger = asm(HELPER_DEVICE), asm("stranger-phone-cccccccccccccc")
+    assert helper.features["helper_device"] == 1 and helper.derived["device"]["helper"] and helper.ctx.device.deviceKnown
+    assert stranger.features["helper_device"] == 0 and not stranger.ctx.device.deviceKnown
+
+
 # ---- the learning phase: a new customer confirms payments with the phone's own fingerprint or screen lock ----------
 
 SCORE = {"now": 0.02}
@@ -1112,3 +1222,28 @@ def test_a_reviewer_can_see_why_a_payee_is_flagged(stack, app, reputation_on):
     seen = stack.bank.AMFA.request("GET", f"/v1/payees/reputation?payeeRef={ref}")
     assert seen["enabled"] and seen["flag"] and seen["senders7d"] == 7 and seen["reports"] == 0     # the six, and the customer who saved it
     assert not stack.bank.AMFA.request("GET", "/v1/payees/reputation?payeeRef=NOBODY-HAS-PAID-THIS")["flag"]
+
+
+# ---- the sign-up questions ----------------------------------------------------------------------------------------
+
+def test_the_answers_to_the_sign_up_questions_are_kept_shown_and_can_be_taken_back(stack, app):
+    me = app.get("/api/me", params={"deviceId": PHONE_DEVICE}).json()
+    assert me["profile"]["declared"] is False and len(me["profile"]["typicalLabels"]) == 5
+    saved = app.post("/api/profile", json={"monthBand": 1, "typicalBand": 2, "regularPayees": ["BEN-42", "NOT-MINE"]}).json()
+    assert saved["declared"] and saved["monthBand"] == 1 and saved["typicalBand"] == 2 and saved["regularPayees"] == 1   # only a payee they really have
+    assert app.get("/api/me", params={"deviceId": PHONE_DEVICE}).json()["profile"]["typicalBand"] == 2
+    assert app.delete("/api/profile").json()["declared"] is False
+
+
+def test_an_answer_outside_the_bands_is_refused(stack, app):
+    assert app.post("/api/profile", json={"typicalBand": 9}).status_code == 422
+    assert app.post("/api/profile", json={"monthBand": -1}).status_code == 422
+
+
+def test_erasing_a_customer_removes_their_answers_and_their_learning_state(stack, app, monkeypatch):
+    monkeypatch.setattr(factors, "erase", lambda *a, **k: True)             # the biometric services are not running here
+    cid = stack.bank.CUSTOMERS[app.user]["amfaUser"]
+    app.post("/api/profile", json={"typicalBand": 1}).raise_for_status()
+    stack.bank.AMFA.request("DELETE", f"/v1/users/{cid}")
+    with db.session() as s:
+        assert s.get(db.CustomerProfile, cid) is None and s.get(db.CustomerPhase, cid) is None

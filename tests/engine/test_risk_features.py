@@ -1,6 +1,8 @@
 """The shared feature builder: what counts as history, and what is missing vs zero."""
 import math
 
+import pytest
+
 from amfa.engine.risk.features import (CATEGORICAL, DAY, FEATURES, H, MONOTONE, Event, Profile, build,
                                        vector)
 
@@ -158,3 +160,41 @@ def test_a_customer_with_little_history_is_not_judged_on_a_spread_learned_from_t
     few = build(ev(0, amount=6000.0), spender([1000, 1000, 1000]), Profile())["habit_surprise"]
     many = build(ev(0, amount=6000.0), spender([1000] * 40), Profile())["habit_surprise"]
     assert 0 < few < many
+
+
+# ---- what the customer said at sign-up
+
+def _declared(typical, month=None):
+    from amfa.engine.risk.declared import peer_prior
+    return Profile(declared_typical=typical, declared_month=month, peer=peer_prior(typical))
+
+
+def test_a_day_one_payment_is_judged_against_what_the_customer_said_they_usually_pay():
+    said_small = _declared(1_200.0)
+    big = build(ev(0, amount=40_000.0), [], said_small)
+    usual = build(ev(0, amount=1_200.0), [], said_small)
+    assert big["habit_surprise"] > 3 and usual["habit_surprise"] == 0.0           # with no history at all
+    assert build(ev(0, amount=40_000.0), [], Profile())["habit_surprise"] is None  # skipped the question: nothing to compare with
+
+
+def test_the_same_payment_is_unremarkable_for_someone_who_said_they_pay_large_amounts():
+    said_large = _declared(100_000.0)
+    assert build(ev(0, amount=40_000.0), [], said_large)["habit_surprise"] == 0.0     # smaller than their usual is no surprise
+
+
+def test_their_own_payments_outweigh_the_declaration_as_they_build_up():
+    from amfa.engine.risk.declared import PEER_K
+    said_small = _declared(1_200.0)
+    habit = [ev(24 * (80 - i), payee=f"shop{i % 7}", amount=25_000.0) for i in range(60)]   # they actually pay about Rs 25,000
+    early = build(ev(0, payee="new", amount=25_000.0), habit[:2], said_small)["habit_surprise"]
+    late = build(ev(0, payee="new", amount=25_000.0), habit, said_small)["habit_surprise"]
+    assert early > 2 > 1 > late and PEER_K == 8                                      # the declaration fades; the habit takes over
+
+
+def test_how_far_a_payment_and_the_months_total_are_from_what_was_said():
+    p = _declared(1_200.0, 22_000.0)
+    f = build(ev(0, amount=12_000.0), [ev(24 * 5, amount=9_000.0), ev(24 * 40, amount=50_000.0)], p)
+    assert f["amount_vs_declared"] == 10.0
+    assert f["declared_gap"] == pytest.approx((9_000 + 12_000) / 22_000)             # the older payment is outside the month
+    none = build(ev(0, amount=12_000.0), [], Profile())
+    assert none["amount_vs_declared"] is None and none["declared_gap"] is None

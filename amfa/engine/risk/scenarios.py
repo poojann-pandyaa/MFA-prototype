@@ -30,6 +30,7 @@ from collections import Counter
 from dataclasses import dataclass, replace
 from typing import Callable, Iterator, NamedTuple, Optional
 
+from .declared import MONTH_BANDS, TYPICAL_BANDS, band_of, peer_prior
 from .features import DAY, H, HISTORY_DAYS, Event, Profile, build, exposure_24h
 
 START = 1_767_225_600.0  # 2026-01-01T00:00Z; rows are only taken from START on
@@ -45,6 +46,8 @@ SEGMENTS = {"STANDARD": .60, "PREMIUM": .12, "SENIOR": .12, "NEW_TO_BANK": .10, 
 # of) what their segment usually pays. Without it the model learns "big rupees = unusual", which is false for a customer
 # whose normal is big; with it, only how a payment compares with THIS customer's own habit predicts fraud.
 SCALE_SPREAD = 1.0
+HELPER_OPT_IN = .45        # of the customers who get family help, the share who register that family member's phone (optional)
+DECLARE_SKIP = .3          # the share of customers who skip the sign-up questions
 MEDIAN_AMOUNT = {"STANDARD": 1500, "PREMIUM": 8000, "SENIOR": 2500, "NEW_TO_BANK": 1000, "CORPORATE": 40000}
 TXNS_PER_DAY = {"STANDARD": .7, "PREMIUM": .9, "SENIOR": .4, "NEW_TO_BANK": .5, "CORPORATE": 2.5}
 PAY_TYPES = ["TRANSFER", "PAYMENT", "CARD_NOT_PRESENT"]
@@ -279,6 +282,30 @@ class Customer:
             tag, (lo, hi), (cv_lo, cv_hi) = RECURRING[period]
             self.recurring.append(Recurring(f"{cid}-r{len(self.recurring)}", period, self.median * rng.uniform(lo, hi),
                                             rng.uniform(cv_lo, cv_hi), rng.uniform(0, period), tag))
+        self._declare()
+        self._helper()
+
+    def _helper(self, lie: bool = False) -> None:
+        """Optional: a customer who gets family help may register that family member's phone as a helper (their own random stream).
+        It is in force from [helper_from], after the bank's cooling-off. Accounts opened by a fraudster never have one."""
+        r = random.Random(f"helper|{self.cid}")
+        self.helper_from = None
+        if (self.assisted or self.segment == "SENIOR") and not lie and r.random() < HELPER_OPT_IN:
+            self.helper_from = START + r.uniform(-HISTORY_DAYS, self.days * .7) * DAY
+
+    def _declare(self, lie: bool = False) -> None:
+        """The sign-up questions. A separate random stream, so adding them changes nothing else about a simulated life. 30% skip them;
+        the rest answer from their true behaviour with noise; an account a fraudster opened says it is a small one, then moves a lot."""
+        r = random.Random(f"declare|{self.cid}|{lie}")
+        self.declared_typical = self.declared_month = None
+        if r.random() < DECLARE_SKIP:
+            return
+        if lie:
+            t, m = r.choice([0, 1]), r.choice([0, 1])
+        else:
+            t = band_of(self.median * r.lognormvariate(0, .35), TYPICAL_BANDS)
+            m = band_of(self.rate * 30 * self.median * math.exp(self.sigma ** 2 / 2) * r.lognormvariate(0, .5), MONTH_BANDS)
+        self.declared_typical, self.declared_month = TYPICAL_BANDS[t], MONTH_BANDS[m]
 
     def _destination(self):
         r = self.rng
@@ -294,6 +321,8 @@ class Customer:
         self.enrolled, self.key_bound = r.randint(1, 2), r.random() < .3
         self.sim_at = self.reset_at = self.contact_at = self.new_phone_at = self.silence = None
         self.recurring, self.trips, self.rate = [], [], .5 * r.uniform(.5, 1.6)
+        self._declare(lie=kind != "bustout")
+        self._helper(lie=True)     # a bust-out builds trust first, so it answers honestly about its small start
 
     def amt(self) -> float:
         return self.rng.lognormvariate(0, self.sigma) * self.median
@@ -310,7 +339,9 @@ class Customer:
                     sim_changed_at=self.sim_at if self.sim_at and self.sim_at <= at else None,
                     contact_changed_at=self.contact_at if self.contact_at and self.contact_at <= at else None,
                     password_reset_at=self.reset_at if self.reset_at and self.reset_at <= at else None,
-                    payee_risk_flag=flag)
+                    payee_risk_flag=flag, declared_typical=self.declared_typical, declared_month=self.declared_month,
+                    peer=peer_prior(self.declared_typical),
+                    helpers=frozenset({f"{self.cid}-fam"}) if self.helper_from is not None and at >= self.helper_from else frozenset())
         return replace(p, **(extra or {}))
 
     def _mk(self, at: float, scenario: str, label: int, *, amount: float, payee: str, type: str = "TRANSFER",
@@ -744,6 +775,14 @@ def _a_stolen(a):  # the real phone, the wrong person
              spoof=r.random() < .2, ueba=(6, 2), **kw)
 
 
+def _a_patient_helper(a):  # a takeover that registers its own phone as a "family helper", waits out the cooling-off, then drains
+    r = a.rng
+    extra = {"helpers": frozenset({a.dev})}
+    for k in range(r.randint(1, 3)):
+        a.ev(a.at + k * r.uniform(2, 30) * 60, a.big(2, 25), a.mule(), extra=extra, flag=.15, failed=int(r.random() < .2),
+             ueba=(4, 4))
+
+
 def _a_customer_mule(a):  # the customer passes every check but forwards money for a fraud ring
     r = a.rng
     for k in range(r.randint(3, 8)):
@@ -781,7 +820,7 @@ ATTACK_FN = {
     "new_account_fraud": _a_new_account, "beneficiary_abuse": _a_beneficiary, "limit_raise_drain": _a_limit,
     "device_binding_takeover": _a_binding, "profile_change_takeover": _a_profile,
     "impossible_travel": _a_impossible, "low_and_slow_mimic": _a_mimic, "stolen_device": _a_stolen,
-    "customer_as_mule": _a_customer_mule, "flagged_payee": _a_flagged, "repeat_scam": _a_repeat_scam,
+    "customer_as_mule": _a_customer_mule, "patient_helper": _a_patient_helper, "flagged_payee": _a_flagged, "repeat_scam": _a_repeat_scam,
     "bill_payee_swap": _a_bill_swap, "recurring_amount_jump": _a_amount_jump,
 }
 ATTACKS = {"account_takeover": .12, "sim_swap": .09, "scam_victim": .12, "remote_access": .08,
@@ -789,11 +828,12 @@ ATTACKS = {"account_takeover": .12, "sim_swap": .09, "scam_victim": .12, "remote
            "card_testing": .04, "test_then_drain": .05, "slow_drip": .04, "bustout": .03,
            "new_account_fraud": .03, "beneficiary_abuse": .05, "limit_raise_drain": .03,
            "device_binding_takeover": .04, "profile_change_takeover": .03, "impossible_travel": .03,
-           "low_and_slow_mimic": .05, "stolen_device": .04, "customer_as_mule": .03, "flagged_payee": .03,
+           "low_and_slow_mimic": .05, "stolen_device": .04, "customer_as_mule": .03, "patient_helper": .03, "flagged_payee": .03,
            "repeat_scam": .04, "bill_payee_swap": .05, "recurring_amount_jump": .05}
 assert set(ATTACKS) == set(ATTACK_FN)
 
 SCENARIO_DOCS = {
+    "patient_helper": "a fraudster registers their own phone as a family helper, waits out the cooling-off, then drains the account",
     # genuine, from ordinary behaviour
     "routine": "usual payee, device, place, hour and amount",
     "travel_domestic": "on a trip to another Indian city",

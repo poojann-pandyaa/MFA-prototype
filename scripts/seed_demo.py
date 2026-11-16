@@ -51,6 +51,7 @@ def main() -> int:
         tenant = s.execute(select(db.Tenant).where(db.Tenant.slug == a.tenant)).scalars().one()
         # let customers choose their own no-extra-check limit; no waiting period here so a presenter can show it
         pol = dict(tenant.policy)
+        pol["familyHelpers"] = {"enabled": True, "coolingOffHours": 0}
         pol["customerBypass"] = {"enabled": True, "maxMinor": 5_000_000, "coolingOffHours": 0}
         if a.learning:   # new sign-ups confirm with the phone's fingerprint or screen lock until the model knows them (needs app 1.0.3+)
             pol["learning"] = {"enabled": True}

@@ -5,9 +5,11 @@ from __future__ import annotations
 
 import math
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from statistics import median
 from typing import Optional
+
+from .declared import PEER_K
 
 TXN_TYPES = ["TRANSFER", "PAYMENT", "CARD_NOT_PRESENT", "ADD_BENEFICIARY", "CHANGE_LIMIT",
              "PROFILE_CHANGE", "DEVICE_BINDING"]
@@ -29,18 +31,18 @@ H, DAY = 3600.0, 86400.0
 # +1: risk can only rise with the value, -1: only fall. Keeps explanations sensible and stops an
 # attacker lowering the score by pushing a value further in the "risky" direction.
 MONOTONE = {
-    "amount_ratio": 1, "amount_vs_max": 1, "amount_24h_ratio": 1, "amount_z_self": 1, "payee_z": 1, "habit_surprise": 1, "velocity_1h": 1, "velocity_24h": 1,
+    "amount_ratio": 1, "amount_vs_max": 1, "amount_24h_ratio": 1, "amount_z_self": 1, "payee_z": 1, "habit_surprise": 1, "amount_vs_declared": 1, "declared_gap": 1, "velocity_1h": 1, "velocity_24h": 1,
     "new_payees_24h": 1, "sensitive_actions_24h": 1, "failed_factors_24h": 1, "spoof_7d": 1, "payee_risk_flag": 1,
     "payee_seen": -1, "amount_vs_payee_avg": 1,
-    "device_seen": -1, "network_seen": -1, "place_seen": -1,
+    "device_seen": -1, "helper_device": -1, "network_seen": -1, "place_seen": -1,
     "sim_changed_hours": -1, "contact_changed_hours": -1, "password_reset_hours": -1,
 }
 
 FEATURES = [
-    "amount_log", "amount_ratio", "amount_vs_max", "amount_24h_ratio", "amount_z_self", "payee_z", "habit_surprise",
+    "amount_log", "amount_ratio", "amount_vs_max", "amount_24h_ratio", "amount_z_self", "payee_z", "habit_surprise", "amount_vs_declared", "declared_gap",
     "velocity_1h", "velocity_24h", "new_payees_24h", "sensitive_actions_24h",
     "payee_seen", "payee_age_days", "days_since_payee_last_paid", "amount_vs_payee_avg",
-    "payee_gap_ratio", "payee_cycle_error", "device_seen", "device_age_days", "device_key_bound",
+    "payee_gap_ratio", "payee_cycle_error", "device_seen", "device_age_days", "device_key_bound", "helper_device",
     "network_seen", "place_seen", "place_changed", "country_changed",
     "minutes_since_last", "days_since_last_ok", "hour_deviation", "is_night",
     "failed_factors_24h", "spoof_7d", "history_count", "account_age_days", "enrolled_factors",
@@ -79,6 +81,14 @@ class Profile:
     contact_changed_at: Optional[float] = None
     password_reset_at: Optional[float] = None
     payee_risk_flag: bool = False
+    # what the customer said at sign-up (rupees): a typical payment and roughly a month's total; None when they skipped it
+    declared_typical: Optional[float] = None
+    declared_month: Optional[float] = None
+    # (centre, spread) of the habit score before they have any history: from their declaration, or their peer group (see core/peers.py)
+    peer: Optional[tuple] = None
+    # devices of family members the customer chose to let help (optional, set up from their own phone, in force after a cooling-off):
+    # a payment from one of them is expected, not a stranger. Keyed hashes, same as Event.device.
+    helpers: frozenset = frozenset()
 
 
 def _hours_since(at: Optional[float], now: float) -> Optional[float]:
@@ -102,18 +112,24 @@ def hour_deviation(hour: int, past_hours: list[int]) -> Optional[float]:
     return diff * 24 / (2 * math.pi) * concentration
 
 
-def habit_z(x: float, past: list[float], *, min_n: int, floor: float, prior: float, k: float) -> Optional[float]:
+def habit_z(x: float, past: list[float], *, min_n: int, floor: float, prior: float, k: float,
+            centre: Optional[float] = None) -> Optional[float]:
     """How many "usual spreads" above this customer's own habit [x] is, in log-amount terms. The centre is the median of their
     own past amounts and the spread their own robust deviation (never below [floor]), blended with a generic spread [prior] that
     counts as [k] payments, so a customer with little history is not judged on a spread learned from two payments.
     None until there are [min_n] past amounts. Positive = bigger than usual; scale-free, so Rs 10,000 is a large jump for a
-    customer who pays Rs 1,500 and nothing at all for one who pays Rs 1 lakh every week."""
-    if len(past) < min_n:
+    customer who pays Rs 1,500 and nothing at all for one who pays Rs 1 lakh every week.
+    With a [centre] (from what the customer declared or their peers) the median is pulled towards it with the weight of [k]
+    payments, and it works from the first payment; their own payments outweigh it as they build up."""
+    if len(past) < min_n and centre is None:
         return None
+    n = len(past)
     logs = [math.log1p(v) for v in past]
-    m = median(logs)
-    mad = max(1.4826 * median(abs(v - m) for v in logs), floor)
-    sigma = math.sqrt((len(logs) * mad ** 2 + k * prior ** 2) / (len(logs) + k))
+    m = median(logs) if n else None
+    mad = max(1.4826 * median(abs(v - m) for v in logs), floor) if n else 0.0
+    if centre is not None:
+        m = centre if not n else (n * m + k * centre) / (n + k)
+    sigma = math.sqrt((n * mad ** 2 + k * prior ** 2) / (n + k))
     return (math.log1p(x) - m) / sigma
 
 
@@ -133,7 +149,7 @@ def build(cur: Event, history: list[Event], profile: Profile) -> dict[str, Optio
     has_payee, monetary = cur.type in PAYEE_TYPES, cur.type in MONETARY_TYPES
     amounts, hours = [], []
     v1h = v24h = failed24 = spoof7 = sens24 = 0
-    amount24 = 0.0
+    amount24 = amount30 = 0.0
     payee_seen = device_seen = network_seen = place_seen = 0
     payee_first = device_first = None
     known_before_24h: set[str] = set()
@@ -165,6 +181,8 @@ def build(cur: Event, history: list[Event], profile: Profile) -> dict[str, Optio
         hours.append(e.hour)
         if e.type in MONETARY_TYPES:
             amounts.append(e.amount)
+            if age <= 30 * DAY:
+                amount30 += e.amount
         if age > DAY and e.type in PAYEE_TYPES:
             known_before_24h.add(e.payee)
         if has_payee and e.type in PAYEE_TYPES and e.payee == cur.payee:
@@ -186,12 +204,16 @@ def build(cur: Event, history: list[Event], profile: Profile) -> dict[str, Optio
     avg_paid = sum(paid_amounts) / len(paid_amounts) if paid_amounts else None
     med = median(amounts) if amounts else None
     ratio = (lambda x: x / med) if med and monetary else (lambda x: None)
-    z_self = habit_z(cur.amount, amounts, min_n=3, floor=.3, prior=.9, k=5) if monetary else None
+    peer = profile.peer
+    z_self = (habit_z(cur.amount, amounts, min_n=0 if peer else 3, floor=.3, prior=peer[1] if peer else .9, k=PEER_K if peer else 5,
+                      centre=peer[0] if peer else None) if monetary else None)
     z_payee = habit_z(cur.amount, paid_amounts, min_n=2, floor=.2, prior=.5, k=2) if monetary and has_payee else None
     # a payee paid before, at amounts like this one, is routine whatever the overall spread; otherwise judge against everything
     surprise = max(0.0, z_payee if z_payee is not None else z_self) if (z_payee is not None or z_self is not None) else None
     return {
         "amount_z_self": z_self, "payee_z": z_payee, "habit_surprise": surprise,
+        "amount_vs_declared": cur.amount / profile.declared_typical if monetary and profile.declared_typical else None,
+        "declared_gap": (amount30 + cur.amount) / profile.declared_month if monetary and profile.declared_month else None,
         "amount_log": math.log1p(max(cur.amount, 0.0)) if monetary else None,
         "amount_ratio": ratio(cur.amount),
         "amount_vs_max": cur.amount / max(amounts) if monetary and amounts and max(amounts) > 0 else None,
@@ -209,6 +231,7 @@ def build(cur: Event, history: list[Event], profile: Profile) -> dict[str, Optio
         "device_seen": device_seen,
         "device_age_days": (now - device_first) / DAY if device_first is not None else None,
         "device_key_bound": int(profile.device_key_bound),
+        "helper_device": int(cur.device in profile.helpers),
         "network_seen": network_seen,
         "place_seen": place_seen if cur.place is not None else None,
         "place_changed": (int(cur.place != last.place)

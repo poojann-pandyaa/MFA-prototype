@@ -108,3 +108,12 @@ def test_a_learning_customer_is_told_what_is_happening_not_the_models_unfamiliar
     over = customer_notice(decide(ctx(exposure=40_000_00), features=CLEAN), TxnType.TRANSFER, CLEAN)
     assert "getting to know how you pay" in usual["reason"] and "device is new" not in usual["reason"] and not usual["scamWarning"]
     assert "one-time code" in over["reason"] and over["scamWarning"]
+
+
+def test_an_account_change_while_learning_is_not_described_as_a_payment(model_says):
+    from amfa.engine.rationale import customer_notice
+    from amfa.engine.context import TxnType
+    model_says("T3")
+    for t in (TxnType.CHANGE_LIMIT, TxnType.DEVICE_BINDING):
+        text = customer_notice(decide(ctx(exposure=40_000_00), features=CLEAN), t, CLEAN)["reason"]
+        assert "changes to your account" in text and "payment" not in text
