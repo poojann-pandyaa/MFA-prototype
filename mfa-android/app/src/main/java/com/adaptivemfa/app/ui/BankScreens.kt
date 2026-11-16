@@ -1,3 +1,4 @@
+@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 package com.adaptivemfa.app.ui
 
 import androidx.compose.foundation.background
@@ -6,6 +7,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -40,6 +42,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import com.adaptivemfa.app.logic.NO_CHECK_MAX
 import com.adaptivemfa.app.logic.NO_CHECK_MIN
 import com.adaptivemfa.app.logic.formatMoney
+import com.adaptivemfa.app.logic.helperStateText
+import com.adaptivemfa.app.logic.parseHelperCode
 import com.adaptivemfa.app.logic.parseNoCheck
 import com.adaptivemfa.app.logic.greeting
 import com.adaptivemfa.app.logic.pressKey
@@ -213,7 +217,11 @@ fun AmountScreen(vm: AppViewModel, s: Screen.Amount) {
     val left = maxOf(0L, me.dailyLimitMinor - me.sentTodayMinor)
     val over = if (minor > left) "That's more than today's limit left (${formatMoney(left)})." else if (minor > me.balanceMinor) "That's more than your balance." else ""
     val shown = if (text.isEmpty()) "0" else text.substringBefore('.').toLong().let { String.format(Locale.US, "%,d", it) } + (if (text.contains('.')) "." + text.substringAfter('.') else "")
-    Page(scroll = false) {
+    // On a tall phone the amount sits centred between the header and the keypad; on a short one (or with large text) there is no room to
+    // centre, so the page scrolls and Continue is always reachable.
+    val tall = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp >= 720 && androidx.compose.ui.platform.LocalDensity.current.fontScale <= 1.15f
+    val gap: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit = { if (tall) Spacer(Modifier.weight(1f)) else Spacer(Modifier.height(8.dp)) }
+    Page(scroll = !tall) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             IconBtn("back", "Back") { vm.back() }
             Row(Modifier.weight(1f).clip(RoundedCornerShape(16.dp)).background(C.card).padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -221,7 +229,7 @@ fun AmountScreen(vm: AppViewModel, s: Screen.Amount) {
                 Column { Text(s.display, color = C.ink, fontWeight = FontWeight.Bold, maxLines = 1); Muted(if (s.kind == "bill") "Bill payment" else "Bank transfer (IMPS)", small = true) }
             }
         }
-        Spacer(Modifier.weight(1f))
+        gap()
         Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.Top) {
                 Text("₹", color = C.muted, fontSize = 32.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(top = 4.dp, end = 4.dp))
@@ -229,7 +237,7 @@ fun AmountScreen(vm: AppViewModel, s: Screen.Amount) {
             }
             Muted(over.ifEmpty { "${formatMoney(left)} of today's limit left" }, align = TextAlign.Center, color = if (over.isEmpty()) C.muted else C.bad)
         }
-        Spacer(Modifier.weight(1f))
+        gap()
         Messages(vm)
         Keypad { text = pressKey(text, it) }
         Btn("Continue", enabled = minor > 0 && over.isEmpty(), busy = vm.busy) { vm.startPayment(s.kind, s.ref, minor / 100.0) }
@@ -241,11 +249,18 @@ fun ReviewScreen(vm: AppViewModel, s: Screen.Review) {
     val a = s.started.action
     val bill = a.kind == "bill"
     val limit = a.kind == "nocheck"
+    val helper = a.kind == "helper" || a.kind == "device"
     val n = a.checks.size
     Page {
-        TopBar(title = if (limit) "Review your limit" else if (bill) "Review bill payment" else "Review payment", onBack = { vm.back() })
+        TopBar(title = if (a.kind == "device") "Verify this phone" else if (helper) "Review your helper" else if (limit) "Review your limit" else if (bill) "Review bill payment" else "Review payment", onBack = { vm.back() })
         Messages(vm)
-        if (limit) CardBox {
+        if (helper) CardBox {
+            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Tile("shieldCheck", size = 56)
+                Text(a.title, color = C.ink, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                Muted("Nothing is paid or changed in your money", small = true)
+            }
+        } else if (limit) CardBox {
             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Tile("shieldCheck", size = 56)
                 Muted("No extra checks up to")
@@ -266,12 +281,12 @@ fun ReviewScreen(vm: AppViewModel, s: Screen.Review) {
                 Tile("shieldCheck")
                 Text(if (n > 0) "We'll confirm it's you in $n quick ${if (n == 1) "step" else "steps"}" else "We'll confirm it's you", color = C.ink, fontWeight = FontWeight.Bold)
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { a.checks.forEachIndexed { i, c -> Chip("${i + 1} · ${c.replaceFirstChar { it.uppercase() }}") } }
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) { a.checks.forEachIndexed { i, c -> Chip("${i + 1} · ${c.replaceFirstChar { it.uppercase() }}") } }
             a.reason?.let { Muted(it) }
         }
         if (a.reviewAfter) Note("brand", "shieldClock", "After these steps, someone at Demo Bank will look at this before it goes through. Your money stays in your account until then.", "Then a quick check by our team")
         if (a.scamWarning) Note("warn", "warn", "Demo Bank will never ask you to move money to keep it safe, to share a code, or to pay to receive a refund or prize.", "Did someone ask you to make this payment?")
-        Btn(if (limit) "Confirm and set limit" else "Confirm and pay ${formatMoney(a.amountMinor)}", busy = vm.busy) { vm.confirmPayment() }
+        Btn(if (a.kind == "device") "Confirm and verify" else if (helper) "Confirm and add helper" else if (limit) "Confirm and set limit" else "Confirm and pay ${formatMoney(a.amountMinor)}", busy = vm.busy) { vm.confirmPayment() }
         LinkText("Cancel", modifier = Modifier.align(Alignment.CenterHorizontally)) { vm.cancelReview() }
     }
 }
@@ -287,11 +302,18 @@ fun ResultScreen(vm: AppViewModel, s: Screen.Result) {
             H1(o.title, align = TextAlign.Center)
             Lede(o.text, align = TextAlign.Center)
         }
+        a?.helperCode?.let { code ->
+            CardBox {
+                Muted("Code for their phone", small = true)
+                Text(code.chunked(4).joinToString(" "), color = C.ink, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 2.sp)
+                Muted("Works once, for 15 minutes", small = true)
+            }
+        }
         if (a != null && a.status == "DONE") CardBox(padding = 16) {
             Column { Kv("When", whenText(a.createdAt)); Kv("Reference", a.id)
                 if (a.confirmedWith.isNotEmpty()) Kv("Confirmed with", a.confirmedWith.joinToString(", ")) }
         }
-        Btn(if (o.kind == "bad" && a != null && a.kind != "") "Try again" else "Done") { if (o.kind == "bad" && a != null) vm.go(if (a.kind == "nocheck") Screen.NoCheck else Screen.Pay(a.kind == "bill")) else vm.go(if (a?.kind == "nocheck") Screen.Profile else Screen.Home) }
+        Btn(if (o.kind == "bad" && a != null && a.kind != "") "Try again" else "Done") { if (o.kind == "bad" && a != null) vm.go(if (a.kind == "nocheck") Screen.NoCheck else if (a.kind == "helper") Screen.Helpers else if (a.kind == "device") Screen.Device else Screen.Pay(a.kind == "bill")) else vm.go(if (a?.kind == "helper") Screen.Helpers else if (a?.kind == "nocheck") Screen.Profile else Screen.Home) }
         if (o.kind == "bad") Btn("Back to home", BtnKind.Secondary) { vm.go(Screen.Home) }
     }
 }
@@ -329,7 +351,7 @@ fun ProfileScreen(vm: AppViewModel) {
                 Tile("shieldCheck")
                 Column(Modifier.weight(1f)) { H3("Protection: ${me.protection.ifBlank { "Basic" }}"); Muted("The ways you can confirm it's you", small = true) }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { me.have.forEach { Chip(it, "ok") } }
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) { me.have.forEach { Chip(it, "ok") } }
         }
         me.learning?.takeIf { it.learning }?.let { l ->
             CardBox {
@@ -343,15 +365,20 @@ fun ProfileScreen(vm: AppViewModel) {
                 LinearProgressIndicator(progress = { learningProgress(l) }, modifier = Modifier.fillMaxWidth(), color = C.brand, trackColor = C.lineSoft, drawStopIndicator = {})
             }
         }
+        me.profile?.let { a ->
+            ListCard(listOf({ Item({ Tile("key") }, "About you", { SubText(if (a.declared) "Your answers help us protect your account" else "Two quick questions, optional") },
+                { Chip(if (a.declared) "Shared" else "Add", if (a.declared) "ok" else "") }, chevron = true) { vm.go(Screen.Questions) } }))
+        }
         ListCard(listOf(
             { Item({ Tile("face") }, "Face check", { SubText(if (me.faceEnrolled) "Set up" else "Not set up yet") }, if (me.faceEnrolled) ({ Chip("Ready", "ok") }) else ({ SoftBtn("Set up") { vm.startSetup("FACE") } })) },
             { Item({ Tile("phone") }, "Voice", { SubText(if (me.voiceEnrolled) "Set up" else "Read three sentences aloud") }, if (me.voiceEnrolled) ({ Chip("Ready", "ok") }) else ({ SoftBtn("Set up") { vm.startSetup("VOICE") } })) },
             { Item({ Tile("lock") }, "Authenticator app", { SubText(if (me.authenticatorEnrolled) "Set up" else "Codes from an app on this phone") }, if (me.authenticatorEnrolled) ({ Chip("Ready", "ok") }) else ({ SoftBtn("Set up") { vm.startSetup("OTP") } })) },
             { Item({ Tile("key") }, "Typing", { SubText(if (me.typingEnrolled) "Set up" else "Your typing rhythm and swipe") }, if (me.typingEnrolled) ({ Chip("Ready", "ok") }) else ({ SoftBtn("Set up") { vm.startSetup("UEBA") } })) },
             { Item({ Tile("shieldCheck") }, "No extra checks", { SubText(noCheckSummary(me)) }, chevron = true) { vm.go(Screen.NoCheck) } },
+            { Item({ Tile("key") }, "Family helper", { SubText(helpersSummary(me)) }, chevron = true) { vm.go(Screen.Helpers) } },
             { Item({ Tile("phone") }, "This phone", { SubText("Calls the bank at ${vm.store.baseUrl}") }, chevron = true) { vm.go(Screen.Settings) } },
         ))
-        Btn("Sign out", BtnKind.Secondary) { vm.logout() }
+        Btn("Sign out", BtnKind.Secondary, busy = vm.busy) { vm.logout() }
     }
 }
 
@@ -380,6 +407,57 @@ fun SettingsScreen(vm: AppViewModel) {
 }
 
 
+private fun helpersSummary(me: Me): String = me.helpers?.helpers?.takeIf { it.isNotEmpty() }?.let { l -> l.joinToString(", ") { it.label } }
+    ?: "Optional. Let a family member help you pay"
+
+/** Signed in on a phone the bank has not seen for this account: verify it before anything else (same wording as the web bank). */
+@Composable
+fun DeviceScreen(vm: AppViewModel) {
+    Page {
+        Spacer(Modifier.height(24.dp))
+        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { ResultMark("warn", "phone") }
+        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            H1("Is this your new phone?", align = TextAlign.Center)
+            Lede("This phone isn't linked to your account yet. A quick check keeps your money safe if someone else has your password.", align = TextAlign.Center)
+        }
+        Messages(vm)
+        Note("brand", "shieldCheck", "We'll ask you to confirm it's you, usually with a code and your face.", "A quick check")
+        Btn("Verify this phone", busy = vm.busy) { vm.startDevice() }
+        Btn("Sign out", BtnKind.Secondary, busy = vm.busy) { vm.logout() }
+        Muted("Didn't sign in yourself? Sign out and change your password.", small = true)
+    }
+}
+
+/** Optional. Someone who gets help paying can let that family member's phone be trusted; the same screen turns this phone into a helper. */
+@Composable
+fun HelpersScreen(vm: AppViewModel) {
+    val me = vm.me ?: return
+    val list = me.helpers?.helpers ?: emptyList()
+    var label by rememberSaveable { mutableStateOf("") }
+    var code by rememberSaveable { mutableStateOf("") }
+    val parsed = parseHelperCode(code)
+    Page {
+        TopBar(title = "Family helper", onBack = { vm.back() })
+        Messages(vm)
+        Note("brand", "shieldCheck", "If a family member sometimes pays for you from their own phone, you can tell us. Their phone is then expected, so your payments through it don't get extra checks that look for strangers. It is optional, and you can remove them any time.", "Optional")
+        if (list.isNotEmpty()) ListCard(list.map { h ->
+            { Item({ Tile("phone") }, h.label, { SubText(helperStateText(h)) }, { SoftBtn("Remove") { vm.removeHelper(h.id) } }) }
+        })
+        if (me.helpers != null && list.size < me.helpers.max) CardBox {
+            H3("Add a helper")
+            Field("Their name (for you)", label, { label = it.take(24) }, enabled = !vm.busy)
+            Btn("Get a code", busy = vm.busy) { vm.startHelper(label) }
+            Muted("You confirm it's you first. Nothing is paid.", small = true)
+        }
+        CardBox {
+            H3("Helping someone with this phone?")
+            Muted("Signed in as them, enter the code from their phone.", small = true)
+            Field("8-digit code", code, { code = it.filter { c -> c.isDigit() }.take(8) }, enabled = !vm.busy, keyboard = KeyboardType.Number)
+            Btn("Use this phone to help", enabled = parsed != null, busy = vm.busy) { parsed?.let { vm.redeemHelper(it); code = "" } }
+        }
+    }
+}
+
 private fun noCheckSummary(me: Me): String = when {
     me.noCheckMinor > 0 -> "Up to ${formatMoney(me.noCheckMinor)} a day" + (me.noCheckPendingMinor?.let { ", raising to ${formatMoney(it)} soon" } ?: "")
     me.noCheckPendingMinor != null -> "Starting soon: up to ${formatMoney(me.noCheckPendingMinor)} a day"
@@ -407,7 +485,7 @@ fun NoCheckScreen(vm: AppViewModel) {
         Note("brand", "shieldCheck", "Payments up to this much a day, to people you've paid before, from this phone, skip the extra checks. New payees, new phones, a lot of payments in a day and anything unusual are still checked. Your bank may also keep some checks it requires by law.", "What this does")
         Note("warn", "shieldClock", "Raising your limit may take effect after a waiting period. Lowering or turning it off is immediate.", "Raised limits wait")
         Btn(if (me.noCheckMinor > 0) "Change limit" else "Set limit", enabled = rupees != null, busy = vm.busy) { rupees?.let { vm.startNoCheck(it) } }
-        if (me.noCheckMinor > 0 || me.noCheckPendingMinor != null) Btn("Turn off", BtnKind.Secondary) { vm.removeNoCheck() }
+        if (me.noCheckMinor > 0 || me.noCheckPendingMinor != null) Btn("Turn off", BtnKind.Secondary, busy = vm.busy) { vm.removeNoCheck() }
     }
 }
 
@@ -421,4 +499,47 @@ fun learningProgress(l: Learning): Float {
     val more = l.moreAtLeast ?: return 0f
     val done = l.verifiedPayments
     return if (done + more == 0) 1f else done.toFloat() / (done + more)
+}
+
+
+/** Two optional questions at sign-up. Each answer is a band; the model uses them only until the customer's own payments are enough. */
+@Composable
+fun QuestionsScreen(vm: AppViewModel) {
+    val a = vm.me?.profile
+    var month by rememberSaveable { mutableStateOf(a?.monthBand ?: -1) }
+    var typical by rememberSaveable { mutableStateOf(a?.typicalBand ?: -1) }
+    Page {
+        TopBar(label = "Optional · about 20 seconds", onBack = { vm.back() })
+        H1("Help us protect you")
+        Lede("Two questions about how you use your account. We use your answers only to spot payments that don't look like you, and you can remove them any time in Profile.")
+        Messages(vm)
+        CardBox {
+            H3("About how much do you send in a month?")
+            (a?.monthLabels ?: emptyList()).forEachIndexed { i, label -> ChoiceRow(label, month == i) { month = if (month == i) -1 else i } }
+        }
+        CardBox {
+            H3("What is a typical payment?")
+            (a?.typicalLabels ?: emptyList()).forEachIndexed { i, label -> ChoiceRow(label, typical == i) { typical = if (typical == i) -1 else i } }
+        }
+        Btn(if (month < 0 && typical < 0) "Skip" else "Save", busy = vm.busy) {
+            if (month < 0 && typical < 0) vm.skipQuestions() else vm.saveAnswers(month.takeIf { it >= 0 }, typical.takeIf { it >= 0 })
+        }
+        if (vm.me?.helpers != null) Muted("Does a family member help you pay? You can add them any time from Profile, Family helper. Optional.", small = true)
+        if (a?.declared == true) LinkText("Remove my answers", modifier = Modifier.align(Alignment.CenterHorizontally)) { vm.removeAnswers() }
+        else LinkText("Not now", modifier = Modifier.align(Alignment.CenterHorizontally)) { vm.skipQuestions() }
+    }
+}
+
+@Composable
+private fun ChoiceRow(label: String, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(if (selected) C.brandSoft else C.card)
+            .clickable(role = Role.RadioButton, onClick = onClick).padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Box(Modifier.size(20.dp).clip(CircleShape).background(if (selected) C.brand else C.line), contentAlignment = Alignment.Center) {
+            if (selected) Box(Modifier.size(8.dp).clip(CircleShape).background(C.bg))
+        }
+        Text(label, color = C.ink, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
+    }
 }

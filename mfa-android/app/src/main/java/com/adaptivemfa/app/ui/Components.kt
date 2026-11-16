@@ -37,6 +37,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -150,13 +152,17 @@ fun Btn(text: String, kind: BtnKind = BtnKind.Primary, enabled: Boolean = true, 
         BtnKind.Secondary -> Triple(C.card, C.ink, C.line)
         BtnKind.Danger -> Triple(C.card, C.bad, C.bad)
     }
+    // while a request is in flight every button is off, but only the one that was pressed shows the spinner; the others just dim
+    var pressed by remember { mutableStateOf(false) }
+    LaunchedEffect(busy) { if (!busy) pressed = false }
+    val spinning = busy && pressed
     Box(
-        Modifier.fillMaxWidth().heightIn(min = 56.dp).alpha(if (enabled) 1f else 0.5f).clip(RoundedCornerShape(16.dp)).background(bg)
+        Modifier.fillMaxWidth().heightIn(min = 56.dp).alpha(if (enabled && !(busy && !pressed)) 1f else 0.5f).clip(RoundedCornerShape(16.dp)).background(bg)
             .then(if (border != null) Modifier.border(BorderStroke(1.5.dp, border), RoundedCornerShape(16.dp)) else Modifier)
-            .clickable(enabled = enabled && !busy, role = Role.Button, onClick = onClick).padding(horizontal = 20.dp),
+            .clickable(enabled = enabled && !busy, role = Role.Button, onClick = { pressed = true; onClick() }).padding(horizontal = 20.dp),
         contentAlignment = Alignment.Center,
     ) {
-        if (busy) CircularProgressIndicator(Modifier.size(22.dp), color = fg, strokeWidth = 2.5.dp)
+        if (spinning) CircularProgressIndicator(Modifier.size(22.dp), color = fg, strokeWidth = 2.5.dp)
         else Text(text, color = fg, fontSize = 16.sp, fontWeight = FontWeight.Bold)
     }
 }
@@ -377,6 +383,9 @@ fun Busy(text: String) {
 fun CodeBoxes(value: String, onChange: (String) -> Unit, enabled: Boolean = true) {
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
+    val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+    // open the keyboard as soon as the boxes are shown: the customer came here to type a code
+    LaunchedEffect(enabled) { if (enabled) runCatching { focus.requestFocus() } }
     Box(Modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             repeat(6) { i ->
@@ -389,7 +398,7 @@ fun CodeBoxes(value: String, onChange: (String) -> Unit, enabled: Boolean = true
             }
         }
         BasicTextField(
-            value, { onChange(it.filter(Char::isDigit).take(6)) }, Modifier.matchParentSize().alpha(0f), enabled = enabled, singleLine = true,
+            value, { onChange(it.filter(Char::isDigit).take(6)) }, Modifier.matchParentSize().alpha(0f).focusRequester(focus), enabled = enabled, singleLine = true,
             interactionSource = interaction, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
         )
     }

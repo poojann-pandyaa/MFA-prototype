@@ -65,7 +65,8 @@ class DeviceKeyTest {
 
     private val ENROL_LINK = ok("""{"url":"http://127.0.0.1:8040/hosted/enroll#token=enr-tok"}""")
     private val ME = ok("""{"name":"Alice Rao","balance":50000000,"enrolled":null,"protection":{"level":"Basic"},"payees":[{"ref":"BEN-42","display":"V. Mehta"}],
-        "learning":{"enabled":true,"phase":"LEARNING","verifiedPayments":3,"offerBiometrics":false,"progress":{"payments":3,"moreAtLeast":9,"missing":["proven"]}}}""")
+        "learning":{"enabled":true,"phase":"LEARNING","verifiedPayments":3,"offerBiometrics":false,"progress":{"payments":3,"moreAtLeast":9,"missing":["proven"]}},
+        "profile":{"declared":false,"monthBand":null,"typicalBand":null,"monthLabels":["Under ₹10,000","₹10,000 to ₹50,000","₹50,000 to ₹2 lakh","₹2 to ₹10 lakh","More than ₹10 lakh"],"typicalLabels":["Up to ₹500","₹500 to ₹2,000","₹2,000 to ₹10,000","₹10,000 to ₹50,000","More than ₹50,000"]}}""")
     private val CHALLENGE_URL = "http://127.0.0.1:8040/hosted/challenge?t=demo-bank&embed=1#token=sess-tok"
     private val DEVICE_STARTED = HttpResultOf("""{"action":{"id":"ACT1","kind":"transfer","status":"AWAITING_VERIFICATION","amountMinor":150000,"checks":["fingerprint or screen lock"],"payee":{"display":"V. Mehta","initials":"VM"}},"challengeUrl":"$CHALLENGE_URL"}""")
     private val SESSION = ok("""{"sessionId":"sess_1","status":"PENDING","approving":{"amount":"₹1,500.00","payee":"V. Mehta"},"steps":[{"factor":"DEVICE","status":"PENDING"}],
@@ -77,7 +78,7 @@ class DeviceKeyTest {
     private fun routes() = RoutedHttp("POST /api/login" to ok("""{"signedIn":true}"""), "GET /api/me" to ME, "GET /api/activity" to ok("""{"activity":[]}"""),
         "POST /api/amfa/enrol" to ENROL_LINK, "POST /c/v1/enrollment/device" to ok("""{"bound":true}"""), "POST /c/v1/enrollment/complete" to ok("""{"complete":true}"""),
         "POST /api/actions/transfer" to DEVICE_STARTED, "GET /c/v1/session" to SESSION, "POST /c/v1/session/factors/DEVICE" to PASSED,
-        "POST /api/actions/ACT1/complete" to DONE)
+        "POST /api/actions/ACT1/complete" to DONE, "POST /api/profile" to ok("""{"declared":true}"""), "DELETE /api/profile" to ok("""{"declared":false}"""))
 
     private fun vm(http: RoutedHttp, signer: DeviceSigner, settings: InMemorySettings = InMemorySettings(deviceId = "android_0123456789ab")) =
         AppViewModel(settings, BankApi(http, { settings.baseUrl }, { settings.deviceId }), { link -> AmfaApi(http, link, secure = true) }, dispatcher, signer)
@@ -122,14 +123,14 @@ class DeviceKeyTest {
         }
     }
 
-    @Test fun openingAnAccountAtABankThatLearnsItsCustomersSkipsFaceSetupAndStillGivesAmfaTheKey() {
+    @Test fun openingAnAccountAtABankThatLearnsItsCustomersAsksTwoOptionalQuestionsNotForAFaceAndStillGivesAmfaTheKey() {
         val inner = routes(); inner.routes["POST /api/register"] = ok("""{"registered":true}""")
         val learning = inner.routes["GET /api/me"]!!
         inner.routes["GET /api/me"] = ok("""{"name":"A","balance":1,"enrolled":null,"protection":{"level":"Basic"},"payees":[]}""")   // before AMFA knows the customer
         val http = BankThatKnowsAfterEnrolment(inner, learning); val signer = FakeSigner(); val settings = InMemorySettings(deviceId = "android_0123456789ab")
         val v = AppViewModel(settings, BankApi(http, { settings.baseUrl }, { settings.deviceId }), { link -> AmfaApi(http, link, secure = true) }, dispatcher, signer)
         v.signUp("riyapatel1", "Riya Patel", "9812345678", "riya@example.com", "long-password-1")
-        assertEquals(Screen.Home, v.screen)                                   // not the "Let's protect your account" face step
+        assertEquals(Screen.Questions, v.screen)                              // the two optional questions, not the "Let's protect your account" face step
         assertTrue(inner.called("/enrollment/device")); assertNotNull(signer.pair)
     }
 
@@ -211,5 +212,37 @@ class DeviceKeyTest {
     @Test fun aBankThatDoesNotUseTheLearningPhaseShowsNothing() {
         val http = routes(); http.routes["GET /api/me"] = ok("""{"name":"A","balance":1,"enrolled":null,"protection":{"level":"Basic"},"payees":[],"learning":{"enabled":false,"phase":"READY"}}""")
         assertNull(vm(http, FakeSigner()).also { it.signIn("alice", "pw") }.me!!.learning)
+    }
+
+    // ---- the sign-up questions
+
+    @Test fun theAnswersAreSentAsBandsAndEitherCanBeLeftOut() {
+        val http = routes(); val v = vm(http, FakeSigner()).also { it.signIn("alice", "pw") }
+        v.go(Screen.Questions)
+        v.saveAnswers(2, null)
+        val sent = JSONObject(http.last("/api/profile").body!!)
+        assertEquals(2, sent.getInt("monthBand")); assertTrue(sent.isNull("typicalBand"))
+        assertEquals(Screen.Home, v.screen); assertEquals("Thanks. We use this only to protect your account.", v.notice)
+    }
+
+    @Test fun skippingTheQuestionsSendsNothing() {
+        val http = routes(); val v = vm(http, FakeSigner()).also { it.signIn("alice", "pw") }
+        v.go(Screen.Questions); v.skipQuestions()
+        assertEquals(Screen.Home, v.screen); assertFalse(http.called("/api/profile"))
+        v.go(Screen.Questions); v.saveAnswers(null, null)                                      // chose nothing: same as skipping, no notice
+        assertEquals(Screen.Home, v.screen); assertNull(v.notice)
+    }
+
+    @Test fun theBanksWordingForEachBandIsShownAndTheCustomerCanTakeTheirAnswersBack() {
+        val http = routes(); val v = vm(http, FakeSigner()).also { it.signIn("alice", "pw") }
+        val a = v.me!!.profile!!
+        assertFalse(a.declared); assertEquals(5, a.monthLabels.size); assertEquals("Up to ₹500", a.typicalLabels[0])
+        v.removeAnswers()
+        assertTrue(http.called("/api/profile")); assertEquals(Screen.Profile, v.screen); assertEquals("Your answers were removed.", v.notice)
+    }
+
+    @Test fun backingOutOfTheQuestionsGoesHomeFromSignUpAndToProfileWhenEditing() {
+        val v = vm(routes(), FakeSigner()).also { it.signIn("alice", "pw") }
+        v.go(Screen.Questions); v.back(); assertEquals(Screen.Home, v.screen)
     }
 }

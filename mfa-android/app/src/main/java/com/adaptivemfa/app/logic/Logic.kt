@@ -1,5 +1,6 @@
 package com.adaptivemfa.app.logic
 
+import com.adaptivemfa.app.data.Helper
 import java.util.Base64
 import java.util.Locale
 
@@ -48,14 +49,17 @@ fun parseRupees(text: String): Double? {
 }
 
 /** The bank's own sign-up rules, so the button stays off until the form can pass. Null means fine. */
-fun registrationProblem(username: String, name: String, phone: String, email: String, password: String, confirm: String): String? = when {
-    !Regex("^[a-z0-9][a-z0-9_-]{2,23}$").matches(username) -> "Username: 3 to 24 lowercase letters, digits, - or _"
-    name.trim().length < 2 -> "Enter your full name"
-    !Regex("^\\+?[0-9]{10,13}$").matches(phone) -> "Mobile number: 10 to 13 digits"
-    !Regex("^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,180}\\.[A-Za-z]{2,24}$").matches(email.trim()) -> "Enter a valid email address"
-    password.length < 8 -> "Password: at least 8 characters"
-    confirm != password -> "Passwords do not match"
-    else -> null
+fun registrationProblem(username: String, name: String, phone: String, email: String, password: String, confirm: String): String? =
+    registrationProblems(username, name, phone, email, password, confirm).values.firstOrNull()
+
+/** Every problem with the sign-up form, keyed by the field it belongs to ("name", "email", "phone", "username", "password"), in form order. */
+fun registrationProblems(username: String, name: String, phone: String, email: String, password: String, confirm: String): Map<String, String> = buildMap {
+    if (name.trim().length < 2) put("name", "Enter your full name")
+    if (!Regex("^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,180}\\.[A-Za-z]{2,24}$").matches(email.trim())) put("email", "Enter a valid email address")
+    if (!Regex("^\\+?[0-9]{10,13}$").matches(phone)) put("phone", "Mobile number: 10 to 13 digits")
+    if (!Regex("^[a-z0-9][a-z0-9_-]{2,23}$").matches(username)) put("username", "Username: 3 to 24 lowercase letters, digits, - or _")
+    if (password.length < 8) put("password", "Password: at least 8 characters")
+    else if (confirm != password) put("password", "Passwords do not match")
 }
 
 /** AMFA's reason codes for a rejected face enrolment, in words. */
@@ -123,6 +127,22 @@ fun noCheckOutcome(rupees: String, waitingHours: Long?): Outcome =
         "No extra checks up to $rupees a day will start in about ${maxOf(1, waitingHours)} hours. Until then your current setting stays. We wait before raising it to keep your account safe.")
     else Outcome("ok", "shieldCheck", "No extra checks up to $rupees a day",
         "Payments within this to people you've paid before, from this phone, skip the extra checks. New payees, new phones and anything unusual are still checked.")
+
+fun deviceOutcome(): Outcome = Outcome("ok", "phone", "This phone is verified", "You can bank from it now. If you didn't do this, change your password and call us.")
+
+/** The 8 digits a family helper's phone is given, or null. */
+fun parseHelperCode(text: String): String? = text.filter { it.isDigit() }.takeIf { it.length == 8 }
+
+/** What the customer is told once a helper invite exists. The code itself is shown on the result screen. */
+fun helperOutcome(label: String): Outcome =
+    Outcome("ok", "shieldCheck", "Ready for ${label.ifBlank { "your helper" }}",
+        "On their phone, open this app, sign in as you, then Profile, Family helper, and enter the code below within 15 minutes. After a short wait their phone is trusted to help you pay. You can remove it any time.")
+
+fun helperStateText(h: Helper): String = when (h.state) {
+    "ACTIVE" -> "Can help you pay"
+    "WAITING" -> "Starts after a short wait, for your safety"
+    else -> "Waiting for them to enter the code"
+}
 
 fun outcomeFor(status: String, detail: String?, rupees: String, payee: String, bill: Boolean): Outcome = when (status) {
     "DONE" -> Outcome("ok", "check", "$rupees ${if (bill) "paid" else "sent"}", "to $payee")

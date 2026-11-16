@@ -54,7 +54,7 @@ import com.adaptivemfa.app.logic.Challenge
 import com.adaptivemfa.app.logic.Pose
 import com.adaptivemfa.app.logic.PoseCoach
 import com.adaptivemfa.app.logic.jpegDataUrl
-import com.adaptivemfa.app.logic.registrationProblem
+import com.adaptivemfa.app.logic.registrationProblems
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -101,21 +101,22 @@ fun SignUpScreen(vm: AppViewModel) {
     var password by rememberSaveable { mutableStateOf("") }
     var touched by rememberSaveable { mutableStateOf(false) }
     val digits = phone.filter(Char::isDigit)
-    val problem = registrationProblem(user.trim().lowercase(), name, digits, email, password, password)
+    val problems = registrationProblems(user.trim().lowercase(), name, digits, email, password, password)
     Page {
         TopBar(onBack = { vm.back() })
         H1("Open an account")
         Lede("It takes about a minute. Use an email you can open on this phone: your one-time codes go there.")
         Messages(vm)
-        Field("Full name", name, { name = it }, enabled = !vm.busy)
-        Field("Email (we send your one-time codes here)", email, { email = it }, enabled = !vm.busy, keyboard = KeyboardType.Email, placeholder = "you@example.com")
-        Field("Mobile number", phone, { phone = it.filter(Char::isDigit).take(10) }, enabled = !vm.busy, keyboard = KeyboardType.Phone, prefix = "+91", placeholder = "98123 45678")
-        Field("Username", user, { user = it }, enabled = !vm.busy)
-        Field("Password", password, { password = it }, enabled = !vm.busy, password = true,
-            error = if (touched && problem != null) problem else null)
+        // each problem sits under its own field once the customer has tried to continue
+        fun err(field: String) = if (touched) problems[field] else null
+        Field("Full name", name, { name = it }, enabled = !vm.busy, error = err("name"))
+        Field("Email (we send your one-time codes here)", email, { email = it }, enabled = !vm.busy, keyboard = KeyboardType.Email, placeholder = "you@example.com", error = err("email"))
+        Field("Mobile number", phone, { phone = it.filter(Char::isDigit).take(10) }, enabled = !vm.busy, keyboard = KeyboardType.Phone, prefix = "+91", placeholder = "98123 45678", error = err("phone"))
+        Field("Username", user, { user = it }, enabled = !vm.busy, error = err("username"))
+        Field("Password", password, { password = it }, enabled = !vm.busy, password = true, error = err("password"))
         Btn("Open account", busy = vm.busy) {
             touched = true
-            if (problem == null) vm.signUp(user, name, "+91$digits", email, password)
+            if (problems.isEmpty()) vm.signUp(user, name, "+91$digits", email, password)
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
             Muted("Already a customer? "); LinkText("Sign in") { vm.go(Screen.SignIn) }
@@ -239,18 +240,21 @@ fun FaceSetupScreen(vm: AppViewModel, s: Screen.FaceSetup) {
 @Composable
 fun VerifyScreen(vm: AppViewModel, s: Screen.Verify) {
     val ch = s.session.challenge
+    // a payment is "₹250 to Dairy Ram"; an account change (verify this phone, add a helper, set a limit) is described by its own title
+    val act = vm.pending?.action?.takeIf { it.id == s.actionId && it.kind != "transfer" && it.kind != "bill" }
+    val approving = act?.title ?: "${s.session.amount} to ${s.session.payee}"
     Page {
         TopBar(label = "Confirm it's you", onBack = { vm.back() })
         StepsBar(s.session.steps.indexOfFirst { it == ch?.factor }.coerceAtLeast(0) + 1, s.session.steps.size.coerceAtLeast(1))
         CardBox {
             Muted("You're approving", small = true)
-            H2("${s.session.amount} to ${s.session.payee}")
+            H2(approving)
         }
         Messages(vm)
         when (ch?.factor) {
             "FACE" -> FaceCheck(vm, ch)
-            "OTP" -> CodeCheck(vm, ch)
-            "DEVICE" -> DeviceCheck(vm, ch, "${s.session.amount} to ${s.session.payee}")
+            "OTP" -> CodeCheck(vm, ch, payment = act == null)
+            "DEVICE" -> DeviceCheck(vm, ch, approving)
             "VOICE" -> VoiceCheck(vm, ch)
             "UEBA" -> TypingCheck(vm, ch)
             else -> {
@@ -272,11 +276,11 @@ private fun FaceCheck(vm: AppViewModel, ch: AmfaChallenge) {
 }
 
 @Composable
-private fun CodeCheck(vm: AppViewModel, ch: AmfaChallenge) {
+private fun CodeCheck(vm: AppViewModel, ch: AmfaChallenge, payment: Boolean = true) {
     var code by rememberSaveable { mutableStateOf("") }
     CardBox {
         H3(if (ch.mode == "totp") "Enter your authenticator code" else "Enter the code we sent")
-        Muted(if (ch.mode == "totp") "Open your authenticator app and enter the 6-digit code for this bank." else "We sent it to ${ch.sentTo ?: "you"}. The message names this amount and payee, so check they match.")
+        Muted(if (ch.mode == "totp") "Open your authenticator app and enter the 6-digit code for this bank." else "We sent it to ${ch.sentTo ?: "you"}." + if (payment) " The message names this amount and payee, so check they match." else " The message names what you are approving, so check it matches.")
         val keyboard = LocalSoftwareKeyboardController.current
         CodeBoxes(code, { code = it; if (it.length == 6) keyboard?.hide() }, enabled = !vm.busy)   // the keyboard would cover Confirm
         if (ch.mode != "totp") LinkText("Send a new code", small = true, modifier = Modifier.align(Alignment.CenterHorizontally)) { vm.resendCode() }
@@ -297,9 +301,10 @@ private fun DeviceCheck(vm: AppViewModel, ch: AmfaChallenge, what: String) {
         if (r.resultCode == Activity.RESULT_OK) vm.deviceUnlocked() else vm.deviceUnlockCancelled()
     }
     LaunchedEffect(ch.id) { vm.signDevice() }
-    LaunchedEffect(vm.deviceUnlock) {
+    // keyed on a counter, not the flag: asking again while the flag is still true (a prompt that never reported back) must open it again
+    LaunchedEffect(vm.deviceUnlockAsks) {
         if (vm.deviceUnlock) {
-            val intent = ctx.getSystemService(KeyguardManager::class.java)?.createConfirmDeviceCredentialIntent("Confirm payment", what)
+            val intent = ctx.getSystemService(KeyguardManager::class.java)?.createConfirmDeviceCredentialIntent("Confirm it's you", what)
             if (intent == null) vm.deviceUnlockCancelled() else launcher.launch(intent)
         }
     }
@@ -308,7 +313,7 @@ private fun DeviceCheck(vm: AppViewModel, ch: AmfaChallenge, what: String) {
             Tile("lock")
             Column(Modifier.weight(1f)) {
                 H3("Use your fingerprint or screen lock")
-                Muted("Your phone checks it's you, then confirms this payment. Nothing is sent from your fingerprint.", small = true)
+                Muted("Your phone checks it's you, then confirms this. Nothing is sent from your fingerprint.", small = true)
             }
         }
     }

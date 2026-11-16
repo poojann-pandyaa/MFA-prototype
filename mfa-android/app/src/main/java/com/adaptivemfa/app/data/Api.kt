@@ -12,6 +12,9 @@ private fun call(http: Http, method: String, url: String, body: JSONObject? = nu
     if (body != null) headers["Content-Type"] = "application/json"
     val result = try {
         http.request(method, url, headers, body?.toString())
+    } catch (e: java.net.SocketTimeoutException) {
+        // it answered the connection but not the request: slow, not missing
+        throw ApiException(0, "${url.substringAfter("://").substringBefore('/')} is taking too long to answer. Nothing was changed on your side; please try again.")
     } catch (e: IOException) {
         throw ApiException(0, "Cannot reach ${url.substringAfter("://").substringBefore('/')}. Is it running, and is the address right (Settings)?")
     }
@@ -49,7 +52,19 @@ data class Me(
     val noCheckPendingMinor: Long? = null,
     val noCheckPendingFrom: Double? = null,
     val learning: Learning? = null,
+    val profile: Answers? = null,
+    /** Optional family helpers; null when the bank does not offer them. */
+    val helpers: HelpersView? = null,
+    /** False on a phone the bank has not verified for this account yet: it must be verified before anything else (see Screen.Device). */
+    val deviceTrusted: Boolean = true,
 )
+
+/** A family member's phone the customer let help with payments. [state] is INVITED (code not yet used), WAITING (starts after the bank's delay) or ACTIVE. */
+data class Helper(val id: String, val label: String, val state: String)
+data class HelpersView(val max: Int, val helpers: List<Helper>)
+
+/** What the customer chose to tell us at sign-up (bands, both optional) and the wording of each band. */
+data class Answers(val declared: Boolean, val monthBand: Int?, val typicalBand: Int?, val monthLabels: List<String>, val typicalLabels: List<String>)
 
 /** How far AMFA is from knowing this customer's habits. While [learning] they confirm payments with the phone's fingerprint or screen lock. */
 data class Learning(val learning: Boolean, val verifiedPayments: Int, val moreAtLeast: Int?, val offerBiometrics: Boolean)
@@ -72,6 +87,8 @@ data class ActivityItem(
     val confirmedWith: List<String> = emptyList(),
     val canContinue: Boolean = false,
     val reported: Boolean = false,
+    /** Set once, on a finished "add a helper": the code the family member's phone enters. */
+    val helperCode: String? = null,
 )
 
 /** Where AMFA's own API lives for one approval or one enrolment, and the single-use token for it. */
@@ -90,7 +107,8 @@ data class Settled(val action: ActivityItem, val balanceMinor: Long) {
 private fun JSONObject.texts(key: String): List<String> =
     optJSONArray(key)?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: emptyList()
 
-private fun JSONObject.optNullable(key: String): String? = if (isNull(key)) null else optString(key).ifEmpty { null }
+/** A JSON null is not the text "null": org.json's optString returns that for a null value. */
+private fun JSONObject?.optNullable(key: String): String? = if (this == null || isNull(key)) null else optString(key).ifEmpty { null }
 
 fun parseAction(a: JSONObject): ActivityItem {
     val p = a.optJSONObject("payee")
@@ -101,6 +119,7 @@ fun parseAction(a: JSONObject): ActivityItem {
         checks = a.texts("checks"), reason = a.optNullable("reason"), scamWarning = a.optBoolean("scamWarning", false),
         reviewAfter = a.optBoolean("reviewAfter", false), confirmedWith = a.texts("confirmedWith"),
         canContinue = a.optBoolean("canContinue", false), reported = a.optBoolean("reported", false),
+        helperCode = a.optNullable("helperCode"),
     )
 }
 
@@ -151,6 +170,16 @@ class BankApi(
             noCheckMinor = j.optJSONObject("noCheck")?.optLong("limit") ?: 0,
             noCheckPendingMinor = j.optJSONObject("noCheck")?.let { if (it.isNull("pending")) null else it.optLong("pending") },
             noCheckPendingFrom = j.optJSONObject("noCheck")?.let { if (it.isNull("pendingFrom")) null else it.optDouble("pendingFrom") },
+            profile = j.optJSONObject("profile")?.let { p ->
+                fun labels(k: String) = p.optJSONArray(k)?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList()
+                Answers(p.optBoolean("declared"), if (p.isNull("monthBand")) null else p.optInt("monthBand"),
+                    if (p.isNull("typicalBand")) null else p.optInt("typicalBand"), labels("monthLabels"), labels("typicalLabels"))
+            },
+            deviceTrusted = j.optBoolean("deviceTrusted", true),
+            helpers = j.optJSONObject("helpers")?.takeIf { it.optBoolean("enabled", false) }?.let { h ->
+                val arr = h.optJSONArray("helpers")
+                HelpersView(h.optInt("max", 2), arr?.let { a -> (0 until a.length()).map { i -> a.getJSONObject(i).let { x -> Helper(x.getString("id"), x.optString("label"), x.optString("state")) } } } ?: emptyList())
+            },
             learning = j.optJSONObject("learning")?.takeIf { it.optBoolean("enabled", false) }?.let {
                 Learning(it.optString("phase") == "LEARNING", it.optInt("verifiedPayments"),
                     it.optJSONObject("progress")?.let { p -> if (p.isNull("moreAtLeast")) null else p.optInt("moreAtLeast") }, it.optBoolean("offerBiometrics"))
@@ -183,6 +212,31 @@ class BankApi(
 
     /** Sets the customer's own no-extra-check limit. It is a checked account change, like a payment: AMFA decides the checks. */
     fun startNoCheck(rupees: Double) = start("nocheck", JSONObject().put("limitRupees", rupees))
+
+    /** Verifies this phone for the account: a checked account change, so AMFA decides the checks. */
+    fun startDevice() = start("device", JSONObject())
+
+    /** Starts adding a family helper (optional): a checked account change, like the limit. The code comes back when it is done. */
+    fun startHelper(label: String) = start("helper", JSONObject().put("label", label))
+
+    /** Run on the family member's phone, signed in as the customer: the code from the customer's own phone makes this phone a helper. */
+    fun redeemHelper(code: String) {
+        call(http, "POST", url("/api/helpers/redeem"), JSONObject().put("code", code).put("deviceId", deviceId()))
+    }
+
+    /** Removing a helper only lowers trust, so being signed in is enough. */
+    fun removeHelper(id: String) {
+        call(http, "DELETE", url("/api/helpers/$id"))
+    }
+
+    /** The sign-up questions: each answer is a band, either may be left out. */
+    fun saveAnswers(monthBand: Int?, typicalBand: Int?) {
+        call(http, "POST", url("/api/profile"), JSONObject().put("monthBand", monthBand ?: JSONObject.NULL).put("typicalBand", typicalBand ?: JSONObject.NULL))
+    }
+
+    fun removeAnswers() {
+        call(http, "DELETE", url("/api/profile"))
+    }
 
     /** Turning it off only adds checks, so it needs nothing beyond being signed in. */
     fun removeNoCheck() {
@@ -348,7 +402,7 @@ class AmfaApi(private val http: Http, private val link: AmfaLink, private val se
             JSONObject().put("challengeId", challengeId).put("payload", body), link.token)
         val r = j.optJSONObject("result")
         return Submitted(r?.optString("status") ?: "", r?.optBoolean("retry", false) ?: false,
-            r?.optString("guidance")?.ifEmpty { null }, parseSession(j.getJSONObject("state")))
+            r.optNullable("guidance"), parseSession(j.getJSONObject("state")))
     }
 }
 
@@ -364,12 +418,12 @@ fun parseSession(j: JSONObject): SessionState {
         payee = approving?.optString("payee") ?: "",
         steps = steps?.let { a -> (0 until a.length()).map { a.getJSONObject(it).optString("factor") } } ?: emptyList(),
         challenge = ch?.let {
-            AmfaChallenge(it.getString("challengeId"), it.optString("factor"), p?.optString("action")?.ifEmpty { null },
-                p?.optInt("frames", 20) ?: 20, p?.optLong("intervalMs", 150) ?: 150, p?.optString("mode")?.ifEmpty { null },
-                p?.optString("sentTo")?.ifEmpty { null },
-                prompt = p?.optString("prompt")?.ifEmpty { null }, minSeconds = p?.optInt("minSeconds", 3) ?: 3, maxSeconds = p?.optInt("maxSeconds", 10) ?: 10,
-                phrase = p?.optString("phrase")?.ifEmpty { null }, shape = parseShape(p?.optJSONArray("shape")), input = p?.optString("input")?.ifEmpty { null },
-                message = p?.optString("message")?.ifEmpty { null })
+            AmfaChallenge(it.getString("challengeId"), it.optString("factor"), p.optNullable("action"),
+                p?.optInt("frames", 20) ?: 20, p?.optLong("intervalMs", 150) ?: 150, p.optNullable("mode"),
+                p.optNullable("sentTo"),
+                prompt = p.optNullable("prompt"), minSeconds = p?.optInt("minSeconds", 3) ?: 3, maxSeconds = p?.optInt("maxSeconds", 10) ?: 10,
+                phrase = p.optNullable("phrase"), shape = parseShape(p?.optJSONArray("shape")), input = p.optNullable("input"),
+                message = p.optNullable("message"))
         },
     )
 }

@@ -24,6 +24,8 @@ import com.adaptivemfa.app.data.Submitted
 import com.adaptivemfa.app.logic.Outcome
 import com.adaptivemfa.app.logic.setupReason
 import com.adaptivemfa.app.logic.formatMoney
+import com.adaptivemfa.app.logic.deviceOutcome
+import com.adaptivemfa.app.logic.helperOutcome
 import com.adaptivemfa.app.logic.noCheckOutcome
 import com.adaptivemfa.app.logic.normalizeBaseUrl
 import com.adaptivemfa.app.logic.outcomeFor
@@ -64,6 +66,12 @@ sealed interface Screen {
     data object Profile : Screen
     /** The customer's own "no extra checks up to this much a day". */
     data object NoCheck : Screen
+    /** Signed in on a phone the bank has not verified yet: nothing else opens until it is. */
+    data object Device : Screen
+    /** Optional: let a family member's phone help with payments, and use this phone as a helper. */
+    data object Helpers : Screen
+    /** The two optional sign-up questions (how much a month, what a typical payment is). */
+    data object Questions : Screen
     data object Settings : Screen
 }
 
@@ -95,7 +103,8 @@ class AppViewModel(
     var demoCode by mutableStateOf<String?>(null)
         private set
     private var amfa: AmfaApi? = null
-    private var pending: Started? = null
+    var pending: Started? = null
+        private set
 
     fun go(to: Screen) {
         error = null
@@ -117,7 +126,8 @@ class AppViewModel(
             Screen.SignIn, Screen.SignUp -> go(Screen.Welcome)
             is Screen.FaceSetup, is Screen.VoiceSetup, is Screen.TypingSetup, is Screen.AuthenticatorSetup -> { go(Screen.Home); notice = "You can set this up later from Profile." }
             is Screen.Amount -> go(Screen.Pay(s.kind == "bill"))
-            Screen.NoCheck -> go(Screen.Profile)
+            Screen.NoCheck, Screen.Helpers -> go(Screen.Profile)
+            Screen.Questions -> go(if (me?.profile?.declared == true) Screen.Profile else Screen.Home)
             is Screen.Review -> cancelReview()
             is Screen.Verify -> cancelVerify()
             is Screen.Pay -> go(Screen.Home)
@@ -130,6 +140,7 @@ class AppViewModel(
         viewModelScope.launch {
             busy = true
             error = null
+            notice = null
             try {
                 block()
             } catch (e: ApiException) {
@@ -194,7 +205,7 @@ class AppViewModel(
         // is offered later from Home and Profile. A phone with no screen lock has no key, so it still gets the face and typing setup.
         ensureDeviceKey()
         try { refresh() } catch (_: ApiException) { }
-        go(if (me?.learning != null) Screen.Home else Screen.Setup)
+        go(if (me?.learning != null) Screen.Questions else Screen.Setup)
     }
 
     fun logout() = run { withContext(io) { try { bank.logout() } catch (_: ApiException) { } }; signOut(null) }
@@ -295,6 +306,16 @@ class AppViewModel(
     // ------------------------------------------------------------ paying: the bank starts it, AMFA decides the checks
 
     /** [kind] is "transfer" (ref is a payee) or "bill" (ref is a biller). Shows the review screen with AMFA's plan. */
+    /** True on a phone the bank has not verified for this account. */
+    val untrusted: Boolean get() = me?.deviceTrusted == false
+
+    /** "Verify this phone": the same checked flow as a payment (review, AMFA's checks, then the bank links the phone). */
+    fun startDevice() = run {
+        val started = withContext(io) { bank.startDevice() }
+        pending = started
+        screen = Screen.Review(started)
+    }
+
     fun startPayment(kind: String, ref: String, rupees: Double) = run {
         val started = withContext(io) { if (kind == "bill") bank.startBill(ref, rupees) else bank.startTransfer(ref, rupees) }
         pending = started
@@ -306,6 +327,42 @@ class AppViewModel(
         val started = withContext(io) { bank.startNoCheck(rupees.toDouble()) }
         pending = started
         screen = Screen.Review(started)
+    }
+
+    /** Adding a helper is checked like a payment: review, then AMFA's checks, then the bank applies it and returns the code. */
+    fun startHelper(label: String) = run {
+        val started = withContext(io) { bank.startHelper(label.trim().ifBlank { "Family" }) }
+        pending = started
+        screen = Screen.Review(started)
+    }
+
+    fun redeemHelper(code: String) = run {
+        withContext(io) { bank.redeemHelper(code) }
+        refresh()
+        notice = "Done. This phone is now a helper for this account."
+    }
+
+    fun removeHelper(id: String) = run {
+        withContext(io) { bank.removeHelper(id) }
+        refresh()
+        notice = "Helper removed."
+    }
+
+    /** Saves the answers (either may be null) and goes home. Optional: they only give the model something to compare with at first. */
+    fun saveAnswers(monthBand: Int?, typicalBand: Int?) = run {
+        withContext(io) { bank.saveAnswers(monthBand, typicalBand) }
+        refresh()
+        go(Screen.Home)
+        notice = if (monthBand == null && typicalBand == null) null else "Thanks. We use this only to protect your account."
+    }
+
+    fun skipQuestions() = go(Screen.Home)
+
+    fun removeAnswers() = run {
+        withContext(io) { bank.removeAnswers() }
+        refresh()
+        go(Screen.Profile)
+        notice = "Your answers were removed."
     }
 
     fun removeNoCheck() = run {
@@ -331,6 +388,10 @@ class AppViewModel(
     var deviceUnlock by mutableStateOf(false)
         private set
 
+    /** Counts every request to show the lock screen, so a second request opens it again even if the first never reported back. */
+    var deviceUnlockAsks by mutableStateOf(0)
+        private set
+
     /** The device check: the phone's key signs AMFA's challenge. If the lock screen has not been confirmed, the screen is asked to do that. */
     fun signDevice() {
         val v = screen as? Screen.Verify ?: return
@@ -338,6 +399,7 @@ class AppViewModel(
         run {
             val signature = try { signer.sign(ch.message ?: "") } catch (_: DeviceAuthRequired) {
                 deviceUnlock = true
+                deviceUnlockAsks++
                 return@run
             } catch (_: DeviceKeyInvalid) {
                 throw ApiException(0, "This phone's key was reset, so it cannot confirm payments. Cancel and ask the bank to set up this phone again.")
@@ -391,7 +453,9 @@ class AppViewModel(
         pending = null
         val m = me
         val wait = m?.noCheckPendingFrom?.let { ((it - System.currentTimeMillis() / 1000.0) / 3600).toLong() }
-        go(Screen.Result(if (a.kind == "nocheck" && a.status == "DONE") noCheckOutcome(formatMoney(a.amountMinor), if (m?.noCheckPendingMinor != null) wait else null)
+        go(Screen.Result(if (a.kind == "device" && a.status == "DONE") deviceOutcome()
+                         else if (a.kind == "helper" && a.status == "DONE") helperOutcome(a.title.removePrefix("Allow ").removeSuffix(" to help with payments"))
+                         else if (a.kind == "nocheck" && a.status == "DONE") noCheckOutcome(formatMoney(a.amountMinor), if (m?.noCheckPendingMinor != null) wait else null)
                          else outcomeFor(a.status, a.detail, formatMoney(a.amountMinor), a.payee, a.kind == "bill"), a))
     }
 
@@ -406,12 +470,17 @@ class AppViewModel(
     }
 
     private fun cancelAction(actionId: String) = run {
-        val isLimit = pending?.action?.kind == "nocheck"
+        val kind = pending?.action?.kind
+        val isLimit = kind == "nocheck" || kind == "helper"
         withContext(io) { try { bank.cancel(actionId) } catch (_: ApiException) { } }
         pending = null
         try { refresh() } catch (_: ApiException) { }
         go(if (isLimit) Screen.Profile else Screen.Home)
-        notice = if (isLimit) "Cancelled. Nothing was changed." else "Payment cancelled. Nothing was sent."
+        notice = when {
+            kind == "device" -> "Cancelled. This phone is not verified yet."
+            isLimit -> "Cancelled. Nothing was changed."
+            else -> "Payment cancelled. Nothing was sent."
+        }
     }
 
     fun refreshHome() = run { refresh() }

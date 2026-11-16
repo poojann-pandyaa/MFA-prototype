@@ -17,6 +17,7 @@ interface Http {
  * AMFA uses a bearer token instead and ignores cookies. Cookies live only as long as the process.
  */
 class UrlConnectionHttp : Http {
+    private companion object { const val BIG_BODY = 100_000 }
     private val cookies = mutableMapOf<String, String>()
 
     override fun request(method: String, url: String, headers: Map<String, String>, body: String?): HttpResult {
@@ -24,8 +25,9 @@ class UrlConnectionHttp : Http {
         try {
             conn.requestMethod = method
             conn.connectTimeout = 8_000
-            // A face check runs detection, liveness and matching on every frame: give it time.
-            conn.readTimeout = 60_000
+            // A face or voice check uploads frames or audio and runs detection, liveness and matching on them: give that time. Everything
+            // else is small, and a bank that has stopped answering should be reported in seconds, not a minute.
+            conn.readTimeout = if ((body?.length ?: 0) > BIG_BODY) 60_000 else 20_000
             headers.forEach { (k, v) -> conn.setRequestProperty(k, v) }
             synchronized(cookies) {
                 if (cookies.isNotEmpty()) conn.setRequestProperty("Cookie", cookies.entries.joinToString("; ") { "${it.key}=${it.value}" })
