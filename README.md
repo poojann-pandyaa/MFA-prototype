@@ -89,6 +89,8 @@ account is approved by AMFA before the bank carries it out:
 | Change the daily limit | `CHANGE_LIMIT` | the new limit |
 | Change mobile, email or password | `PROFILE_CHANGE` | the change; later payments report it as `accountEvents` |
 | Use a device not yet verified | `DEVICE_BINDING` | the device; other actions are refused from it until then |
+| Choose "no extra checks up to ₹X a day" (optional) | `CHANGE_LIMIT` | the amount; see [docs/customer-limit.md](docs/customer-limit.md) |
+| Let a family member's phone help with payments (optional) | `CHANGE_LIMIT`, payee `HELPER` | the approval, used once; see [docs/family-helper.md](docs/family-helper.md) |
 
 The bank acts only after it verifies the proof's signature and binding and consumes it, so an approval
 can never be replayed or applied to a different amount.
@@ -140,9 +142,18 @@ picks the factors: T0 OTP, T1 + behaviour, T2 + face, T3 + voice, T4 manual revi
 policy floor still applies on top. With no active model, every transaction fails closed to manual
 review.
 
-**Memory.** The model looks at each customer's last 365 days, never longer. Besides usual amounts, devices
-and places, it checks whether the payee has been paid before, how long ago, at about what amount and on
-what schedule (weekly to yearly), so rent, premiums and bills that repeat are recognised as familiar.
+**Memory.** The model looks at each customer's last 90 days, never longer: the bank may not keep more, and
+everything older is deleted (see "Data kept" below). Besides usual amounts, devices and places, it checks whether
+the payee has been paid before, how long ago, at about what amount and on what schedule (weekly to two-monthly), so
+rent, premiums and bills that repeat inside the window are recognised as familiar. A payment that repeats less
+often than every 90 days looks like a first payment.
+
+**Each customer against their own habit.** A `habit_surprise` input says how far above this customer's own usual a
+payment is (for the same payee, against what they pay that payee), so a weekly ₹1 lakh to a wholesaler is routine
+and ₹10,000 from someone who pays ₹1,500 is a jump. Habit alone also sets a minimum level, from percentiles of
+genuine payments stored in the model card. A routine payment (same payee at least three times over at least 30
+days, about the usual amount, a known phone, no warning sign) is kept light even at a high amount.
+See [docs/customer-limit.md](docs/customer-limit.md).
 
 **Small payments.** A payment is held at T1 (OTP plus the passive behaviour check, still two factors)
 instead of the model's higher level when all of these hold: the money sent in the last 24 hours is in the
@@ -167,6 +178,56 @@ dataset for coverage and fairness checks; the model is never given age. Add a sc
 `scenarios.py` and its description in `SCENARIO_DOCS`; the tests fail if any documented scenario has no rows. Banks may send optional `accountEvents`
 (SIM, contact or password changes; payee risk flag) with each transaction.
 
+## New customers: learn first, then decide
+
+A new customer has no bank history, so the model does not decide for them at first. Until a test on their own
+payments says the model knows them (`amfa/engine/risk/readiness.py`: proven, known, spread over several days, not a
+fixed number of days) every payment is confirmed with the phone's own fingerprint or screen lock (a key in the secure
+hardware signs AMFA's challenge), plus a one-time code above the learning limits or on a hard warning sign. Limits
+and hard signals guard the learning phase, not heavier checks. Two optional sign-up questions (typical payment and a
+month's total, as bands) give the model a starting point; payees reported by other customers or paid by many customers
+at once are flagged for everyone. Details, measurements and status: [docs/new-customer-learning.md](docs/new-customer-learning.md)
+and [docs/cold-start-implementation.md](docs/cold-start-implementation.md). Turn it on per bank with `learning`,
+`payeeReputation` and `DEVICE` in `permittedFactors` (`python scripts/seed_demo.py --learning` does it for the demo).
+
+## Customer controls (both optional, both off unless the bank turns them on)
+
+- **No extra checks up to ₹X a day** (`customerBypass`): payments within the customer's own limit to known payees from
+  a known phone skip the risk-based face and voice checks, never the legal minimum. Setting it needs a verified
+  `CHANGE_LIMIT`; a raise waits out a cooling-off. [docs/customer-limit.md](docs/customer-limit.md)
+- **Family helper** (`familyHelpers`): a customer who gets help paying can register a family member's phone, so that
+  phone is expected instead of strange. Added only against a verified approval with a single-use code and a
+  cooling-off; removed at once. [docs/family-helper.md](docs/family-helper.md)
+
+## Android app
+
+`mfa-android` is a native Kotlin / Jetpack Compose app for the demo bank with the same screens as the web bank plus the
+phone's own key, no-extra-checks limit, sign-up questions, family helper and "is this your new phone". Every request
+shows a loader and ignores taps while it runs. Build, install and test notes: [mfa-android/README.md](mfa-android/README.md).
+A tag like `android-v1.0.4` publishes the APK on a GitHub Release.
+
+## Testing and evaluation
+
+```bash
+.venv/bin/python -m pytest -q                                   # Python suites (engine, core, factors, demo bank)
+.venv/bin/python -m amfa.demo.regression                        # named personas through the whole decision path
+.venv/bin/python scripts/measure_readiness.py                   # how long new customers take to be known
+.venv/bin/python scripts/evaluate_datasets.py 4000 --md=docs/dataset-evaluation.md   # five different dummy banks end to end
+.venv/bin/python scripts/smoke_demo.py                          # a running stack: sign-up, payments, limit, helper, retention
+(cd mfa-android && ./gradlew :app:testDebugUnitTest)           # 131 Android unit tests
+```
+
+Latest five-bank result: 63 of 65 checks met ([docs/dataset-evaluation.md](docs/dataset-evaluation.md)). Known and
+documented: the release fairness gate still fails for older customers (senior segment step-up ratio about 2.3 against
+a limit of 1.25), so the risk model in use was activated by hand (`--force`). All numbers are on simulated customers;
+there are no real fraud labels yet.
+
+## Data kept: 90 days
+
+Transactions and everything derived from them are deleted after 90 days (hourly, and `python -m amfa.cli purge`;
+`AMFA_RETENTION_DAYS` changes the window) and the risk model reads no more than that. Customers, enrolled templates,
+devices and the audit log stay.
+
 ## Settings
 
 | Variable | Values |
@@ -174,10 +235,12 @@ dataset for coverage and fairness checks; the model is never given age. Add a sc
 | `AMFA_AGENT_BACKEND` | `local` (Qwen2.5-3B on the server, can only add checks), `off` (risk model only) |
 | `AMFA_ADMIN_TOTP` | `required` (password + authenticator), `off` (password only) |
 | `AMFA_VOICE_PROMPT_CHECK` | `advisory`, `enforce`, `off` |
+| `AMFA_RETENTION_DAYS` | days of transactions kept and read by the risk model (default 90; a model trained on a longer window is refused) |
+| `AMFA_BYPASS_CAPS` | the platform's ceiling for a customer's "no extra checks" limit per currency (default ₹50,000) |
 | `AMFA_UEBA_TOUCH_MODE` | `live` (phone typing and shape count toward the decision; default), `shadow` (scored and logged only, never counted) |
 
 Per-bank policy (permitted factors, risk appetite, minimum checks, how many checks the AI may
-add) is edited in the admin console. Leaving `OTP` out of the permitted factors removes the
+add, and the optional features `learning`, `payeeReputation`, `customerBypass` and `familyHelpers`) is edited in the admin console. Leaving `OTP` out of the permitted factors removes the
 authenticator from the customer flow; face or voice then serves as the dynamic factor.
 
 ## Layout
@@ -187,7 +250,11 @@ amfa/engine      decision engine: risk model, AI agent, bank policy
 amfa/core        platform API, orchestration, proofs, admin console, hosted pages
 amfa/factors     face, voice and behaviour services
 sdk/python       bank client
-examples         demo bank
+examples         demo bank (web) and its tests' fixtures
+mfa-android      native Android app
 deploy           Dockerfile, compose files, Caddy, deploy script
-scripts          model download and verification
+scripts          model download and verification, demo seeding, readiness measurement,
+                 five-bank evaluation, live-stack smoke test
+docs             design notes, measurements and status (see docs/)
+tests            Python test suites
 ```

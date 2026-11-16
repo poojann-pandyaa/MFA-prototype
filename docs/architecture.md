@@ -27,7 +27,7 @@ It also answers one design question that came up: should the face, voice and typ
 | **Voice** (`amfa/factors/voice`) | voiceprints, anti-spoof models | core only | same |
 | **UEBA** (`amfa/factors/ueba`) | typing / touch / shape profiles | core only | same |
 | **Bank / demo bank** | accounts, money | core's tenant API | the bank's own |
-| **Phone app** (`mfa-android`) | capture, coaching, encryption | bank, core's customer API | the phones themselves |
+| **Phone app** (`mfa-android`) | capture, coaching, encryption, the phone's own secure-hardware key | bank, core's customer API | the phones themselves |
 
 The core never imports a factor's code. It calls it over HTTP with a signed request (`amfa/core/factors.py`) and gets back a
 `FactorResult` (`amfa/common/contract.py`). That contract is the seam: anything that speaks it can replace a service.
@@ -138,3 +138,27 @@ the phone's result only to skip a check at the lowest risk levels. That needs at
 
 Transactions and everything derived from them are deleted after 90 days (`amfa/core/retention.py`, `AMFA_RETENTION_DAYS`), and the risk model reads no more
 than that. See [customer-limit.md](customer-limit.md) for what goes and what stays, and what the shorter memory costs.
+
+## 7. What the core keeps per customer, and for how long
+
+Besides sessions, plans, proofs and the audit log, the core keeps a few small tables that make decisions personal. None holds a
+biometric, a name, an account number or an exact location; devices, payees and places are keyed hashes.
+
+| Table | What it holds | Module |
+|---|---|---|
+| `customer_phase` | whether the model knows this customer yet, and the evidence behind it (marks, never transactions) | `core/phase.py`, `engine/risk/readiness.py` |
+| `customer_profile` | the optional sign-up answers as bands, and up to three bank-vouched regular payees | `core/api_tenant.py`, `engine/risk/declared.py` |
+| `peer_group_stat` | how customers with the same answer really pay, kept only for groups of 50 or more, refreshed nightly | `core/peers.py` |
+| `known_payee` | which customers paid which payee and when: the basis of payee reputation (mule detection) | `core/payee_reputation.py` |
+| `bypass_limit` | a customer's own "no extra checks up to X a day", with a raise waiting out its cooling-off | `core/bypass.py` |
+| `trusted_helper` | a family member's phone the customer chose (a label and a keyed hash), with an invite code kept only as a hash | `core/helpers.py` |
+
+Every one of these is optional per bank (`learning`, `payeeReputation`, `customerBypass`, `familyHelpers` in the tenant policy) and
+off by default. Transactions and everything derived from them are deleted after 90 days (hourly, and `python -m amfa.cli purge`;
+`AMFA_RETENTION_DAYS`), and the risk model refuses to load if trained on a longer window. See
+[customer-limit.md](customer-limit.md) for what goes and what stays, [new-customer-learning.md](new-customer-learning.md) for the
+learning phase and [family-helper.md](family-helper.md) for helpers.
+
+The risk model is one model for everyone; what is personal is the history it is given. Its release gate (beats a logistic-regression
+baseline and a per-segment fairness ratio of at most 1.25) currently fails for older customers (about 2.3), so the model in use was
+activated by hand. [dataset-evaluation.md](dataset-evaluation.md) tests it on five different simulated banks.

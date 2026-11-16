@@ -25,6 +25,17 @@ A fraudster who has taken over an account would love a trusted phone, so: adding
 single-use, the phone waits out the cooling-off, a bank sets the maximum (`maxHelpers`, 2 by default), and the training data contains
 this attack on purpose (`patient_helper`: register own phone, wait, then drain).
 
+## Where it is in the product
+
+- **Server:** `amfa/core/helpers.py`, `trusted_helper`, endpoints under `/v1/users/{id}/helpers` (list, add against an approval, redeem
+  from the helper's phone, remove), policy `familyHelpers` (off by default; `maxHelpers` 2, `coolingOffHours` 24, `inviteMinutes` 15).
+  The context builder marks the helper phone as known and gives the model `helper_device`.
+- **Demo bank:** action `helper`, `POST /api/helpers/redeem`, `DELETE /api/helpers/{id}`, and `helpers` in `/api/me`.
+- **Android:** Profile, "Family helper" (list, "Get a code", and "Helping someone with this phone?"), and one optional line on the
+  sign-up questions. Adding a helper asks for a code and the phone's lock screen; the code is shown once on the result screen.
+- A phone the bank has not verified for the account first sees "Is this your new phone?" and verifies itself (`DEVICE_BINDING`);
+  a helper phone is that same step, followed by entering the code.
+
 ## What is stored
 
 `trusted_helper`: a label the customer typed (24 characters), a keyed hash of the helper phone, timestamps. No name, number or location.

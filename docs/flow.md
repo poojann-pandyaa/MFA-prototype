@@ -22,7 +22,7 @@ This is the big picture of Demo Bank and AMFA working together, in plain languag
 
 1. **Open an account.** The customer gives a name, mobile number, **email address**, username and password. The email matters: it is where one-time codes are sent.
 2. **Set up protection.** The app is *progressive*: only what's needed to start. Today that means the email code (ready straight away) plus a quick **face setup**. Voice, typing and an authenticator app can be added later in Security, and each one means fewer interruptions.
-3. **Trusted phone.** The phone used to sign up becomes the first trusted device automatically.
+3. **Trusted phone.** The phone used to sign up becomes the first trusted device automatically. On a bank that learns its customers first, the app also makes a key in the phone's secure hardware, so the phone's fingerprint or screen lock can confirm payments, and offers two optional questions (a typical payment and a month's total) that give the model a starting point.
 4. **Ready.** The customer lands on Home and can start banking.
 
 The face photos never reach the bank. Only an encrypted template is kept, and it can be removed.
@@ -87,6 +87,10 @@ Calmer levels mean fewer checks; severe levels mean all of them:
 | T3 | Unusual | Adds a voice check |
 | T4 | Severe | Everything the customer has set up, all handled automatically |
 
+**New customers.** Until a test on the customer's own payments says AMFA knows them (not a fixed number of days: a daily payer and a weekly payer are known at different times), the checks are not chosen by risk level at all: the phone's fingerprint or screen lock confirms each payment, plus a one-time code above the learning limits or on a hard warning sign. See [new-customer-learning.md](new-customer-learning.md).
+
+**The customer's own habit.** A payment is judged against that customer's last 90 days, so a weekly ₹1 lakh to a wholesaler is routine and the same amount from someone who pays ₹1,500 is a jump. A customer may also set "no extra checks up to ₹X a day" (never below the legal minimum), see [customer-limit.md](customer-limit.md).
+
 A person is **not** called in just because the level is high. The system asks for the strongest checks it can, and only brings in a person for the specific situations listed in "Held requests" below.
 
 If a check the customer *hasn't set up* is needed, AMFA tries a stand-in (face and voice can cover for each other). If the quiet typing check isn't available at a low level, it is simply skipped rather than swapped for a face scan. If the bank would prefer more checks than the customer has set up, the customer is asked for every check they do have, as long as the legal minimum (two kinds of proof, one of them live) is met. The customer is never queued for a person just because they haven't set up voice or typing.
@@ -148,7 +152,9 @@ The bank can turn this "low-touch" behaviour off in its policy, which brings bac
 
 ## 7. New phones
 
-A phone the bank hasn't seen can't be used for banking until it's verified. Verifying needs a strong set of checks (including face), then the phone becomes trusted. Later, a trusted phone also proves it really is that phone using a secret kept on the device, so a copied-over "device ID" is not enough.
+A phone the bank hasn't seen can't be used for banking until it's verified. Verifying needs a strong set of checks (including face), then the phone becomes trusted. Later, a trusted phone also proves it really is that phone using a secret kept on the device, so a copied-over "device ID" is not enough. In the phone app a customer who signs in on such a phone lands on "Is this your new phone?" and verifies it there.
+
+**Family helper (optional).** A customer who gets help paying from a family member's own phone can register that phone as a helper, so it is expected instead of strange. It is added from the customer's own phone against a verified approval with a single-use code, waits out a cooling-off, and can be removed at once. See [family-helper.md](family-helper.md).
 
 ---
 

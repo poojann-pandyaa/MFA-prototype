@@ -296,9 +296,9 @@ simulating; nothing else changes.
 
 | Step | Pieces | Why first | Size |
 |---|---|---|---|
-| 1 | 3 (device key + integrity + SIM binding), 1 (phases with light checks) | Gives the light learning-phase check you asked for, and its safety net | 2-3 weeks |
-| 2 | 4 (payee reputation) | Biggest protection for new customers, needs no labels | 1-2 weeks |
-| 3 | 2 (sign-up questions, peer groups) + retrain | Better decisions from day one | 2 weeks |
+| 1 (done, except integrity and SIM binding) | 3 (device key + integrity + SIM binding), 1 (phases with light checks) | Gives the light learning-phase check you asked for, and its safety net | 2-3 weeks |
+| 2 (done) | 4 (payee reputation) | Biggest protection for new customers, needs no labels | 1-2 weeks |
+| 3 (done) | 2 (sign-up questions, peer groups) + retrain | Better decisions from day one | 2 weeks |
 | 4 | 5 (labels, silent genuine, monthly retrain) | Turns the simulator model into a real one | 1-2 weeks |
 | 5 | 7 (anti-gaming), 6 (drift) | Hardening once the basics run | 2 weeks |
 | 6 | 8 (pilot) and 9 (consent screens, data page, inventory) | 9's consent must be in place before the pilot starts | runs alongside |
@@ -322,7 +322,7 @@ Each step ends with its tests, a regression run (`python -m amfa.demo.regression
   `DEVICE` in `permittedFactors`.
 - `GET /v1/users/{id}/phase` and `learning` in the demo bank's `/api/me`, for the progress bar.
 
-**Built (Android, tested on the JVM; not yet on a phone):**
+**Built (Android, tested on the JVM and on an emulator; not on a physical phone):**
 - `DeviceKey.kt` (the signer interface and the key's format for AMFA) and `KeystoreSigner.kt` (a P-256 key made in the secure hardware,
   StrongBox when present, which signs only for 15 seconds after the phone's fingerprint or screen lock was confirmed).
 - After sign-in the app makes the key once per account and gives AMFA its public half (`/c/v1/enrollment/device`). A phone with no
@@ -439,3 +439,39 @@ payee, phone or place, which a declaration says nothing about. The fairness gate
 - A declaration never lowers a check. It gives the model something to compare with; a customer who says "small" and then moves a lot is a signal.
 - The web bank has no questions screen yet; its endpoint is the same (`POST /api/profile`).
 - Payee names are not checked by AMFA; the bank vouches for them. A bank that does not check should send none.
+
+---
+
+## Status: after step 3, what was added and how it was tested
+
+**Added since step 3:**
+- **Fairness reweighting in training** (`amfa/engine/risk/train.py`): genuine payments of a segment that is stepped up too often count more
+  (up to 8x, up to 4 rounds, `fairnessBoost` in the model card). The senior segment's ratio went from 2.71 to about 2.3; the gate (1.25) still
+  fails because the cause is behaviour (ordinary payments, assisted payments, one-off large payments), not the segment label. Forcing the segment
+  to STANDARD at scoring time changes nothing, and binding the phone's key changes it little (3.86 to 3.77 in a counterfactual).
+  A lower senior cut-off would close it at T2 for 100% to 95% of fraud caught, but 94% to 75% at T3, so it is not applied.
+- **Optional family helper** ([family-helper.md](family-helper.md)): server, demo bank and Android, with a `patient_helper` attack in the training
+  data. Measured effect on the senior ratio is small (2.23 to 2.21 if everyone used it) because assisted payments are about a tenth of seniors'
+  genuine payments. It is built because it is the honest signal for those payments, not because it closes the gate.
+- **Five different dummy banks, end to end** (`scripts/evaluate_datasets.py`, [dataset-evaluation.md](dataset-evaluation.md)): baseline, high-value,
+  micro-payments, senior-heavy, and under attack with mostly new customers and few signals. 63 of 65 checks met. The two misses: bank 3's weakest
+  attack type (low-and-slow mimic, 41 cases, 28% against a floor of 30%) and bank 4's new popular merchants flagged (35.3% against 35%). The senior
+  step-up ratio across the banks is 2.0 to 3.2 (before the reweighting, 2.4 to 4.1). Fraud met while a customer is still being learned is held for
+  a person in 69% of cases (90% of the money), gets a code added in 16% (9%), and meets the fingerprint alone in 14% (1%).
+- **Live-stack smoke test** (`scripts/smoke_demo.py`): sign-up, payments, limit, helper and retention against a running stack.
+
+**Frontend test on an emulator and in a browser** (slow and failing connections, a small screen with large text, dark mode). Found and fixed:
+1. A customer signing in on a phone the bank had not verified could not pay and had no way to verify it. The app now has the "Is this your new phone?" screen.
+2. Three check chips collapsed into single letters; they now wrap. The Amount screen's Continue was off-screen on short screens; it now scrolls.
+3. A second Confirm did nothing if the lock-screen prompt never reported back; each Confirm now reopens it. The code boxes now open the keyboard.
+4. A failed typing check showed the text "null" (a JSON null read as a string, in 8 fields).
+5. Account changes were worded as payments ("₹0.00 to This device", "Confirm payment", "each payment" in the learning reason); stale notices followed the customer to
+   the next screen.
+6. No feedback on soft buttons and links, and every button spun while any request ran. A bar and swallowed taps now cover a request in flight, and only the pressed
+   button spins. Requests time out after 20 s (60 s for face and voice uploads) and a slow server is reported as slow.
+7. Sign-up errors sat under the password field; each now sits under its own field.
+
+Not tested: Face, Voice, Authenticator and Typing setup (the emulator has no camera or microphone feed), and the typing check's success path with real keystrokes.
+
+**Next:** step 4 (labels, silent genuine payments, monthly retrain), then 7 (anti-gaming) and 6 (drift), then the pilot and the consent screens (8, 9). The
+planned-payment note ("I will pay ₹3 lakh to the hospital this week") would target the largest remaining part of the senior gap; it is not built.

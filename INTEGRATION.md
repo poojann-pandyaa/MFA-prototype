@@ -12,6 +12,20 @@ Re-check with `git log integration..origin/<branch>` after every port.
 | `ueba-service` | `23910e1` | done, see below |
 | `voice-auth` | `c706875` | done, see below |
 
+## Work done on `integration` itself since the port
+
+Not ported from any branch; recorded here so the ledger covers the whole of `integration`. Each item has its own document.
+
+| Area | What | Where |
+|---|---|---|
+| Per-customer habit, 90-day memory | `habit_surprise`, habit cut-offs in the model card, retention purge, `HISTORY_DAYS` check on load | [docs/customer-limit.md](docs/customer-limit.md) |
+| Customer's own limit | "no extra checks up to X a day", with cooling-off | [docs/customer-limit.md](docs/customer-limit.md) |
+| New customers | learning phase, readiness test, phone key (`Factor.DEVICE`), payee reputation, sign-up questions and peer groups | [docs/new-customer-learning.md](docs/new-customer-learning.md), [docs/cold-start-implementation.md](docs/cold-start-implementation.md) |
+| Family helper | optional, with a `patient_helper` attack in training | [docs/family-helper.md](docs/family-helper.md) |
+| Fairness | training reweighting; the release gate still fails for older customers | [docs/cold-start-implementation.md](docs/cold-start-implementation.md) |
+| Evaluation | five different dummy banks end to end, live-stack smoke test | [docs/dataset-evaluation.md](docs/dataset-evaluation.md) |
+| Android app | native client with the web bank's screens, loaders, device verification | [mfa-android/README.md](mfa-android/README.md) |
+
 ## voice-auth @ c706875
 
 The 1:1 path (ECAPA-TDNN match at 0.25, RawNet2 PAD at log 0.5, same RawNet2 model file) was already

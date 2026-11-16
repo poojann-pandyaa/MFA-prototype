@@ -25,8 +25,15 @@ The screens follow the web bank (`examples/demo_bank/static`): the same colour t
 setting picks), the same stroke icons, welcome, sign-in and sign-up, "Let's protect your account", home with the balance
 card, pay again, protection and recent payments, pay (people and bills), the keypad amount screen, the review screen with
 AMFA's plan and scam warning, the verify step (a face circle with a progress ring and turn arrow, or six code boxes), the
-result screens, activity with filters, and a profile tab. Not ported: adding a payee, changing the limit, contact details
-or password, the "Behind the scenes" demo drawer, and opening an activity item to continue or report it.
+result screens, activity with filters, and a profile tab. Also in the app, beyond the web bank: the phone's own key (fingerprint
+or screen lock confirms a payment), "No extra checks" (the customer's own daily limit), the optional sign-up questions ("About
+you"), the optional family helper, and "Is this your new phone?" for a phone the bank has not verified. Not ported: adding a
+payee, changing contact details or password, the "Behind the scenes" demo drawer, and opening an activity item to continue or
+report it.
+
+Every request shows a loader: a thin bar on top, taps ignored while it runs, a spinner on the pressed button only. Requests time
+out after 20 seconds (60 for face and voice uploads), and a slow server is reported as slow. Screens are scrollable, so a short
+screen or large text still reaches every button.
 
 ## How it works
 
@@ -39,6 +46,11 @@ or password, the "Behind the scenes" demo drawer, and opening an activity item t
 | Code check | a 6-digit code: emailed or texted (with "Send a new code"), or from an authenticator app set up in Profile | AMFA `/c/v1/session/factors/OTP`, `/c/v1/session/otp/resend`; setup `/c/v1/enrollment/totp/{start,confirm}` |
 | Voice check | records 3 to 10 s of 16 kHz mono audio (`AudioRecord`), sends it as a base64 WAV | AMFA `/c/v1/session/factors/VOICE`; setup `/c/v1/enrollment/voice` (three sentences) |
 | Typing check | types the phrase in a text box (each key is recovered from the text change, as the web SDK does for phones) and, when asked, traces a line with a finger | AMFA `/c/v1/session/factors/UEBA`; setup `/c/v1/enrollment/behaviour` |
+| Phone key | after sign-in the app makes a P-256 key in the secure hardware and gives AMFA its public half; each check signs AMFA's challenge after the lock screen is confirmed | AMFA `/c/v1/enrollment/device`, `/c/v1/session/factors/DEVICE` |
+| New phone | `BankApi.startDevice()` (shown when `/api/me` says `deviceTrusted: false`) | bank `/api/actions/device` (`DEVICE_BINDING`) |
+| No extra checks | `startNoCheck`, `removeNoCheck` | bank `/api/actions/nocheck`, `/api/nocheck-limit` |
+| Sign-up questions | `saveAnswers`, `removeAnswers` | bank `/api/profile` |
+| Family helper | `startHelper`, `redeemHelper`, `removeHelper` | bank `/api/actions/helper`, `/api/helpers/redeem`, `/api/helpers/{id}` |
 | Settle | `BankApi.complete` | bank `/api/actions/{id}/complete`: the bank applies the payment only against AMFA's verified proof |
 
 All biometric work (detection, liveness, matching) stays on AMFA's servers; the app only captures camera frames, so the
@@ -55,7 +67,7 @@ uses the bank's host instead (`reachableAmfaBase`), so an emulator reaching the 
 |---|---|
 | Application id | `com.adaptivemfa.app` |
 | App name | Adaptive MFA |
-| Version | 1.0.0 (versionCode 1) |
+| Version | 1.0.0 in the source; a release build takes its version from the tag (`android-v1.0.4` sets 1.0.4) |
 | Min SDK | 26 (Android 8.0) |
 | Target SDK | 36 (Android 16) |
 | Compile SDK | 37 (required by Compose 1.12; install `platforms;android-37.0`) |
@@ -122,3 +134,15 @@ matched.
   Integrity or a Keystore key would add proof of the device.
 - The bank's sign-in cookie is not stored, so the app asks for the password after each restart.
 - AMFA's one-time-code resend is not wired up.
+
+## Tests
+
+```bash
+cd mfa-android && ./gradlew :app:testDebugUnitTest      # 131 JVM tests: API parsing, view model flows, device key, E2E box, loaders, validation
+```
+
+`FrontendFixesTest` keeps each defect found by driving the app on an emulator. To drive it yourself: an emulator needs a screen lock
+(`adb shell locksettings set-pin 1234`) and an enrolled fingerprint (Settings, Security, then `adb emu finger touch 1` for each touch) for the
+phone-key check; keep the screen awake (`adb shell svc power stayon true`) or the lock screen will return. Point the app at
+`http://10.0.2.2:<bank port>` in Settings. Slow, failing and dropped connections can be simulated with a small proxy in front of the bank.
+Not tested on an emulator: face, voice and authenticator setup (no camera or microphone feed), and the typing check's success path.

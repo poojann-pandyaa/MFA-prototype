@@ -60,7 +60,8 @@ not trusted yet, so the guards are **limits and hard signals**, not heavier chec
 **Fingerprint or passcode as a real factor.** The app creates a key in the phone's secure hardware (Android Keystore,
 StrongBox where present) that only unlocks with the phone's fingerprint or screen lock. AMFA sends a challenge and the key
 signs it. That proves this phone (possession) and the person who unlocked it (fingerprint or PIN), and counts towards the
-two-factor minimum. The app does not do this yet; AMFA already has the device-key endpoint (`/c/v1/session/device`).
+two-factor minimum. Built: the Android app makes the key after sign-in and signs the challenge after the phone's lock screen is confirmed
+(see [cold-start-implementation.md](cold-start-implementation.md), step 1). A browser cannot hold such a key, so the learning phase is a phone feature.
 
 ## 3. What we store, and how
 
@@ -109,14 +110,20 @@ customer whose recent payments start drawing false alarms again (the "proven" te
   alarms on the same held-out weeks.
 - `scripts/measure_readiness.py` is rerun after each retrain, and the 30-payment / 45-day threshold is moved if the curve moves.
 
-## 5. Build list
+## 5. Build list (status)
 
 1. Customer phase (`learning` or `ready`) driven by `readiness.Tracker` after every verified payment. Decisions in learning use the fixed
-   learning-phase checks plus hard signals and limits; the model's score is still recorded.
-2. Device-key check in the app: Keystore key unlocked by fingerprint or screen lock, signing AMFA's challenge.
-3. Learning-phase limits as bank settings.
-4. The new phone signals in section 3 (call in progress, screen sharing, pasted account number, time to confirm).
-5. A readiness report per bank: how many customers are learning, how many are ready, and the false-alarm rate of each.
+   learning-phase checks plus hard signals and limits; the model's score is still recorded. **Built.**
+2. Device-key check in the app: Keystore key unlocked by fingerprint or screen lock, signing AMFA's challenge. **Built**, tested on an emulator.
+3. Learning-phase limits as bank settings. **Built** (`learning` in the tenant policy).
+4. The new phone signals in section 3 (call in progress, screen sharing, pasted account number, time to confirm). **Not built.**
+5. A readiness report per bank: how many customers are learning, how many are ready, and the false-alarm rate of each. **Partly:**
+   `scripts/measure_readiness.py` and the five-bank evaluation report it; there is no per-bank screen yet.
+6. Sign-up questions and peer groups (section 2 of the implementation plan). **Built.**
+7. Payee reputation (mule detection). **Built.**
+
+The customer-facing controls that came after (own no-check limit, optional family helper) are in [customer-limit.md](customer-limit.md) and
+[family-helper.md](family-helper.md); the end-to-end test on five different simulated banks is [dataset-evaluation.md](dataset-evaluation.md).
 
 Already fixed while writing this: a payment the bank had completed was not counted as the customer's history (its status
 changes to CONSUMED), so a new customer's own payments would never have taught the model anything.
