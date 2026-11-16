@@ -16,7 +16,7 @@ from amfa import config
 from amfa.common import crypto
 from amfa.common.contract import ID_PATTERN
 from amfa.common.web import ApiError
-from amfa.core import audit, bypass, db, factors, helpers, orchestrator, peers, phase, proofs, webhooks
+from amfa.core import audit, bypass, db, factors, helpers, learning_store, orchestrator, peers, phase, proofs, webhooks
 from amfa.core.auth import TenantCaller, require_scope
 from amfa.core.context_builder import TxnInput, assemble, device_key
 from amfa.core.context_builder import payee_key as context_builder_payee_key
@@ -574,6 +574,7 @@ def cancel(txn_id: str, caller: TenantCaller = Depends(require_scope("transactio
         sess = s.get(db.AuthSession, txn.session_id)
         if sess and sess.status in (orchestrator.PENDING, orchestrator.REVIEW):
             sess.status, sess.resolution, sess.resolved_at = orchestrator.BLOCKED, "CANCELLED", time.time()
+        learning_store.record(s, txn)
         return _txn_view(s, txn, include_proof=False)
 
 
@@ -594,6 +595,7 @@ def feedback(txn_id: str, body: Feedback, caller: TenantCaller = Depends(require
         row = db.RiskLabel(tenant_id=txn.tenant_id, transaction_id=txn.id, label=body.label,
                            source=body.source, reason=body.reason)
         s.add(row)
+        learning_store.apply_label(s, txn.id, body.label, body.source)
         if body.label == "FRAUD":
             from amfa.core import phase
             phase.reset(s, txn.customer_id)
@@ -641,6 +643,12 @@ def apply_policy(tenant_id: str, new: TenantPolicy, actor: str, expected_version
         if not platform and new.regulatoryProfile.value != (old or {}).get("regulatoryProfile", "RBI_2025"):
             raise ApiError(403, "REGULATORY_PROFILE_LOCKED",
                            "the regulatory profile can only be changed by the platform operator")
+        from amfa.core import band_gate
+        relaxed = band_gate.relaxes(TenantPolicy.model_validate(old or {}).collection, new.collection)
+        if relaxed:   # nobody alone, not even a platform operator or the bank's API key, may relax the band switch
+            raise ApiError(409, "TWO_PERSON_CHANGE",
+                           f"this change {', '.join(relaxed)}: an operator must request it in the admin console and a second "
+                           "operator approve it")
         t.policy = new.model_dump(mode="json")
         t.policy_version += 1
         s.add(db.PolicyVersion(tenant_id=t.id, version=t.policy_version, policy=t.policy, created_by=actor))

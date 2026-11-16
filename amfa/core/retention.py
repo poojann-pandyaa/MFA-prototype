@@ -5,6 +5,8 @@ derived from a transaction goes with it: the decision record and its inputs, the
 the proof, review case and fraud label, webhook deliveries, security events, the places a network was seen at, and the payee
 relationships that no transaction in the window explains any more. Customers, enrolments (templates), devices, tenants, keys
 and the hash-chained audit log are not transactions and stay; the audit log holds ids and outcomes, never amounts or payees.
+The band switch's anonymous learning rows (core/learning_store.py) lose their label link at the same 90 days and are themselves
+deleted after the bank's own `collection.retentionDays`.
 
 Run by the core's sweeper about hourly, or by hand: python -m amfa.cli purge
 """
@@ -17,7 +19,7 @@ from typing import Optional
 from sqlalchemy import delete, select
 
 from amfa import config
-from amfa.core import db
+from amfa.core import db, learning_store
 from amfa.core.context_builder import payee_key
 
 log = logging.getLogger("amfa.retention")
@@ -57,6 +59,8 @@ def purge(s, now: Optional[float] = None, days: Optional[int] = None) -> dict[st
         s.delete(p)
     out["known_payee"] = len(stale)
     run("txn", delete(db.Transaction).where(db.Transaction.created_at < cutoff))
+    # the band switch's anonymous rows: their label links expire with the transactions, the rows by each bank's own retention
+    out.update(learning_store.purge(s, now))
     if any(out.values()):
         log.info("retention purge", extra={"deleted": out})
     return out

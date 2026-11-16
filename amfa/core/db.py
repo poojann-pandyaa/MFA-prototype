@@ -444,6 +444,65 @@ class RiskLabel(Base):
     reported_at: Mapped[float] = mapped_column(Float, default=now, index=True)
 
 
+class LearningRow(Base):
+    """One settled payment for the band switch, by amount band and small categories only (amfa/core/learning_store.py). It holds no
+    customer, account, amount, payee, device, network, place, address or exact time, and its id is random so the order rows were
+    written in says nothing. `link` (a keyed hash of the transaction id) exists only so a label arriving later can find its row;
+    it and `link_expires_at` are set to null after 90 days, after which nothing can tie the row to a person. The allowed columns are
+    pinned by a test: adding one means changing that test on purpose."""
+    __tablename__ = "learning_row"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(40), index=True)
+    band: Mapped[int] = mapped_column(Integer, index=True)              # 0..3, engine/risk/collection_bands.py
+    band_vs_usual: Mapped[str] = mapped_column(String(12))              # NEW, LOWER, SAME, ONE_HIGHER, TWO_HIGHER
+    payee_kind: Mapped[str] = mapped_column(String(8))                  # KNOWN, NEW, FLAGGED
+    device_kind: Mapped[str] = mapped_column(String(8))                 # KNOWN, NEW, HELPER
+    hour_bucket: Mapped[str] = mapped_column(String(10))                # NIGHT, MORNING, AFTERNOON, EVENING
+    hard_sign: Mapped[bool] = mapped_column(Boolean)
+    rules_level: Mapped[str] = mapped_column(String(2))                 # T0..T4, engine/band_switch.level_of
+    model_level: Mapped[str] = mapped_column(String(2))
+    mode: Mapped[str] = mapped_column(String(12))                       # COLLECTING, ELIGIBLE, MODEL when it was decided
+    outcome: Mapped[str] = mapped_column(String(10))                    # COMPLETED, DECLINED, CANCELLED, EXPIRED
+    label: Mapped[str] = mapped_column(String(8), default="UNKNOWN")    # UNKNOWN, GENUINE, FRAUD
+    label_source: Mapped[Optional[str]] = mapped_column(String(24), nullable=True)
+    week_start: Mapped[str] = mapped_column(String(10), index=True)     # the Monday of its week, YYYY-MM-DD
+    link: Mapped[Optional[str]] = mapped_column(String(64), unique=True, nullable=True)
+    link_expires_at: Mapped[Optional[float]] = mapped_column(Float, nullable=True, index=True)   # a whole day, never a time
+
+
+class BandGateState(Base):
+    """Where one amount band of one bank stands on its way from the rules to the model (amfa/core/band_gate.py). `figures` holds only
+    counts and rates from the last grading. Every change of `state` is also in the audit log."""
+    __tablename__ = "band_gate"
+    tenant_id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    band: Mapped[int] = mapped_column(Integer, primary_key=True)
+    state: Mapped[str] = mapped_column(String(12), default="COLLECTING")     # COLLECTING, ELIGIBLE, MODEL
+    streak: Mapped[int] = mapped_column(Integer, default=0)                   # weekly gradings passed in a row
+    counted_week: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)   # the week whose passing grading counted last
+    evaluated_at: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    changed_at: Mapped[float] = mapped_column(Float, default=now)
+    figures: Mapped[dict] = mapped_column(JSON, default=dict)
+    losing: Mapped[int] = mapped_column(Integer, default=0)                   # on MODEL: weekly gradings lost in a row
+    losing_week: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
+
+
+class BandSwitchRequest(Base):
+    """A change that relaxes the band switch waits here for a second, different operator: moving a band to the model, or turning the
+    switch off or asking it for less evidence. Requests expire unapproved. Both operators are in the audit log."""
+    __tablename__ = "band_switch_request"
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(40), index=True)
+    kind: Mapped[str] = mapped_column(String(16))                         # BAND_TO_MODEL, POLICY
+    band: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)             # POLICY: the new collection section
+    status: Mapped[str] = mapped_column(String(12), default="PENDING")    # PENDING, APPROVED, CANCELLED
+    requested_by: Mapped[str] = mapped_column(String(40))
+    requested_at: Mapped[float] = mapped_column(Float, default=now)
+    expires_at: Mapped[float] = mapped_column(Float)
+    approved_by: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    approved_at: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+
 class AuditLog(Base):
     __tablename__ = "audit_log"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

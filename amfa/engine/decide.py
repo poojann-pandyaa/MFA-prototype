@@ -4,7 +4,7 @@ import time
 import uuid
 from typing import Optional
 
-from . import adjudicate
+from . import adjudicate, band_switch
 from .agent import AgentClient, select_with_agent
 from .availability import apply_availability, apply_org_requirements, available, enforce_floor
 from .context import SELECTABLE, Band, Context, Factor, Plan, dynamic_factors
@@ -107,6 +107,16 @@ def learning_plan(features: Optional[dict], ctx: Context) -> Plan:
 
 
 def decide(ctx: Context, agent: Optional[AgentClient] = None, features: Optional[dict] = None) -> Plan:
+    plan = _decide(ctx, agent, features)
+    if band_switch.collecting(ctx, plan):
+        # Until the band is on the model, the plan must hold everything the model's own final plan would: the regulatory filler,
+        # the substitutes and the holds can differ once the rules have added checks, so take the model-only plan and add it in.
+        model_ctx = ctx.model_copy(update={"policy": ctx.policy.model_copy(update={"bandState": band_switch.MODEL})})
+        plan = band_switch.merge(plan, _decide(model_ctx, None, features))
+    return plan
+
+
+def _decide(ctx: Context, agent: Optional[AgentClient] = None, features: Optional[dict] = None) -> Plan:
     started = time.perf_counter()
 
     # The light plan needs the phone to sign (it is the whole check). A customer who cannot, such as one on a browser or on a phone
@@ -114,6 +124,8 @@ def decide(ctx: Context, agent: Optional[AgentClient] = None, features: Optional
     learning = ctx.policy.phase == "LEARNING" and available(Factor.DEVICE, ctx)
     plan = learning_plan(features, ctx) if learning else select_by_model(features, ctx)
     plan.rulesBaseline = select_by_rules(ctx).required  # logged for comparison only; never decides
+    plan.bandView = band_switch.view(ctx, plan, features)   # logged for the band switch's learning row, from the model's own call
+    plan = band_switch.apply(plan, ctx)                     # until the band is on the model, the rules set the minimum
     plan = apply_org_requirements(plan, ctx)
     committed = list(plan.required)
 

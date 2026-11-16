@@ -110,6 +110,23 @@ customer whose recent payments start drawing false alarms again (the "proven" te
   alarms on the same held-out weeks.
 - `scripts/measure_readiness.py` is rerun after each retrain, and the 30-payment / 45-day threshold is moved if the curve moves.
 
+## 4b. Two tests, not one: the customer and the band
+
+The readiness test above asks whether the model knows **this customer**. A second test, the band switch
+([rbi-banded-data-collection.md](rbi-banded-data-collection.md)), asks whether the model can be trusted on **payments of this size**
+at this bank. It is pooled across all customers and graded on real outcomes. It exists because the bank gives no data to train on,
+so the model has only ever seen simulated customers.
+
+| | Customer readiness (built before) | Band switch (built now) |
+|---|---|---|
+| Whose data | this customer's own payments | every customer's payments in one amount band, as anonymous rows |
+| What it needs | about 25–76 of their payments on 3+ separate days | 5,000 genuine payments, 100 real fraud reports and 8 weeks per band (double for ₹1 lakh+), and the model beating the rules 4 weeks running |
+| Until it passes | the learning plan: phone key, limits, hard signs | the stricter of the rules and the model |
+| Who moves it | automatic | automatic to ELIGIBLE, then two operators |
+
+The model lowers a customer's checks only when **both** have passed. A customer still in the learning phase keeps the learning plan
+whatever their band's state. The band switch is off by default (`collection` in the tenant policy).
+
 ## 5. Build list (status)
 
 1. Customer phase (`learning` or `ready`) driven by `readiness.Tracker` after every verified payment. Decisions in learning use the fixed
@@ -121,6 +138,8 @@ customer whose recent payments start drawing false alarms again (the "proven" te
    `scripts/measure_readiness.py` and the five-bank evaluation report it; there is no per-bank screen yet.
 6. Sign-up questions and peer groups (section 2 of the implementation plan). **Built.**
 7. Payee reputation (mule detection). **Built.**
+8. The band switch: anonymous banded rows, nightly grading of the rules against the model per amount band, two-person approval,
+   automatic fallback (section 4b). **Built**, off by default.
 
 The customer-facing controls that came after (own no-check limit, optional family helper) are in [customer-limit.md](customer-limit.md) and
 [family-helper.md](family-helper.md); the end-to-end test on five different simulated banks is [dataset-evaluation.md](dataset-evaluation.md).

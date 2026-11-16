@@ -63,6 +63,8 @@ def main(argv: list[str] | None = None) -> None:
     cal.add_argument("--target-frr", type=float, default=0.01)
 
     sub.add_parser("purge", help="delete transactions and what derives from them older than AMFA_RETENTION_DAYS (90)")
+    bg = sub.add_parser("band-gates", help="grade every amount band of a bank now (rules against model) and print where each stands")
+    bg.add_argument("--tenant", required=True)
 
     rs = sub.add_parser("reseal")
     rs.add_argument("--factor", choices=["face", "voice", "ueba"], default=None,
@@ -160,6 +162,18 @@ def main(argv: list[str] | None = None) -> None:
         from amfa.core import retention
         with db.session() as s:
             print(json.dumps(retention.purge(s), indent=2))
+    elif a.cmd == "band-gates":
+        from amfa.core import band_gate
+        from amfa.engine.policy import TenantPolicy
+        with db.session() as s:
+            t = s.get(db.Tenant, a.tenant)
+            if t is None:
+                raise SystemExit(f"no tenant {a.tenant}")
+            policy = TenantPolicy.model_validate(t.policy)
+            if not policy.collection.enabled:
+                raise SystemExit("the band switch is off for this bank (policy collection.enabled)")
+            band_gate.evaluate(s, t.id, policy)
+            print(json.dumps(band_gate.view(s, t.id, policy), indent=2))
     elif a.cmd == "tenant":
         print(json.dumps(create_tenant(a.name, a.slug, "cli"), indent=2))
     elif a.cmd == "operator":

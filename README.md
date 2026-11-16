@@ -190,6 +190,21 @@ at once are flagged for everyone. Details, measurements and status: [docs/new-cu
 and [docs/cold-start-implementation.md](docs/cold-start-implementation.md). Turn it on per bank with `learning`,
 `payeeReputation` and `DEVICE` in `permittedFactors` (`python scripts/seed_demo.py --learning` does it for the demo).
 
+## When the bank gives no data to train on: the band switch
+
+The risk model was trained on simulated customers. A bank that shares no data of its own can turn on `collection`.
+- **What is recorded:** every settled payment becomes one anonymous row by amount band (₹0–2,000, ₹2,000–10,000, ₹10,000–1 lakh,
+  ₹1 lakh and above). The row holds no customer, amount, payee, device, place or time, and the app sends nothing new.
+- **Until a band earns the model:** its payments get the stricter of the rules and the model.
+- **Each night:** the rules and the model are graded against each other on that band's real outcomes.
+- **Earning the model:** a band that has enough evidence and wins 4 weeks running can be moved to the model by two different
+  operators. It falls back to the rules on its own if the model starts losing.
+- **Admin API:** `/admin/api/band-gates`. Command line: `python -m amfa.cli band-gates --tenant <id>`.
+- **Replay:** `python scripts/replay_band_switch.py` replays a simulated bank through it.
+
+Design, security and results: [docs/rbi-banded-data-collection.md](docs/rbi-banded-data-collection.md) and
+[docs/band-switch-replay.md](docs/band-switch-replay.md).
+
 ## Customer controls (both optional, both off unless the bank turns them on)
 
 - **No extra checks up to ₹X a day** (`customerBypass`): payments within the customer's own limit to known payees from
@@ -214,6 +229,7 @@ A tag like `android-v1.0.4` publishes the APK on a GitHub Release.
 .venv/bin/python scripts/measure_readiness.py                   # how long new customers take to be known
 .venv/bin/python scripts/evaluate_datasets.py 4000 --md=docs/dataset-evaluation.md   # five different dummy banks end to end
 .venv/bin/python scripts/smoke_demo.py                          # a running stack: sign-up, payments, limit, helper, retention
+.venv/bin/python scripts/replay_band_switch.py 2000             # a simulated bank through the band switch from day one
 (cd mfa-android && ./gradlew :app:testDebugUnitTest)           # 131 Android unit tests
 ```
 
@@ -226,7 +242,8 @@ there are no real fraud labels yet.
 
 Transactions and everything derived from them are deleted after 90 days (hourly, and `python -m amfa.cli purge`;
 `AMFA_RETENTION_DAYS` changes the window) and the risk model reads no more than that. Customers, enrolled templates,
-devices and the audit log stay.
+devices and the audit log stay. The band switch's anonymous rows lose their link to the payment at the same 90 days, and are
+kept for the bank's `collection.retentionDays` (default 365).
 
 ## Settings
 
@@ -240,7 +257,7 @@ devices and the audit log stay.
 | `AMFA_UEBA_TOUCH_MODE` | `live` (phone typing and shape count toward the decision; default), `shadow` (scored and logged only, never counted) |
 
 Per-bank policy (permitted factors, risk appetite, minimum checks, how many checks the AI may
-add, and the optional features `learning`, `payeeReputation`, `customerBypass` and `familyHelpers`) is edited in the admin console. Leaving `OTP` out of the permitted factors removes the
+add, and the optional features `learning`, `payeeReputation`, `customerBypass`, `familyHelpers` and `collection`) is edited in the admin console. A change that relaxes `collection` (turning it off, asking for less evidence, more rows a day) is refused there: one operator requests it through `/admin/api/band-gates/policy-request` and a second approves it (there is no console screen for this yet). Leaving `OTP` out of the permitted factors removes the
 authenticator from the customer flow; face or voice then serves as the dynamic factor.
 
 ## Layout

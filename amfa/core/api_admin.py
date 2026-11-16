@@ -186,6 +186,83 @@ def overview(tenant: Optional[str] = None, caller: OperatorCaller = Depends(oper
             "agent": backend_status(), "factorServices": factors.health()}
 
 
+@router.get("/band-gates")
+def band_gates(tenant: Optional[str] = None, caller: OperatorCaller = Depends(operator_caller(perm="policy:read"))):
+    """Where each amount band stands on its way from the rules to the model: counts and rates only, small figures hidden."""
+    from amfa.core import band_gate
+    tid = caller.scope_tenant(tenant)
+    with db.session() as s:
+        t = s.get(db.Tenant, tid)
+        if t is None:
+            raise ApiError(404, "TENANT_NOT_FOUND", "no such tenant")
+        policy = TenantPolicy.model_validate(t.policy)
+        return {"enabled": policy.collection.enabled, "bands": band_gate.view(s, tid, policy)}
+
+
+def _gate_call(fn):
+    from amfa.core import band_gate
+    try:
+        return fn()
+    except band_gate.GateError as e:
+        raise ApiError(e.status, e.code, e.message) from None
+
+
+class CollectionChange(Strict):
+    collection: dict
+
+
+@router.post("/band-gates/{band}/request-model")
+def band_request_model(band: int, tenant: Optional[str] = None,
+                       caller: OperatorCaller = Depends(operator_caller(perm="policy:write"))):
+    """First of two people: ask for an ELIGIBLE band to be decided by the model."""
+    from amfa.core import band_gate
+    tid = caller.scope_tenant(tenant)
+    with db.session() as s:
+        r = _gate_call(lambda: band_gate.request_model(s, tid, band, caller.operator.id))
+        return {"id": r.id, "status": r.status, "expiresAt": int(r.expires_at), "needs": "a second, different operator to approve"}
+
+
+@router.post("/band-gates/policy-request")
+def band_request_policy(body: CollectionChange, tenant: Optional[str] = None,
+                        caller: OperatorCaller = Depends(operator_caller(perm="policy:write"))):
+    """First of two people: a change that relaxes the band switch (off, less evidence, more rows a day)."""
+    from amfa.core import band_gate
+    tid = caller.scope_tenant(tenant)
+    with db.session() as s:
+        r = _gate_call(lambda: band_gate.request_policy(s, tid, body.collection, caller.operator.id))
+        return {"id": r.id, "status": r.status, "expiresAt": int(r.expires_at), "needs": "a second, different operator to approve"}
+
+
+@router.get("/band-gates/requests")
+def band_requests(tenant: Optional[str] = None, caller: OperatorCaller = Depends(operator_caller(perm="policy:read"))):
+    from amfa.core import band_gate
+    tid = caller.scope_tenant(tenant)
+    with db.session() as s:
+        return {"requests": band_gate.requests(s, tid)}
+
+
+@router.post("/band-gates/requests/{request_id}/approve")
+def band_approve(request_id: str, caller: OperatorCaller = Depends(operator_caller(perm="policy:write"))):
+    """Second of two people. Must be a different operator, allowed for the request's bank."""
+    from amfa.core import band_gate
+    with db.session() as s:
+        r = s.get(db.BandSwitchRequest, request_id)
+        if r is None:
+            raise ApiError(404, "REQUEST_NOT_FOUND", "no such request")
+        caller.scope_tenant(r.tenant_id)
+        return _gate_call(lambda: band_gate.approve(s, request_id, caller.operator.id))
+
+
+@router.post("/band-gates/{band}/revert")
+def band_revert(band: int, tenant: Optional[str] = None, caller: OperatorCaller = Depends(operator_caller(perm="policy:write"))):
+    """One person: send a band back to the rules at once. Only ever adds safety."""
+    from amfa.core import band_gate
+    tid = caller.scope_tenant(tenant)
+    with db.session() as s:
+        changed = _gate_call(lambda: band_gate.revert(s, tid, band, caller.operator.id))
+        return {"band": band, "state": "COLLECTING", "changed": changed}
+
+
 @router.get("/decisions")
 def admin_decisions(tenant: Optional[str] = None, limit: int = Query(50, ge=1, le=200),
                     transactionId: Optional[str] = None,

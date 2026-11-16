@@ -107,6 +107,36 @@ class LearningPolicy(BaseModel):
     offerBiometricsAfter: int = Field(default=5, ge=1, le=100)   # verified payments before face/voice setup is offered, optionally
 
 
+class BandGate(BaseModel):
+    """What one amount band must show, on real payments, before the model may choose its checks (docs/rbi-banded-data-collection.md,
+    section 2b). The lower bounds are hard minimums: no bank setting can ask for less evidence than this."""
+    model_config = ConfigDict(extra="forbid")
+    minGenuine: int = Field(default=5_000, ge=2_000, le=10_000_000)       # mature genuine payments in the 8-week window
+    minFraud: int = Field(default=100, ge=50, le=1_000_000)               # real fraud labels; simulated ones never count
+    minWeeks: int = Field(default=8, ge=4, le=52)                         # distinct weeks with data
+    passingEvaluations: int = Field(default=4, ge=4, le=52)               # weekly evaluations in a row that must all pass
+
+    def at_least(self, other: "BandGate") -> bool:
+        return all(getattr(self, k) >= getattr(other, k) for k in type(self).model_fields)
+
+
+class CollectionPolicy(BaseModel):
+    """The band switch. Every payment is recorded only by amount band (amfa/engine/risk/collection_bands.py), and the model may lower
+    a band's checks below the rules only once that band has passed its gate. Off by default: with it off nothing changes."""
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = False
+    gate: BandGate = Field(default_factory=BandGate)                                  # bands 0, 1 and 2
+    topGate: BandGate = Field(default_factory=lambda: BandGate(minGenuine=10_000, minFraud=200))   # band 3, Rs 1 lakh and above
+    dailyRowsPerCustomer: int = Field(default=10, ge=1, le=50)            # rows one customer can add in a day, so no one can flood a band
+    retentionDays: int = Field(default=365, ge=90, le=1825)               # anonymous rows; at least the grading window plus label maturity
+
+    @model_validator(mode="after")
+    def top_band_needs_as_much(self):
+        if not self.topGate.at_least(self.gate):
+            raise ValueError("collection.topGate may not ask for less evidence than collection.gate in any field")
+        return self
+
+
 class PayeeReputation(BaseModel):
     """Flag a payee that takes money from many customers at once, or that customers have reported (see core/payee_reputation.py)."""
     model_config = ConfigDict(extra="forbid")
@@ -234,6 +264,7 @@ class TenantPolicy(BaseModel):
     lowTouch: bool = True
     customerBypass: CustomerBypass = Field(default_factory=CustomerBypass)
     learning: LearningPolicy = Field(default_factory=LearningPolicy)
+    collection: CollectionPolicy = Field(default_factory=CollectionPolicy)
     payeeReputation: PayeeReputation = Field(default_factory=PayeeReputation)
     familyHelpers: FamilyHelpers = Field(default_factory=FamilyHelpers)
     deviceTrustDays: int = Field(default=0, ge=0, le=90)
@@ -316,6 +347,10 @@ class TenantPolicy(BaseModel):
                 raise ValueError(f"exemption ceiling exceeds the platform ceiling of {plat} minor units")
         if self.currency not in self.amountBands:
             raise ValueError(f"amountBands has no entry for {self.currency}")
+        if self.collection.enabled:
+            from .risk.collection_bands import CURRENCY
+            if self.currency != CURRENCY:
+                raise ValueError(f"the band switch's bands are in {CURRENCY}; it cannot be enabled for a {self.currency} bank")
         cb = self.customerBypass
         if cb.enabled:
             plat = platform_bypass_caps().get(self.currency)

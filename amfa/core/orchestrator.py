@@ -13,7 +13,7 @@ from sqlalchemy.orm.exc import StaleDataError
 from amfa.common import crypto
 from amfa.common.contract import (FAILED, INSUFFICIENT_DATA, PASSED, SPOOF_DETECTED, UNAVAILABLE)
 from amfa.common.web import ApiError
-from amfa.core import audit, context_builder, db, factors, otp, proofs, webhooks
+from amfa.core import audit, context_builder, db, factors, learning_store, otp, proofs, webhooks
 from amfa.engine.agent import reassess
 from amfa.engine.availability import available
 from amfa.engine.context import Band, Context, Factor, dynamic_factors
@@ -476,6 +476,7 @@ def _resolve(s, sess, txn, customer, tenant, policy: TenantPolicy, verdict: str)
                              ttl_s=policy.proofTtlSeconds, s=s)
         _learn(s, sess, txn, customer, tenant)
         _teach_phase(s, txn, customer, policy)
+        learning_store.record(s, txn, now)
         webhooks.emit(s, tenant.id, "transaction.authorized", {
             "transactionId": txn.id, "externalId": txn.external_id, "sessionId": sess.id,
             "proof": proof["token"], "factors": passed, "expiresAt": proof["expiresAt"]})
@@ -488,6 +489,7 @@ def _resolve(s, sess, txn, customer, tenant, policy: TenantPolicy, verdict: str)
             _event(s, sess, "HIGH", "PRESENTATION_ATTACK",
                    "presentation attack or replay detected; session and customer locked")
             _open_review(s, sess, txn, "presentation attack detected; customer locked pending review")
+        learning_store.record(s, txn, now)
         webhooks.emit(s, tenant.id, "transaction.denied", {
             "transactionId": txn.id, "externalId": txn.external_id, "sessionId": sess.id,
             "reason": sess.resolution})
@@ -553,6 +555,7 @@ def _learn(s, sess, txn, customer, tenant) -> None:
 def _expire(s, sess, txn) -> None:
     sess.status, sess.resolved_at, sess.resolution = EXPIRED, time.time(), "TIMEOUT"
     txn.status, txn.updated_at = "EXPIRED", time.time()
+    learning_store.record(s, txn)
     webhooks.emit(s, sess.tenant_id, "transaction.expired",
                   {"transactionId": txn.id, "externalId": txn.external_id, "sessionId": sess.id})
 
@@ -707,6 +710,9 @@ def review_decision(s, case: db.ReviewCase, approve: bool, operator: db.Operator
     # a rejection is the reviewer's judgement, not a confirmed fraud: training weighs labels by source
     s.add(db.RiskLabel(tenant_id=tenant.id, transaction_id=txn.id, label="GENUINE" if approve else "FRAUD",
                        source="review_verdict", reason=note[:280] or None))
+    # the payment has settled; its learning row picks up the verdict just added (or, if it already exists, is labelled now)
+    if learning_store.record(s, txn) is None:
+        learning_store.apply_label(s, txn.id, "GENUINE" if approve else "FRAUD", "review_verdict")
     webhooks.emit(s, tenant.id, "review.resolved", {"caseId": case.id, "transactionId": txn.id,
                                                      "approved": approve})
     audit.record(f"operator:{operator.id}", "review.approve" if approve else "review.reject", case.id,

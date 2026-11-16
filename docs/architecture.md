@@ -152,9 +152,12 @@ biometric, a name, an account number or an exact location; devices, payees and p
 | `known_payee` | which customers paid which payee and when: the basis of payee reputation (mule detection) | `core/payee_reputation.py` |
 | `bypass_limit` | a customer's own "no extra checks up to X a day", with a raise waiting out its cooling-off | `core/bypass.py` |
 | `trusted_helper` | a family member's phone the customer chose (a label and a keyed hash), with an invite code kept only as a hash | `core/helpers.py` |
+| `learning_row` | the band switch's anonymous record of each settled payment: amount band, small categories, what the rules and the model each asked for, the outcome and label, and the week. **No customer, amount, payee, device, place or time.** A keyed-hash link to its payment, only so a late fraud report can find it, is wiped at 90 days | `core/learning_store.py` |
+| `band_gate` | per bank and amount band: COLLECTING, ELIGIBLE or MODEL, and the last grading's counts and rates | `core/band_gate.py` |
+| `band_switch_request` | a change that relaxes the band switch, waiting for a second operator | `core/band_gate.py` |
 
-Every one of these is optional per bank (`learning`, `payeeReputation`, `customerBypass`, `familyHelpers` in the tenant policy) and
-off by default. Transactions and everything derived from them are deleted after 90 days (hourly, and `python -m amfa.cli purge`;
+Every one of these is optional per bank (`learning`, `payeeReputation`, `customerBypass`, `familyHelpers`, `collection` in the tenant
+policy) and off by default. Transactions and everything derived from them are deleted after 90 days (hourly, and `python -m amfa.cli purge`;
 `AMFA_RETENTION_DAYS`), and the risk model refuses to load if trained on a longer window. See
 [customer-limit.md](customer-limit.md) for what goes and what stays, [new-customer-learning.md](new-customer-learning.md) for the
 learning phase and [family-helper.md](family-helper.md) for helpers.
@@ -162,3 +165,30 @@ learning phase and [family-helper.md](family-helper.md) for helpers.
 The risk model is one model for everyone; what is personal is the history it is given. Its release gate (beats a logistic-regression
 baseline and a per-segment fairness ratio of at most 1.25) currently fails for older customers (about 2.3), so the model in use was
 activated by hand. [dataset-evaluation.md](dataset-evaluation.md) tests it on five different simulated banks.
+
+## 8. The band switch: when the model may lower checks
+
+The bank gives us no data to train the model on, so the model (trained on simulated customers) is not trusted to **lower** checks
+until real payments show it can.
+
+- **Bands.** Every payment is put in one of four amount bands: ₹0–2,000, ₹2,000–10,000, ₹10,000–1 lakh, ₹1 lakh and above. The
+  band is the higher of the payment's own and the band of its 24-hour total, so a split payment never drops a band. The edges are
+  fixed in code (`engine/risk/collection_bands.py`).
+- **Collecting.** Until a band has earned the model, its payments get every check of the model's plan plus every check the rules
+  ask for (`engine/band_switch.py`, `engine/decide.py`). It is never weaker than the model alone; a test sweeps 7,200 situations.
+- **Grading.** Each night, each band's anonymous rows are graded: the rules against the model on the same payments, counting only
+  rows old enough to have been reported (`core/band_gate.py`).
+- **Eligible.** After enough real evidence (5,000 genuine payments and 100 real fraud reports in 8 weeks; double for ₹1 lakh+)
+  and 4 weekly passes in a row, the band is ELIGIBLE. The model must miss no more fraud and bother no more honest customers than
+  the rules.
+- **Switching.** Two different operators must approve moving a band to the model. One operator can send it back at any time.
+- **Fallback.** It goes back on its own after 2 lost weekly gradings, or at once in the ₹1 lakh+ band.
+- **Fail closed.** If anything is missing, unreadable or stale, the band is decided by the rules.
+- **What stays unchanged:**
+  - customers in the learning phase and account changes;
+  - the floors, hard warning signs, payee holds and proofs;
+  - everything, when the bank has the switch off (the default).
+
+Turning it off, or asking it for less evidence, also needs two operators. The full design, the measurements and the security
+review are in [rbi-banded-data-collection.md](rbi-banded-data-collection.md); a simulated bank replayed through it is in
+[band-switch-replay.md](band-switch-replay.md).

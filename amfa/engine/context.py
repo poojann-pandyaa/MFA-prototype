@@ -171,6 +171,10 @@ class Policy(BaseModel):
     learningNewPayeeMinor: Optional[int] = None
     # the customer's own no-extra-check limit in force right now, in minor units (None = they set none)
     customerBypassMinor: Optional[int] = None
+    # the band switch (engine/band_switch.py): on for this bank, and the state of this payment's amount band. Anything but MODEL
+    # means the rules set the minimum and the model may only add to it
+    bandSwitch: bool = False
+    bandState: Optional[str] = None
 
 
 class Context(BaseModel):
@@ -207,6 +211,10 @@ class Plan(BaseModel):
     unmet: list[Factor] = Field(default_factory=list)
     substituted: dict[str, str] = Field(default_factory=dict)
     rulesBaseline: list[Factor] = Field(default_factory=list)
+    # a payment's coarse view for the band switch (engine/band_switch.view): logged, never decides
+    bandView: Optional[dict] = None
+    bandState: Optional[str] = None                                  # the band's state this payment was decided under
+    bandRulesAdded: list[Factor] = Field(default_factory=list)       # checks the rules added while the band is not on the model
     orgAdded: list[Factor] = Field(default_factory=list)
     agentAdded: list[Factor] = Field(default_factory=list)
     agentCapped: list[Factor] = Field(default_factory=list)

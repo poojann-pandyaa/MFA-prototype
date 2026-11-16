@@ -19,6 +19,7 @@ from amfa.engine.context import (Band, BehaviouralCtx, Capability, Context, Devi
 from amfa.engine.policy import TenantPolicy
 from amfa.engine.risk import declared
 from amfa.engine.risk import features as risk_features
+from amfa.engine.risk.collection_bands import band_of
 from amfa.engine.risk.threat import is_routine
 
 HOUR_HISTORY_MIN = 8
@@ -259,6 +260,10 @@ def assemble(s, tenant: db.Tenant, customer: db.Customer, txn_id: str, t: TxnInp
     ctx.transaction.exposureMinor = int(round(exposure * 100))
     if t.type in (TxnType.TRANSFER, TxnType.PAYMENT, TxnType.CARD_NOT_PRESENT):
         ctx.policy.customerBypassMinor = bypass.limit_for(s, customer.id, policy, t.currency, now)
+        if policy.collection.enabled:            # the band switch: the state of this payment's band, read fail-closed
+            from amfa.core import band_gate
+            ctx.policy.bandSwitch = True
+            ctx.policy.bandState = band_gate.state_for(s, tenant.id, band_of(ctx.transaction.exposureMinor), now)
     return Assembled(ctx=ctx, preview=preview, facts=facts, derived=derived, policy=policy, features=features)
 
 

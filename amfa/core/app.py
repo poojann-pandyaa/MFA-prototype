@@ -14,7 +14,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from amfa import config
 from amfa.common import logs, web
-from amfa.core import api_admin, api_client, api_tenant, db, factors, orchestrator, peers, proofs, retention, webhooks
+from amfa.core import api_admin, api_client, api_tenant, band_gate, db, factors, orchestrator, peers, proofs, retention, webhooks
 from amfa.engine.agent import backend_status, build_agent
 
 log = logging.getLogger("amfa.core")
@@ -108,6 +108,11 @@ class Sweeper(threading.Thread):
                         retention.purge(s)
                 except Exception:
                     log.exception("retention purge failed")
+                try:                                 # each bank's amount bands graded, rules against model: checked hourly, due nightly
+                    with db.session() as s:
+                        band_gate.run_due(s)
+                except Exception:
+                    log.exception("band grading failed")
             if time.time() - last_peers > 86_400:    # how customers who answered the same way really pay: nightly
                 last_peers = time.time()
                 try:
