@@ -266,3 +266,10 @@ select.input { appearance: none; }
 .new-row .sub { color: var(--brand-deep); font-size: 13px; display: block; }
 .empty { text-align: center; padding: 24px 12px; color: var(--muted); display: flex; flex-direction: column; align-items: center; gap: 10px; }
 @media (max-width: 360px) { .big-amount { font-size: 42px; } .quick { gap: 4px; } h1 { font-size: 24px; } }
+
+/* in-flight indicator (see js/api.js) */
+#busybar { position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 1000; pointer-events: none; opacity: 0; transition: opacity 0.15s;
+  background: linear-gradient(90deg, transparent, var(--brand), transparent) no-repeat; background-size: 40% 100%; animation: busybar 1s linear infinite; }
+#busybar.on { opacity: 1; }
+@keyframes busybar { from { background-position: -40% 0; } to { background-position: 140% 0; } }
+@media (prefers-reduced-motion: reduce) { #busybar { animation: none; background-size: 100% 100%; } }
