@@ -93,7 +93,7 @@ The model alone isn't enough, because a model can be wrong or be fooled. Rules a
 
 **How we thought about it.** A tiny, ordinary payment to someone the customer pays often doesn't represent much risk, *as long as nothing else looks wrong*. So allow a lighter level for those, with strict conditions.
 
-**The flow we chose.** For payments in the bank's lowest amount band, the lighter level (a code plus the quiet typing-behaviour check) is allowed only when **all** of these hold: the model had asked for more than that light level, the amount is not unusually large for this customer, and none of the "hard warning signs" is present (recent security incidents, a flagged payee, recent changes to account details, a burst of new payees, and similar).
+**The flow we chose.** For payments in the bank's lowest amount band, the lighter level (a code plus the quiet typing-behaviour check) is allowed only when **all** of these hold: the model had asked for more than that light level but not for one of its two highest levels, the amount is not unusually large for this customer, none of the "hard warning signs" is present (recent security incidents, a flagged payee, recent changes to account details, a burst of new payees, and similar), and, from ₹2,000 sent in a day, the payee is one the customer first paid at least 30 days ago (see D39).
 
 **Why these conditions.** The relief has to be earned. A small amount is not safe by itself, because attackers like small test payments, so any real warning sign cancels it. Actions that aren't payments (adding a payee, changing a setting) never get it, because their danger isn't about the amount.
 
@@ -562,7 +562,7 @@ Every significant choice, in the order it was made. Each entry says **what** was
 - **Cost:** the list is judgement; it is easy to widen or narrow it.
 
 ### D36. Relief for ordinary traffic: regular payees, new customers, tiny payments
-- **Decision:** a regular payee at the usual amount stays light even at a medium amount; a new customer's ordinary payments get a moderate level instead of "stranger"; payments below a small ceiling to existing payees can need only the emailed code (the bank turned this on for demo); a quiet check that can't run at a low level is dropped, not swapped for a face scan.
+- **Decision:** a regular payee at the usual amount stays light even at a medium amount, unless the model is confident (D39); a new customer's ordinary payments get a moderate level instead of "stranger"; payments below a small ceiling to existing payees can need only the emailed code (the bank turned this on for demo); a quiet check that can't run at a low level is dropped, not swapped for a face scan.
 - **Why:** friction should follow danger. A new customer's "everything is unfamiliar" is not evidence. All reliefs switch off on any warning sign, and none applies to very large payments or to account changes.
 - **Cost:** a patient fraudster could try to look ordinary; the daily limit and warning signs bound that.
 
@@ -575,6 +575,11 @@ Every significant choice, in the order it was made. Each entry says **what** was
 - **Decision:** the AI helper keeps its add-only role. Waiving checks and ending reviews is done by explainable rules.
 - **Why:** a language model can be talked into a mistake; a wrong waiver is the costly kind of error, while a wrong addition only costs a little friction.
 - **Where it is consulted:** only where it can help. Not when the risk is already low, not where a relief has already judged the request ordinary, and not for a customer with no history, because every signal it sees about a brand-new account reads "unfamiliar" and says nothing about fraud. In testing, the first version of this rule had the helper adding a face check to a ₹500 payment to an established payee for exactly that reason.
+
+### D39. The small-payment and regular-payee reliefs no longer override a confident model, and the small-payment relief needs an established payee from ₹2,000
+- **Decision:** the small-payment relief and the regular-payee relief lower only the model's lowest step-up level (T2) to the light level, never T3 or T4. From ₹2,000 sent in 24 hours (a bank setting, `smallPaymentEstablishedPayeeFromMinor`), the small-payment relief also needs a payee the customer first paid at least 30 days ago.
+- **Why:** coached scams are paid from the customer's own phone, at home, at a few times their usual amount, to an account that is new or only recently paid. No hard warning sign trips, so the relief held them at the light level even when the model ranked them among its most suspicious payments. In a replay of two simulated banks (2,000 customers each, 237,151 payments), it let through 129 of 346 frauds at ₹2,000–10,000 against customers aged 60–74; the model alone had asked for a face check or more on 97% of them. The regular-payee relief had the same hole: a scammer paid every week or two becomes a "regular payee" after a month. With this change, fraud caught at ₹2,000–10,000 rose from 79.3% to 98.4% (60–74: 62.7% to 95.4%), and all fraud caught from 86.6% to 98.6%.
+- **Cost:** honest payments asked for a face check or more rose from 29.85% to 30.56%. No age group moves closer to the fairness limit of 1.25 times the average except those over 60, who stay well below the average (60–74: 0.71 to 0.80 of it). Customers aged 45–59 were already over the limit (1.29) and are at 1.28 after; that is a separate problem. A regular payee at the usual amount now gets a face check when the model is confident, so some genuine ₹10,000–1,00,000 payments to long-standing payees are no longer light. Of the frauds still missed at ₹2,000–10,000 (18), most are scam payees paid often enough that the model itself no longer finds them unusual; reports from victims are what would flag them.
 
 ---
 

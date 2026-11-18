@@ -163,6 +163,8 @@ class Policy(BaseModel):
     maxFactors: int = 3
     guidance: Optional[str] = Field(default=None, max_length=1000)
     smallPaymentCap: bool = True
+    # from this 24-hour total (minor units) the small-payment cap also needs an established payee; None = never needs one
+    smallPaymentEstablishedPayeeFromMinor: Optional[int] = 2_000_00
     # the strongest automated checks replace a person unless a hard-hold sign is present (see adjudicate.py)
     lowTouch: bool = True
     # LEARNING while the model does not yet know this customer: light checks, set by learning_plan; READY once it does

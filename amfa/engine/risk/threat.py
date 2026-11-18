@@ -58,11 +58,13 @@ REGULAR_USUAL_RATIO = 3.0      # and a payment is usual for it when under this m
 
 def regular_payee_relief(level: str, f: dict) -> tuple[str, Optional[str]]:
     """Mid-sized payments to a payee the customer has long paid, at about the usual amount, from a device
-    they use, with no warning sign: kept at the light level. Same shape as small_payment_cap."""
+    they use, with no warning sign: kept at the light level. Same shape as small_payment_cap, and like it never lowers a
+    level above CAP_CEILING: a scammer paid every week or two becomes a "regular payee" after a month."""
     ratio = f.get("amount_vs_payee_avg")
     regular = ((f.get("payee_seen") or 0) >= REGULAR_MIN_PAYMENTS and (f.get("payee_age_days") or 0) >= REGULAR_MIN_AGE_DAYS
                and ratio is not None and ratio < REGULAR_USUAL_RATIO and (f.get("device_seen") or 0) > 0)
-    if not regular or LEVELS.index(level) <= LEVELS.index(CAP_LEVEL) or hard_signals(f):
+    if (not regular or LEVELS.index(level) <= LEVELS.index(CAP_LEVEL) or LEVELS.index(level) > LEVELS.index(CAP_CEILING)
+            or hard_signals(f)):
         return level, None
     return CAP_LEVEL, f"regular payee at the usual amount, kept at {CAP_LEVEL}"
 
@@ -82,15 +84,40 @@ def new_customer_relief(level: str, f: dict) -> tuple[str, Optional[str]]:
     return COLD_START_LEVEL, f"new customer with too little history to judge, kept at {COLD_START_LEVEL}"
 
 
-def small_payment_cap(level: str, f: dict) -> tuple[str, Optional[str]]:
+# The highest model level the small-payment cap may lower. T3 and above mean the model ranks the payment among the most
+# suspicious 1% of genuine traffic: a coached scam from the customer's own phone, at a few times their usual amount, looks like
+# that and nothing else gives it away, so a small amount alone is no reason to set the model aside.
+CAP_CEILING = "T2"
+# From this 24-hour total (minor units, still inside the bank's LOW band) the cap also needs a payee the customer first paid at
+# least REGULAR_MIN_AGE_DAYS ago. Below it, everyday payments to anyone stay light. Scammers are paid at a few thousand rupees,
+# to an account that is new or only recently paid.
+ESTABLISHED_PAYEE_FROM_MINOR = 2_000_00
+
+
+def established_payee(f: dict) -> bool:
+    """A payee this customer verifiably paid before, first at least REGULAR_MIN_AGE_DAYS ago."""
+    return (f.get("payee_seen") or 0) >= 1 and (f.get("payee_age_days") or 0) >= REGULAR_MIN_AGE_DAYS
+
+
+def needs_established_payee(exposure_minor: Optional[int], from_minor: Optional[int]) -> bool:
+    """Whether a LOW-band payment is large enough that the cap needs an established payee. An unknown total is never small."""
+    if from_minor is None:
+        return False
+    return exposure_minor is None or exposure_minor >= from_minor
+
+
+def small_payment_cap(level: str, f: dict, *, payee_check: bool = False) -> tuple[str, Optional[str]]:
     """The level to use for a payment already known to be small (the caller checks the amount line).
-    Returns (level, why it was lowered or None). Never raises a level, and never lowers one when a
-    hard signal is present or the amount is unusual for this customer."""
+    Returns (level, why it was lowered or None). Never raises a level, and never lowers one above CAP_CEILING, when a
+    hard signal is present or when the amount is unusual for this customer. With [payee_check] (see needs_established_payee)
+    the payee must also be established."""
     if f.get("amount_log") is None:   # not a payment (adding a payee, a limit or device change): never lenient
         return level, None
-    if LEVELS.index(level) <= LEVELS.index(CAP_LEVEL) or hard_signals(f):
+    if LEVELS.index(level) <= LEVELS.index(CAP_LEVEL) or LEVELS.index(level) > LEVELS.index(CAP_CEILING) or hard_signals(f):
         return level, None
     if (f.get("amount_ratio") or 0) >= USUAL_RATIO:
+        return level, None
+    if payee_check and not established_payee(f):
         return level, None
     return CAP_LEVEL, f"small payment within this customer's usual, kept at {CAP_LEVEL}"
 

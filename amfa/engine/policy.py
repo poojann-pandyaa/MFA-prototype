@@ -257,6 +257,10 @@ class TenantPolicy(BaseModel):
     # small payments within a customer's usual never go above the lightest extra check, unless a hard
     # warning sign is present; "small" is the LOW amount band above
     smallPaymentCap: bool = True
+    # from this much sent in 24 hours (minor units, still inside the LOW band) a small payment is held light only when it goes to
+    # a payee the customer first paid at least 30 days ago: coached scams are paid at a few thousand rupees to a new or recently
+    # added account. 0 asks for an established payee across the whole LOW band.
+    smallPaymentEstablishedPayeeFromMinor: int = Field(default=2_000_00, ge=0)
     # a payment that is routine for this customer (see threat.is_routine) is not treated as high-value for the bank's high-value
     # floor, so a weekly lakh to the same wholesaler does not need three factors every week; the legal minimum still applies
     routineEasesHighValue: bool = True

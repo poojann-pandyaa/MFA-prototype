@@ -108,7 +108,8 @@ def pipeline(rows, m):
     rank = []
     for k, r in zip(mrank, rows):
         lvl = LEVELS[k]
-        lvl = small_payment_cap(lvl, r.features)[0] if r.exposure < LOW_LINE else routine_relief(lvl, r.features)[0]
+        lvl = (small_payment_cap(lvl, r.features, payee_check=train.mid_payee_check(r))[0] if r.exposure < LOW_LINE
+               else routine_relief(lvl, r.features)[0])
         lvl = raise_for_habit(lvl, habit_level(r.features.get("habit_surprise"), m.habit_cutoffs))[0]
         rank.append(LEVELS.index(lvl))
     rank = np.array(rank)
@@ -159,7 +160,8 @@ def cold_start(rows, m):
         tr, got = Tracker(), None
         for i, (r, a, sc) in enumerate(seq):
             lvl = level(a, m.cutoffs)
-            lvl = small_payment_cap(lvl, r.features)[0] if r.exposure < LOW_LINE else routine_relief(lvl, r.features)[0]
+            lvl = (small_payment_cap(lvl, r.features, payee_check=train.mid_payee_check(r))[0] if r.exposure < LOW_LINE
+               else routine_relief(lvl, r.features)[0])
             lvl = raise_for_habit(lvl, habit_level(r.features.get("habit_surprise"), m.habit_cutoffs))[0]
             alarm = LEVELS.index(lvl) >= 2
             learning = not tr.ready()

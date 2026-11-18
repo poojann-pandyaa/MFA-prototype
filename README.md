@@ -157,8 +157,10 @@ See [docs/customer-limit.md](docs/customer-limit.md).
 
 **Small payments.** A payment is held at T1 (OTP plus the passive behaviour check, still two factors)
 instead of the model's higher level when all of these hold: the money sent in the last 24 hours is in the
-bank's LOW amount band (under Rs 10,000 by default), the payment is under 5x the customer's usual, and
-no hard warning sign is present (spoof attempt, repeated failed checks, payee on a risk list, SIM
+bank's LOW amount band (under Rs 10,000 by default), the model asked for T2 (never T3 or T4: a confident
+model is not set aside for a small amount), the payment is under 5x the customer's usual, from Rs 2,000 sent in
+24 hours the payee is one the customer first paid at least 30 days ago (`smallPaymentEstablishedPayeeFromMinor`),
+and no hard warning sign is present (spoof attempt, repeated failed checks, payee on a risk list, SIM
 change within 48 h, password reset or contact change within 24 h, an account setting changed today, or
 3+ new payees today). Account changes are never treated as small. The plan records both levels
 (`modelLevel`, `threatLevel`) and the reason (`capReason`). Switch it off per bank with

@@ -28,6 +28,7 @@ from dataclasses import replace
 from amfa.engine.risk.features import DAY, HISTORY_DAYS, build, exposure_24h
 from amfa.engine.risk.scenarios import START, Row, simulate
 from amfa.engine.risk.threat import LEVELS, habit_level, level, raise_for_habit, routine_relief, small_payment_cap
+from amfa.engine.risk.train import mid_payee_check
 
 LOW_LINE = 10_000
 MODEL = next((a.split('=', 1)[1] for a in sys.argv if a.startswith('--model=')), None)    # a model version, to measure one that is not active
@@ -36,7 +37,8 @@ MODEL = next((a.split('=', 1)[1] for a in sys.argv if a.startswith('--model=')),
 def experienced_level(m, r, raw) -> str:
     """What the customer would be asked, the way decide() combines model, reliefs and habit."""
     lvl = level(raw, m.cutoffs)
-    lvl = small_payment_cap(lvl, r.features)[0] if r.exposure < LOW_LINE else routine_relief(lvl, r.features)[0]
+    lvl = (small_payment_cap(lvl, r.features, payee_check=mid_payee_check(r))[0] if r.exposure < LOW_LINE
+           else routine_relief(lvl, r.features)[0])
     return raise_for_habit(lvl, habit_level(r.features.get("habit_surprise"), m.habit_cutoffs))[0]
 
 

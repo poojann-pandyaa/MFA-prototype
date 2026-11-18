@@ -10,8 +10,8 @@ from .availability import apply_availability, apply_org_requirements, available,
 from .context import SELECTABLE, Band, Context, Factor, Plan, dynamic_factors
 from .rationale import counterfactual, reasoning
 from .risk import scorer
-from .risk.threat import (BAND, hard_signals, COLD_START_PAYMENTS, RESPONSE, REVIEW_LEVEL, customer_bypass, new_customer_relief,
-                          raise_for_habit, regular_payee_relief, routine_relief, small_payment_cap)
+from .risk.threat import (BAND, hard_signals, COLD_START_PAYMENTS, RESPONSE, REVIEW_LEVEL, customer_bypass, needs_established_payee,
+                          new_customer_relief, raise_for_habit, regular_payee_relief, routine_relief, small_payment_cap)
 from .rules import select_by_rules
 
 
@@ -30,7 +30,8 @@ def _relieved(r, features: dict, ctx: Context) -> tuple[str, Optional[str]]:
     lvl, why = r.level, None
     exposure = ctx.transaction.exposureBand
     if ctx.policy.smallPaymentCap and exposure is Band.LOW:
-        lvl, why = small_payment_cap(r.level, features)
+        lvl, why = small_payment_cap(r.level, features, payee_check=needs_established_payee(
+            ctx.transaction.exposureMinor, ctx.policy.smallPaymentEstablishedPayeeFromMinor))
     elif (ctx.policy.smallPaymentCap and ctx.policy.lowTouch and exposure is Band.MEDIUM
           and not ctx.transaction.isNewBeneficiary):
         lvl, why = regular_payee_relief(r.level, features)

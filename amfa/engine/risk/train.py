@@ -19,8 +19,8 @@ from .features import CATEGORICAL, FEATURES, HISTORY_DAYS, MONOTONE, vector
 from .scenarios import ATTACKS, FEEDS, START, amount_band, dataset, AMOUNT_BANDS
 from .collection_bands import band_of as collection_band
 from .scorer import ACTIVE, MANIFEST, RiskModel, root, set_candidate, sha256
-from .threat import (GENUINE_SHARE_AT_OR_ABOVE, HABIT_SHARE_AT_OR_ABOVE, LEVELS, habit_level, level, raise_for_habit,
-                     routine_relief, small_payment_cap)
+from .threat import (ESTABLISHED_PAYEE_FROM_MINOR, GENUINE_SHARE_AT_OR_ABOVE, HABIT_SHARE_AT_OR_ABOVE, LEVELS, habit_level, level,
+                     needs_established_payee, raise_for_habit, routine_relief, small_payment_cap)
 
 DAY = 86400.0
 TRAIN_END, VALID_END = 105, 128   # days after START; the rest of the simulation is the test set
@@ -66,6 +66,11 @@ def wquantile(x: np.ndarray, w: np.ndarray, q: float) -> float:
 
 
 LOW_LINE_RUPEES = 10_000   # the bank's default LOW amount band: below this a payment is "small"
+
+
+def mid_payee_check(r) -> bool:
+    """Whether the small-payment cap needs an established payee for simulator row [r], at the bank's default line."""
+    return needs_established_payee(int(round(r.exposure * 100)), ESTABLISHED_PAYEE_FROM_MINOR)
 
 
 def evaluate(raw, prob, y, w, scenario, segment, feed, rank, groups) -> dict:
@@ -230,7 +235,8 @@ def run(customers: int = 20000, days: int = 150, seed: int = 7, activate: bool =
     rank = []
     for m, r in zip(model_rank, te_rows):
         lvl = LEVELS[m]
-        lvl = small_payment_cap(lvl, r.features)[0] if r.exposure < LOW_LINE_RUPEES else routine_relief(lvl, r.features)[0]
+        lvl = (small_payment_cap(lvl, r.features, payee_check=mid_payee_check(r))[0] if r.exposure < LOW_LINE_RUPEES
+               else routine_relief(lvl, r.features)[0])
         lvl = raise_for_habit(lvl, habit_level(r.features.get("habit_surprise"), habit_cutoffs))[0]
         rank.append(LEVELS.index(lvl))
     rank = np.array(rank)

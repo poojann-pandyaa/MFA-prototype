@@ -222,6 +222,7 @@ def assemble(s, tenant: db.Tenant, customer: db.Customer, txn_id: str, t: TxnInp
         capability=capability,
         policy=Policy(actionFloor=floor, guidance=policy.agent.guidance if policy.agent.enabled else None,
                       smallPaymentCap=policy.smallPaymentCap, lowTouch=policy.lowTouch,
+                      smallPaymentEstablishedPayeeFromMinor=policy.smallPaymentEstablishedPayeeFromMinor,
                       phase=phase.current(s, customer, policy, now),
                       learningDailyMinor=policy.learning.dailyLimitMinor if policy.learning.enabled else None,
                       learningNewPayeeMinor=policy.learning.newPayeeLimitMinor if policy.learning.enabled else None),

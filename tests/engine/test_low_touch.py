@@ -156,23 +156,31 @@ REGULAR = CALM | {"payee_seen": 6, "payee_age_days": 90.0, "amount_vs_payee_avg"
 
 
 def test_a_regular_payee_at_the_usual_amount_stays_light_even_at_a_medium_amount(model_says):
-    model_says("T3")
+    model_says("T2")
     plan = decide(ctx(new=False, exposure=Band.MEDIUM), features=REGULAR)
-    assert plan.threatLevel == "T1" and plan.modelLevel == "T3" and "regular payee" in plan.capReason
+    assert plan.threatLevel == "T1" and plan.modelLevel == "T2" and "regular payee" in plan.capReason
     assert set(plan.required) == {Factor.OTP, Factor.UEBA}
+
+
+@pytest.mark.parametrize("level", ["T3", "T4"])
+def test_a_confident_model_is_never_set_aside_for_a_regular_payee(model_says, level):
+    """A scammer paid every week or two from the customer's own phone is a "regular payee" after a month."""
+    model_says(level)
+    plan = decide(ctx(new=False, exposure=Band.MEDIUM), features=REGULAR)
+    assert plan.threatLevel == level and plan.capReason is None
 
 
 @pytest.mark.parametrize("change", [{"payee_seen": 2}, {"payee_age_days": 10.0}, {"amount_vs_payee_avg": 3.5},
                                     {"device_seen": 0}, {"sim_changed_hours": 3.0}, {"spoof_7d": 1}])
 def test_the_regular_payee_relief_needs_everything_to_look_normal(model_says, change):
-    model_says("T3")
+    model_says("T2")
     plan = decide(ctx(new=False, exposure=Band.MEDIUM), features=REGULAR | change)
-    assert plan.threatLevel == "T3"
+    assert plan.threatLevel == "T2"
 
 
 def test_the_regular_payee_relief_does_not_apply_to_very_large_amounts(model_says):
-    model_says("T3")
-    assert decide(ctx(new=False, exposure=Band.HIGH, amount=Band.HIGH), features=REGULAR).threatLevel == "T3"
+    model_says("T2")
+    assert decide(ctx(new=False, exposure=Band.HIGH, amount=Band.HIGH), features=REGULAR).threatLevel == "T2"
 
 
 NEWBIE = CALM | {"history_count": 1, "amount_ratio": None, "device_seen": 0}
