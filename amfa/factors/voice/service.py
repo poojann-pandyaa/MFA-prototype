@@ -95,6 +95,13 @@ def enroll(req: EnrollRequest) -> EnrollResult:
                         latencyMs=ms())
 
 
+def _pad_verdict(score: float) -> str:
+    """SHADOW while the anti-spoof model only reports (models.PAD_MODE); the session never counts it as a spoof warning."""
+    if vm.PAD_MODE == "shadow":
+        return "SHADOW"
+    return "BONAFIDE" if score > vm.PAD_THRESHOLD else "SPOOF"
+
+
 @app.post("/factor/verify", response_model=FactorResult, dependencies=[Depends(internal_auth)])
 def verify(req: VerifyRequest) -> FactorResult:
     t0 = time.perf_counter()
@@ -122,11 +129,12 @@ def verify(req: VerifyRequest) -> FactorResult:
         return result(SPOOF_DETECTED, hit, livenessPassed=False)
 
     pad_score = vm.pad().score(wav)
-    bonafide = pad_score > vm.PAD_THRESHOLD
-    pad = PadResult(ran=True, verdict="BONAFIDE" if bonafide else "SPOOF",
+    shadow = vm.PAD_MODE == "shadow"
+    bonafide = shadow or pad_score > vm.PAD_THRESHOLD            # in shadow the anti-spoof score decides nothing
+    pad = PadResult(ran=True, verdict=_pad_verdict(pad_score),
                     score=round(pad_score, 4), threshold=round(vm.PAD_THRESHOLD, 4),
                     model=vm.pad().version, mode=req.padMode)
-    common = dict(livenessPassed=bonafide, livenessScore=round(pad_score, 4), pad=pad)
+    common = dict(livenessPassed=None if shadow else bonafide, livenessScore=round(pad_score, 4), pad=pad)
     if not bonafide and req.padMode is PadMode.TERMINAL:
         return result(SPOOF_DETECTED, "PRESENTATION_ATTACK_DETECTED", **common)
 
@@ -186,8 +194,8 @@ def identify_voice(req: IdentifyRequest) -> dict:
         return out("REJECTED_INPUT", problem, quality=q)
 
     pad_score = vm.pad().score(wav)
-    bonafide = pad_score > vm.PAD_THRESHOLD
-    pad = {"verdict": "BONAFIDE" if bonafide else "SPOOF", "score": round(pad_score, 4),
+    bonafide = vm.PAD_MODE == "shadow" or pad_score > vm.PAD_THRESHOLD
+    pad = {"verdict": _pad_verdict(pad_score), "score": round(pad_score, 4),
            "threshold": round(vm.PAD_THRESHOLD, 4), "mode": req.padMode.value}
     if not bonafide and req.padMode is PadMode.TERMINAL:
         return out("REJECTED_SPOOF", "PRESENTATION_ATTACK_DETECTED", pad=pad)
@@ -218,4 +226,4 @@ def health() -> dict:
     return {"service": "voice", "status": "up" if all(a["verified"] for a in pins) else "degraded",
             "models": pins, "matchThreshold": vm.MATCH_THRESHOLD, "padThreshold": vm.PAD_THRESHOLD,
             "identThreshold": vm.IDENT_THRESHOLD, "identMargin": vm.IDENT_MARGIN,
-            "padDefaultMode": "advisory", "promptCheck": vm.PROMPT_CHECK, "store": store.ping()}
+            "padDefaultMode": "advisory", "padMode": vm.PAD_MODE, "promptCheck": vm.PROMPT_CHECK, "store": store.ping()}

@@ -100,8 +100,9 @@ def test_templates_from_another_model_version_are_left_out(env):
     assert r["gallerySize"] == 1 and r["decision"] == "REJECTED_NO_MATCH"
 
 
-def test_a_spoofed_probe_never_reaches_the_gallery(env):
+def test_a_spoofed_probe_never_reaches_the_gallery(env, monkeypatch):
     client, pad = env
+    monkeypatch.setattr(vm, "PAD_MODE", "on")                    # the anti-spoof model deciding, as before
     enrol("tn_a8", {"cu_1": 1})
     pad.score_value = vm.PAD_THRESHOLD - 1
     r = probe(client, "tn_a8", 1.0)
@@ -118,3 +119,96 @@ def test_bad_audio_is_an_input_rejection(env, monkeypatch):
 
 def test_the_ident_threshold_is_never_below_the_verification_threshold():
     assert vm.IDENT_THRESHOLD >= vm.MATCH_THRESHOLD and vm.IDENT_MARGIN >= 0
+
+
+# ---- the anti-spoof model in shadow (AMFA_VOICE_PAD, default) -------------------------------------------------------------
+# the score every real voice got on 2026-11-18 (9 of 9 phone recordings, 3 people): far below the line, i.e. "fake"
+MEASURED_REAL_VOICE = -11.97
+
+
+def check(client, tenant, user, code):
+    body = {"tenantId": tenant, "userId": user, "sessionId": "s", "transactionId": "t", "challenge": {},
+            "padMode": PadMode.ADVISORY.value, "payload": {"audio": str(code)}}
+    return client.post("/factor/verify", json=body).json()
+
+
+def test_the_anti_spoof_model_is_in_shadow_by_default():
+    assert vm.PAD_MODE == "shadow"
+
+
+def test_in_shadow_a_real_voice_it_calls_fake_passes_without_a_warning_and_its_score_is_kept(env):
+    client, pad = env
+    enrol("tn_v1", {"cu_1": 1})
+    pad.score_value = MEASURED_REAL_VOICE
+    r = check(client, "tn_v1", "cu_1", 1.0)
+    assert r["status"] == "PASSED" and r["failureReason"] is None
+    assert r["pad"]["verdict"] == "SHADOW" and r["pad"]["score"] == MEASURED_REAL_VOICE
+    assert r["livenessPassed"] is None and r["livenessScore"] == MEASURED_REAL_VOICE
+
+
+def test_in_shadow_a_terminal_bank_does_not_reject_on_it_either(env):
+    client, pad = env
+    enrol("tn_v2", {"cu_1": 1})
+    pad.score_value = MEASURED_REAL_VOICE
+    body = {"tenantId": "tn_v2", "userId": "cu_1", "sessionId": "s", "transactionId": "t", "challenge": {},
+            "padMode": PadMode.TERMINAL.value, "payload": {"audio": "1.0"}}
+    assert client.post("/factor/verify", json=body).json()["status"] == "PASSED"
+
+
+def test_in_shadow_a_different_speaker_still_fails(env):
+    client, pad = env
+    enrol("tn_v3", {"cu_1": 1})
+    r = check(client, "tn_v3", "cu_1", 4.0)
+    assert r["status"] == "FAILED" and r["failureReason"] == "SPEAKER_IDENTITY_MISMATCH"
+
+
+def test_switched_on_it_warns_again(env, monkeypatch):
+    client, pad = env
+    monkeypatch.setattr(vm, "PAD_MODE", "on")
+    enrol("tn_v4", {"cu_1": 1})
+    pad.score_value = MEASURED_REAL_VOICE
+    r = check(client, "tn_v4", "cu_1", 1.0)
+    assert r["status"] == "PASSED" and r["failureReason"] == "PAD_ADVISORY_SPOOF_SUSPECTED"
+    assert r["pad"]["verdict"] == "SPOOF" and r["livenessPassed"] is False
+
+
+def test_in_shadow_identification_is_not_rejected_on_it(env):
+    client, pad = env
+    enrol("tn_v5", {"cu_1": 1})
+    pad.score_value = MEASURED_REAL_VOICE
+    r = probe(client, "tn_v5", 1.0)
+    assert r["decision"] == "IDENTIFIED" and r["pad"]["verdict"] == "SHADOW"
+
+
+# ---- what the anti-spoof model is given (models.pad_input) -----------------------------------------------------------------
+
+def _speechy(seconds=2.0, level=0.5):
+    t = np.arange(int(16000 * seconds)) / 16000
+    return (level * np.sin(2 * np.pi * 180 * t) * (0.6 + 0.4 * np.sin(2 * np.pi * 3 * t))).astype(np.float32)
+
+
+def test_a_quiet_recording_reaches_the_model_at_the_same_level_as_a_loud_one():
+    """A phone records quietly; the model scored real speech at a tenth of its volume the same as silence."""
+    loud, quiet = vm.pad_input(_speechy(level=0.5)), vm.pad_input(_speechy(level=0.05))
+    assert abs(float(np.abs(loud).max()) - vm.PAD_PEAK) < 1e-4 and np.allclose(loud, quiet, atol=1e-3)
+
+
+def test_silence_at_the_ends_is_cut_off():
+    w = np.concatenate([np.zeros(24000, np.float32), _speechy(), np.zeros(16000, np.float32)])
+    out = vm.pad_input(w)
+    assert len(out) < len(w) and abs(len(out) - len(_speechy()) - 2 * 1600) <= 400 + 2 * 1600
+
+
+def test_silence_is_left_as_it_is():
+    z = np.zeros(32000, np.float32)
+    assert np.array_equal(vm.pad_input(z), z)
+
+
+def test_the_service_hands_on_the_raw_recording_only_the_anti_spoof_model_rescales_it(env):
+    """pad_input runs inside the anti-spoof model: the recording the voiceprint is made from is unchanged."""
+    client, pad = env
+    seen = []
+    pad.score = lambda wav: (seen.append(wav), 0.0)[1]
+    enrol("tn_v6", {"cu_1": 1})
+    assert check(client, "tn_v6", "cu_1", 1.0)["status"] == "PASSED"
+    assert float(seen[0][0]) == 1.0                                       # the scripted audio, not rescaled
