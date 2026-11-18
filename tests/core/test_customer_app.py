@@ -1247,3 +1247,89 @@ def test_erasing_a_customer_removes_their_answers_and_their_learning_state(stack
     stack.bank.AMFA.request("DELETE", f"/v1/users/{cid}")
     with db.session() as s:
         assert s.get(db.CustomerProfile, cid) is None and s.get(db.CustomerPhase, cid) is None
+
+
+
+def test_a_known_customer_on_a_keyed_phone_proves_the_key_instead_of_going_to_review(stack, learning, monkeypatch):
+    """A customer past the learning phase, paying from a phone that holds a key the plan did not ask for: once the plan's
+    checks pass, the phone is asked to prove its key (fingerprint or screen lock). Before, the server only looked for face,
+    voice or typing to make up for the missing proof, and when none was left to add the payment went to a person
+    (DEVICE_KEY_UNPROVEN). Found on a real phone, 2026-11-18, with a plan that already held every other check."""
+    from amfa.core import phase
+    cid = stack.bank.CUSTOMERS[learning.user]["amfaUser"]
+    with db.session() as s:
+        s.add(db.Enrollment(customer_id=cid, factor="UEBA"))         # typing set up; no face or voice to add
+        row = phase.ensure(s, s.get(db.Customer, cid))
+        row.phase, row.ready_since, row.verified_payments = "READY", time.time(), 30
+    _face_results(monkeypatch, ["PASSED"])                            # typing passes; the code and the key are real
+    LEVEL["now"] = "T1"
+    before = balance(learning)
+    started = act(learning, "transfer", payeeRef="BEN-42", amountRupees=9000).json()
+    assert started["action"]["checks"] == ["one-time code", "typing check"]   # the model's plan does not ask for the key
+    assert _run(stack, learning, started) == [("OTP", 200, "PASSED"), ("UEBA", 200, "PASSED"), ("DEVICE", 200, "PASSED")]
+    done = learning.post(f"/api/actions/{started['action']['id']}/complete").json()
+    assert done["action"]["status"] == "DONE" and done["balance"] == before - 9000_00
+    with db.session() as s:
+        assert not s.execute(select(db.ReviewCase).where(db.ReviewCase.customer_id == cid,
+                                                         db.ReviewCase.status == "OPEN")).scalars().first()
+
+
+def _face_warns_voice(monkeypatch, voice_verdict):
+    """Every check passes; the face check carries an advisory spoof warning, and the voice check's anti-spoof verdict is
+    `voice_verdict` (SHADOW when the voice model only reports, SPOOF when it warns)."""
+    from amfa.common.contract import PadResult
+
+    def verify_(factor, **kw):
+        if factor == "FACE":
+            return FactorResult(factor=factor, status="PASSED", score=0.96, threshold=0.363, livenessPassed=False,
+                                failureReason="PAD_ADVISORY_SPOOF_SUSPECTED",
+                                pad=PadResult(ran=True, verdict="SPOOF", score=0.749, threshold=0.7, mode="advisory"))
+        if factor == "VOICE":
+            return FactorResult(factor=factor, status="PASSED", score=0.76, threshold=0.25, livenessScore=-11.97,
+                                failureReason=None if voice_verdict == "SHADOW" else "PAD_ADVISORY_SPOOF_SUSPECTED",
+                                pad=PadResult(ran=True, verdict=voice_verdict, score=-11.97, threshold=-0.69,
+                                              mode="advisory"))
+        return FactorResult(factor=factor, status="PASSED", score=0.9, threshold=0.5)
+    monkeypatch.setattr(factors, "verify", verify_)
+    from amfa.engine import decide
+    monkeypatch.setattr(decide, "_relieved", lambda r, features, ctx: (r.level, None))   # a known customer: no new-customer cap
+
+
+def test_a_face_warning_and_a_voice_check_in_shadow_still_send_the_payment(stack, app, monkeypatch):
+    """Found on a real phone, 2026-11-18: face and voice both matched, but the face carried a spoof warning and the voice
+    anti-spoof model (which called every real voice fake) a second one, so the voice step kept asking to try again. With that
+    model in shadow its verdict is not a warning, and one warning in a payment is allowed."""
+    _face_warns_voice(monkeypatch, "SHADOW")
+    LEVEL["now"] = "T3"
+    before = balance(app)
+    started = act(app, "transfer", payeeRef="BEN-42", amountRupees=LARGE).json()
+    assert {"face check", "voice check"} <= set(started["action"]["checks"]), started["action"]["checks"]
+    assert verify(stack, started["challengeUrl"])["status"] == "VERIFIED"
+    done = app.post(f"/api/actions/{started['action']['id']}/complete").json()
+    assert done["action"]["status"] == "DONE" and done["balance"] == before - LARGE * 100
+
+
+def test_two_real_spoof_warnings_in_one_payment_still_block_it(stack, app, monkeypatch):
+    """The rule itself is unchanged: when the voice model does warn (switched on), a second warning is not accepted."""
+    _face_warns_voice(monkeypatch, "SPOOF")
+    LEVEL["now"] = "T3"
+    started = act(app, "transfer", payeeRef="BEN-42", amountRupees=LARGE).json()
+    token = started["challengeUrl"].split("#token=", 1)[1]
+    auth = {"authorization": f"Bearer {token}"}
+    seen = []
+    for _ in range(8):
+        ch = stack.core.get("/c/v1/session", headers=auth).json()["challenge"]
+        if ch is None:
+            break
+        payload = {"code": re.match(r"(\d+)", SENT[-1]).group(1)} if ch["factor"] == "OTP" else {}
+        r = stack.core.post(f"/c/v1/session/factors/{ch['factor']}", headers=auth,
+                            json={"challengeId": ch["challengeId"], "payload": payload}).json()
+        seen.append((ch["factor"], r["result"]["status"]))
+        if ch["factor"] == "VOICE":
+            break
+    assert seen[-1][0] == "VOICE" and seen[-1][1] != "PASSED"            # "try again", as the phone showed
+    with db.session() as s:
+        sess = s.execute(select(db.AuthSession).order_by(db.AuthSession.created_at.desc())).scalars().first()
+        voice = next(i for i in sess.checklist if i["factor"] == "VOICE")
+        assert voice["status"] != "PASSED" and voice["result"]["failureReason"] == "REPEATED_PAD_ADVISORIES"
+    assert app.post(f"/api/actions/{started['action']['id']}/complete").json()["action"]["status"] != "DONE"

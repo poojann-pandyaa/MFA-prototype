@@ -268,7 +268,9 @@ def submit(s, *, sess: db.AuthSession, customer: db.Customer, txn: db.Transactio
             _event(s, sess, "MEDIUM", "DEVICE_KEY_UNPROVEN",
                    "transaction claimed a trusted device that did not prove possession of its key")
             listed = [i["factor"] for i in sess.checklist]
-            extra = next((f for f in (Factor.FACE, Factor.VOICE, Factor.UEBA)
+            # first choice: ask the phone to prove the key it claims (fingerprint or screen lock); only when the bank does not
+            # permit that check does a face, voice or typing check make up for the missing proof
+            extra = next((f for f in (Factor.DEVICE, Factor.FACE, Factor.VOICE, Factor.UEBA)
                           if f.value not in listed and available(f, ctx)), None)
             if extra is None:
                 for other in sess.checklist:
