@@ -88,6 +88,9 @@ def verify_liveness_and_identity(images_b64: list, challenge_type: str, stored_e
     bboxes = [d.bbox for d in valid_detections]
 
     live_mask = pad_onnx.live_frame_mask(valid_frames, bboxes, config.LIVENESS_THRESHOLD)
+    if any(c is not None for c in pad_onnx.last_custom_scores):   # the custom PAD model's view, for re-calibration
+        step2_log.info("step2 pad_custom_shadow scores=%s",
+                       ",".join("-" if c is None else f"{c:.3f}" for c in pad_onnx.last_custom_scores))
     if not pad_onnx.mask_passes(live_mask, config.LIVENESS_MIN_LIVE_FRAME_FRACTION):
         step2_log.info("step2 result=pad_failed challenge=%s live=%s/%d min_fraction=%.2f",
                        challenge_type, "n/a" if live_mask is None else sum(live_mask),

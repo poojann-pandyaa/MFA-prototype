@@ -30,9 +30,21 @@ MODEL_DIR = os.path.join(CURRENT_DIR, "..", "models")
 # MobileNetV3-Small model outputting one sigmoid live-probability, not the
 # vendored MiniFASNet ensemble's 3-class softmax. Different enough (input
 # size, preprocessing, output shape) that it can't share _PadModel's
-# filename-encoded-crop-scale parsing, so it gets its own loader below and
-# fully replaces the ensemble when present, rather than joining it.
+# filename-encoded-crop-scale parsing, so it gets its own loader below.
+#
+# MFA_PAD_CUSTOM_MODE decides what it does when present:
+#   shadow (default)  the MiniFASNet ensemble decides; the custom model is still run on every frame and
+#                     its live-probability kept (last_custom_scores), so it can be re-calibrated
+#   replace           the custom model decides alone (the behaviour before 2026-11-18)
+# Why shadow: on the first real phone test (through the integrated Adaptive MFA app) it rejected real
+# faces MiniFASNet was sure of: phone frames MiniFASNet scored 0.92-0.99 live it scored 0.05-0.33, and a
+# sharp, well-lit laptop webcam frame MiniFASNet scored 1.000 it scored 0.007. Its BPCER of 12.7% per frame
+# on LCC-FASD alone rejects real faces often. Switch back once ml/eval.py has been re-run on real phone and
+# webcam captures and it separates them from photos and screens.
 CUSTOM_MODEL_FILENAME = "pad_custom.onnx"
+CUSTOM_MODE = os.environ.get("MFA_PAD_CUSTOM_MODE", "shadow").strip().lower()
+if CUSTOM_MODE not in ("shadow", "replace"):
+    CUSTOM_MODE = "shadow"
 CUSTOM_INPUT_SIZE = 128
 # LCC-FASD's published crops aren't pixel-identical to any specific
 # detector+crop recipe, so this scale (how far the crop expands past the
@@ -91,22 +103,33 @@ class _CustomPadModel:
 
 
 class AntiSpoofPredictor:
-    def __init__(self, model_dir: str = MODEL_DIR):
+    def __init__(self, model_dir: str = MODEL_DIR, custom_mode: str = None):
         self.cropper = CropImage()
         self.models = []
         self.custom_model = None
+        self.custom_mode = custom_mode or CUSTOM_MODE
+        self.last_custom_prob = None     # the custom model's live-probability for the last frame scored
 
         custom_path = os.path.join(model_dir, CUSTOM_MODEL_FILENAME)
         if os.path.isfile(custom_path):
             self.custom_model = _CustomPadModel(custom_path)
-        elif os.path.isdir(model_dir):
+        if os.path.isdir(model_dir) and not (self.custom_model is not None and self.custom_mode == "replace"):
             for f in sorted(os.listdir(model_dir)):
-                if f.endswith(".onnx"):
+                if f.endswith(".onnx") and f != CUSTOM_MODEL_FILENAME:
                     self.models.append(_PadModel(os.path.join(model_dir, f)))
 
     @property
     def ready(self) -> bool:
-        return self.custom_model is not None or len(self.models) > 0
+        if self.custom_mode == "replace" and self.custom_model is not None:
+            return True
+        return len(self.models) > 0
+
+    def _custom_probability(self, img_bgr: np.ndarray, bbox) -> float:
+        crop = self.cropper.crop(
+            org_img=img_bgr, bbox=bbox, scale=CUSTOM_CROP_SCALE,
+            out_w=CUSTOM_INPUT_SIZE, out_h=CUSTOM_INPUT_SIZE, crop=True,
+        )
+        return self.custom_model.predict_probability(crop)
 
     def predict_with_bbox(self, img_bgr: np.ndarray, bbox):
         """bbox is (left, top, width, height) from services.face_detect -
@@ -116,14 +139,13 @@ class AntiSpoofPredictor:
         if not self.ready:
             return None, None
 
+        self.last_custom_prob = None
         if self.custom_model is not None:
-            crop = self.cropper.crop(
-                org_img=img_bgr, bbox=bbox, scale=CUSTOM_CROP_SCALE,
-                out_w=CUSTOM_INPUT_SIZE, out_h=CUSTOM_INPUT_SIZE, crop=True,
-            )
-            prob_live = self.custom_model.predict_probability(crop)
-            label = 1 if prob_live > 0.5 else 0
-            return label, prob_live
+            prob_live = self._custom_probability(img_bgr, bbox)
+            self.last_custom_prob = prob_live
+            if self.custom_mode == "replace":
+                label = 1 if prob_live > 0.5 else 0
+                return label, prob_live
 
         prediction = np.zeros((1, 3), dtype=np.float32)
         for model in self.models:
@@ -165,10 +187,17 @@ def live_frame_mask(frames_bgr, bboxes, threshold: float):
         raise ValueError("frames_bgr and bboxes must be the same length")
 
     mask = []
+    last_custom_scores.clear()
     for frame, bbox in zip(frames_bgr, bboxes):
         label, confidence = _predictor.predict_with_bbox(frame, bbox)
         mask.append(bool(label == 1 and confidence is not None and confidence > threshold))
+        last_custom_scores.append(getattr(_predictor, "last_custom_prob", None))
     return mask
+
+
+# The custom model's live-probability for each frame of the last burst scored (None where it did not run).
+# In shadow mode it does not decide; callers log it so the model can be re-calibrated on real captures.
+last_custom_scores: list = []
 
 
 def mask_passes(mask, min_live_fraction: float) -> bool:

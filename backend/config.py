@@ -51,12 +51,12 @@ VERIFICATION_SESSION_TTL_SECONDS = int(os.environ.get("MFA_VERIFICATION_TTL_SECO
 # enrollment/impostor data is available.
 FACE_MATCH_THRESHOLD = float(os.environ.get("MFA_FACE_MATCH_THRESHOLD", "0.45"))
 
-# Anti-spoofing "real face" confidence threshold. Calibrated against the
-# ml/-trained custom PAD model's score distribution on its LCC-FASD test
-# split (see ml/eval.py output): 0.5 gives APCER=8.7% / BPCER=12.7% there.
-# The prior 0.8 was calibrated for the vendored MiniFASNet ensemble this
-# model replaces and doesn't carry over - re-run ml/eval.py and adjust
-# this if real-world acceptance/rejection rates diverge from those numbers.
+# Anti-spoofing "real face" confidence threshold, per frame: a frame is live when the deciding PAD model
+# labels it live with confidence above this. Since 2026-11-18 the MiniFASNet ensemble decides by default
+# and the custom model runs in shadow (services/pad_onnx.py, MFA_PAD_CUSTOM_MODE). 0.5 is MiniFASNet's own
+# decision point (live the most likely of its three classes, above 0.5); it was also the custom model's
+# calibrated point on LCC-FASD (APCER=8.7% / BPCER=12.7%) when that model decided (MFA_PAD_CUSTOM_MODE=replace).
+# Measured on a real phone in a dim room, MiniFASNet scored straight-on frames 0.92-0.99 live.
 LIVENESS_THRESHOLD = float(os.environ.get("MFA_LIVENESS_THRESHOLD", "0.5"))
 
 # Step-2 challenge-response actions. Randomized per verification session
@@ -87,7 +87,11 @@ HEAD_TURN_MIN_INTERMEDIATE_FRAMES = int(os.environ.get("MFA_HEAD_TURN_MIN_INTERM
 # Step-2 capture burst (frontend captures this many frames; see Task 11's
 # ChallengeCameraCapture.jsx). Starting defaults, not measured values.
 LIVENESS_MIN_VALID_FRAMES = int(os.environ.get("MFA_LIVENESS_MIN_VALID_FRAMES", "6"))
-LIVENESS_MIN_LIVE_FRAME_FRACTION = float(os.environ.get("MFA_LIVENESS_MIN_LIVE_FRAME_FRACTION", "0.8"))
+# Share of the burst's frames that must be live. 0.75 (was 0.8): measured through the integrated app on a
+# real phone, a genuine face check sent 22 frames of which 5 scored below 0.5 (among them the camera's first
+# 3, taken while its exposure was still settling), i.e. 17 of 22 = 0.77; one weak turned frame in a 4-frame
+# capture is 0.75. Spliced photo frames are still caught: gesture evidence comes only from live frames.
+LIVENESS_MIN_LIVE_FRAME_FRACTION = float(os.environ.get("MFA_LIVENESS_MIN_LIVE_FRAME_FRACTION", "0.75"))
 # Upper bound on frames accepted per step-2 request; /login/step2 rejects
 # larger bursts before decoding anything, so a client can't make the server
 # decode/run ML on an unbounded number of images.
