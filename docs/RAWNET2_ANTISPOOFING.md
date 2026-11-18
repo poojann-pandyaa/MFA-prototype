@@ -33,6 +33,7 @@ RawNet2 functions as the upstream **Presentation Attack Detection (PAD)** gateke
 - **Padding & Slicing Protocol**:
   - Waveforms shorter than 64,600 samples are repeated via `np.tile(x, repeats)[:64600]`.
   - Waveforms longer than 64,600 samples are truncated to the first 64,600 samples.
+- **Level and silence (added 2026-11-18)**: before padding, `prepare_for_pad` cuts silence at both ends and scales the peak to 0.9 (`level_input=True`, the default; see Section 7).
 
 ### 3.2 Network Topology
 - **Sinc-Convolutional Layer**: Filter length of 1,024, 20 output channels, bandpass cutoff frequencies initialized according to Mel-scale distribution.
@@ -122,3 +123,46 @@ Evaluation was conducted using a deterministic, balanced benchmark subset:
 1. **Acoustic Domain Mismatch**: RawNet2 operates directly on raw waveforms and was trained on studio-quality speech (VCTK). Sinc filters are sensitive to environmental acoustic reverberation, microphone frequency response differences, and codec compression artifacts.
 2. **Channel Sensitivity**: In field deployments, background ambient noise or lossy Bluetooth/VoIP codecs can shift bona fide log-probabilities downward, causing false rejections (elevated BPCER).
 3. **Operational Guidance**: In production Adaptive MFA architectures, RawNet2 should be combined with an upstream Voice Activity Detector (VAD), mild spectral noise reduction, and tiered fallback to out-of-band factors.
+
+---
+
+## 7. Real Phone Findings (2026-11-18) and What Changed
+
+The benchmark above uses ASVspoof 2021 DF audio. The first test on real phone recordings, through the integrated
+Adaptive MFA app on an Android phone, behaved very differently.
+
+### 7.1 Every real voice was scored SPOOF
+All 9 real recordings from 3 people (enrolments and verifications) scored between **-11.5 and -11.98**, far below the
+`log(0.5) ≈ -0.693` line. With `pad_mode="enforce"` the pipeline would have rejected every genuine user.
+
+### 7.2 Cause: level and silence
+On real recorded speech (SpeechBrain's sample utterances), the same checkpoint scored about **0 (BONAFIDE)** as recorded
+but about **-12 at a tenth of the volume**, the same as silence (-12.1). Leading silence also pulled some real samples
+down to -8.5 or -11.1. Phone recordings are quiet, so they all landed at about -12.
+
+### 7.3 Change: `prepare_for_pad` (on by default, `level_input=True`)
+Before the model, the recording's silence at both ends is cut (frames more than 30 dB below the loudest, keeping
+100 ms either side) and it is scaled to a peak of 0.9. On the same real samples played at a tenth of the volume:
+
+| | Before | After |
+|---|---|---|
+| Real samples scored BONAFIDE | 0 of 7 | 5 of 7 |
+| White noise | BONAFIDE (score 0) | SPOOF (-12.24) |
+
+`level_input=False` reproduces the benchmark numbers in Section 5, which were made without this step.
+
+### 7.4 Still not reliable on phone audio: `pad_mode="shadow"` by default
+On the phone after the change: one live try scored -0.68 (BONAFIDE, just), another live try **-11.15 (SPOOF)**, and a
+**replayed recording** of the user's own voice (played from a laptop into the phone) scored **-0.002 (BONAFIDE)**, more
+"real" than the live voice. No threshold separates these. This matches published results: models trained on ASVspoof
+generalise poorly to real-world audio (Müller et al., 2022, "Does Audio Deepfake Detection Generalize?", arXiv:2203.16263).
+
+So `VoiceBiometricPipeline` now defaults to `pad_mode="shadow"`: RawNet2 runs and its result (with `pad_mode`) is returned
+with every decision, but a SPOOF verdict does not reject the factor; speaker verification decides. `pad_mode="enforce"`
+restores the original early reject. Switch to it only after measuring on the deployment's own live recordings and
+replays (for example 5+ of each per person) and finding a threshold that separates them.
+
+### 7.5 What this means for security
+With RawNet2 in shadow, the voice factor gives **no protection against replay or voice cloning** on its own; speaker
+verification only stops other people's voices. The spoken random prompt stops old recordings, not a replay recorded in
+the moment. Next step: a stronger, more recent anti-spoof model, evaluated on phone recordings and replays.

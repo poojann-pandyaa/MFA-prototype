@@ -37,6 +37,33 @@ def pad_waveform(x: np.ndarray, max_len: int = 64600) -> np.ndarray:
     return padded_x
 
 
+PAD_PEAK = 0.9       # the level the model is given; ASVspoof's training audio is loud and clean
+PAD_TRIM_DB = 30.0   # frames this far below the loudest are silence at the ends of a recording
+
+
+def prepare_for_pad(x: np.ndarray, sr: int = 16000) -> np.ndarray:
+    """
+    Cut the silence at both ends of a recording and bring it to a fixed peak level.
+
+    Measured 2026-11-18 with the ASVspoof 2021 DF checkpoint on real recorded speech: the model
+    scored it about 0 (BONAFIDE) as recorded but about -12 at a tenth of the volume, the same as
+    silence (-12.1) and the same as every phone recording it had heard (-11.5 to -11.98). Leading
+    silence also pulled some real samples down to -8.5 or -11.1. With this step 5 of 7 real samples
+    scored BONAFIDE whatever their volume, and white noise, which it had called BONAFIDE, scored SPOOF.
+    """
+    w = np.asarray(x, dtype=np.float32)
+    frame = sr // 40                                   # 25 ms
+    n = len(w) // frame
+    if n:
+        rms = np.sqrt((w[: n * frame].reshape(n, frame) ** 2).mean(axis=1) + 1e-12)
+        loud = np.flatnonzero(rms >= rms.max() * 10 ** (-PAD_TRIM_DB / 20))
+        if len(loud):
+            margin = sr // 10                          # keep 100 ms either side
+            w = w[max(0, loud[0] * frame - margin): min(len(w), (loud[-1] + 1) * frame + margin)]
+    peak = float(np.abs(w).max()) if len(w) else 0.0
+    return w if peak < 1e-4 else (w * (PAD_PEAK / peak)).astype(np.float32)
+
+
 class RawNet2Detector:
     """
     Inference detector wrapping NTU-ROSE RawNet2 model.
@@ -46,7 +73,8 @@ class RawNet2Detector:
         checkpoint_path: Union[str, Path],
         config_path: Optional[Union[str, Path]] = None,
         device: Optional[str] = None,
-        decision_threshold: float = -0.69314718  # log(0.5) by default
+        decision_threshold: float = -0.69314718,  # log(0.5) by default
+        level_input: bool = True
     ):
         """
         Initialize RawNet2 detector.
@@ -56,7 +84,10 @@ class RawNet2Detector:
             config_path: Optional path to model_config_RawNet.yaml. Defaults to bundled yaml.
             device: 'cuda', 'cpu', or None (auto-select).
             decision_threshold: BONAFIDE log-probability threshold. Default is log(0.5) ≈ -0.6931.
+            level_input: cut silence at the ends and normalise the level first (prepare_for_pad).
+                The results in results/rawnet2/ were produced without it (False reproduces them).
         """
+        self.level_input = level_input
         self.checkpoint_path = Path(checkpoint_path)
         if not self.checkpoint_path.exists():
             raise FileNotFoundError(f"Checkpoint not found at: {self.checkpoint_path}")
@@ -104,6 +135,8 @@ class RawNet2Detector:
         else:
             raise TypeError(f"Unsupported audio input type: {type(audio_input)}")
 
+        if self.level_input:
+            data = prepare_for_pad(data)
         # Upstream pad logic
         padded = pad_waveform(data, max_len=self.max_len)
         tensor = torch.from_numpy(padded).unsqueeze(0).to(self.device)  # (1, 64600)

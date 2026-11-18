@@ -66,6 +66,8 @@ Voice Input Audio (16 kHz mono)
         └── YES (GENUINE) ──► [VOICE MFA FACTOR PASSES]
 ```
 
+> **Since 2026-11-18 the pipeline defaults to `pad_mode="shadow"`**: RawNet2 still runs and its verdict is returned, but a SPOOF verdict does not reject; speaker verification decides. On real phone recordings RawNet2 scored every real voice SPOOF and a replay BONAFIDE, so it is not trusted to reject yet. `pad_mode="enforce"` restores the early reject shown above. See `docs/RAWNET2_ANTISPOOFING.md`, Section 7.
+
 Detailed architectural diagrams, sequence flows, and failure mode analyses are available in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ---

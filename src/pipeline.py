@@ -11,7 +11,8 @@ This module implements the complete 2-stage verification pipeline:
     │   (SincConv + ResBlocks + GRU)         │
     └───────────────────┬────────────────────┘
                         │
-               Is audio BONAFIDE?
+               Is audio BONAFIDE?   (pad_mode="enforce"; the default "shadow" records the
+               │                     verdict and always goes on to speaker verification)
                ├── NO (SPOOF)  ──► [REJECT AUTHENTICATION: Attack Detected]
                │                   (Early exit: prevents unnecessary downstream compute)
                └── YES (BONAFIDE)
@@ -58,7 +59,8 @@ class VoiceBiometricPipeline:
         speaker_verifier: Optional[SpeakerVerifier] = None,
         rawnet2_checkpoint: Optional[Union[str, Path]] = None,
         pad_threshold: float = -0.69314718,  # log(0.5)
-        verification_threshold: float = 0.25
+        verification_threshold: float = 0.25,
+        pad_mode: str = "shadow"
     ):
         """
         Initialize the 2-stage voice authentication pipeline.
@@ -69,7 +71,17 @@ class VoiceBiometricPipeline:
             rawnet2_checkpoint: Path to RawNet2 .pth weights (if detector not pre-initialized).
             pad_threshold: BONAFIDE log-probability threshold for RawNet2.
             verification_threshold: Cosine similarity threshold for ECAPA-TDNN.
+            pad_mode: "shadow" (default): RawNet2 runs and its result is returned with every decision,
+                but a SPOOF verdict does not reject the factor. "enforce": a SPOOF verdict rejects the
+                factor before speaker verification (the original design).
+                Why shadow: on a real phone (2026-11-18) RawNet2 scored 9 of 9 real recordings from 3
+                people as SPOOF, and after level normalisation it still scored one of two live tries
+                SPOOF and a replayed recording BONAFIDE (docs/RAWNET2_ANTISPOOFING.md). Use "enforce"
+                only once it has been measured on this deployment's own recordings and replays.
         """
+        if pad_mode not in ("shadow", "enforce"):
+            raise ValueError(f"pad_mode must be 'shadow' or 'enforce', got {pad_mode!r}")
+        self.pad_mode = pad_mode
         if rawnet2_detector is not None:
             self.pad_detector = rawnet2_detector
         elif rawnet2_checkpoint is not None:
@@ -129,8 +141,8 @@ class VoiceBiometricPipeline:
         # -------------------------------------------------------------
         pad_result = None
         if self.pad_detector is not None:
-            pad_result = self.pad_detector.predict(test_audio, threshold=thr_pad)
-            if pad_result["predicted_label"] == "SPOOF":
+            pad_result = dict(self.pad_detector.predict(test_audio, threshold=thr_pad), pad_mode=self.pad_mode)
+            if pad_result["predicted_label"] == "SPOOF" and self.pad_mode == "enforce":
                 total_latency_ms = (time.perf_counter() - t0) * 1000.0
                 return {
                     "voice_factor_passed": False,
@@ -232,8 +244,8 @@ class VoiceBiometricPipeline:
         # -------------------------------------------------------------
         pad_result = None
         if self.pad_detector is not None:
-            pad_result = self.pad_detector.predict(test_audio, threshold=thr_pad)
-            if pad_result["predicted_label"] == "SPOOF":
+            pad_result = dict(self.pad_detector.predict(test_audio, threshold=thr_pad), pad_mode=self.pad_mode)
+            if pad_result["predicted_label"] == "SPOOF" and self.pad_mode == "enforce":
                 total_latency_ms = (time.perf_counter() - t0) * 1000.0
                 return {
                     "voice_factor_passed": False,

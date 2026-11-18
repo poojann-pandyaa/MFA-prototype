@@ -200,6 +200,7 @@ def test_pipeline_spoof_rejection_bypasses_gallery_search(verifier, gallery):
     pipeline = VoiceBiometricPipeline(
         rawnet2_detector=MockPADDetector(should_pass=False),
         speaker_verifier=verifier,
+        pad_mode="enforce",
     )
 
     result = pipeline.identify_factor(gallery=gallery, test_audio=speaker_audio(3))
@@ -330,3 +331,10 @@ def test_effective_false_match_rate_grows_with_gallery_size():
 
     with pytest.raises(ValueError):
         effective_false_match_rate(1.5, 10)
+
+
+def test_in_shadow_a_spoof_verdict_does_not_stop_identification(verifier, gallery):
+    pipeline = VoiceBiometricPipeline(rawnet2_detector=MockPADDetector(should_pass=False), speaker_verifier=verifier)
+    result = pipeline.identify_factor(gallery=gallery, test_audio=speaker_audio(5, utterance=6))
+    assert result["voice_factor_passed"] is True and result["identified_speaker_id"] == "user_5"
+    assert result["pad_result"]["predicted_label"] == "SPOOF" and result["pad_result"]["pad_mode"] == "shadow"

@@ -30,11 +30,11 @@ class MockPADDetector:
 
 
 def test_pipeline_spoof_rejection():
-    # When PAD detects SPOOF, the pipeline must reject early and bypass speaker verification
+    # With pad_mode="enforce", when PAD detects SPOOF the pipeline must reject early and bypass speaker verification
     mock_pad = MockPADDetector(should_pass=False)
     mock_sv = SpeakerVerifier(extractor=MockExtractor(), threshold=0.25)
 
-    pipeline = VoiceBiometricPipeline(rawnet2_detector=mock_pad, speaker_verifier=mock_sv)
+    pipeline = VoiceBiometricPipeline(rawnet2_detector=mock_pad, speaker_verifier=mock_sv, pad_mode="enforce")
     voiceprint = np.ones(192) / np.sqrt(192)
 
     result = pipeline.authenticate_factor(
@@ -68,3 +68,20 @@ def test_pipeline_bonafide_and_speaker_match():
     # Crucial policy notice verification
     assert "Adaptive MFA" in result["policy_notice"]
     assert "does not by itself constitute final user authentication" in result["policy_notice"]
+
+
+def test_pad_mode_defaults_to_shadow_and_rejects_unknown_values():
+    import pytest
+    assert VoiceBiometricPipeline(speaker_verifier=SpeakerVerifier(extractor=MockExtractor())).pad_mode == "shadow"
+    with pytest.raises(ValueError):
+        VoiceBiometricPipeline(speaker_verifier=SpeakerVerifier(extractor=MockExtractor()), pad_mode="off")
+
+
+def test_in_shadow_a_spoof_verdict_is_reported_but_does_not_reject():
+    """RawNet2 called real phone voices SPOOF; in shadow the speaker match decides and the verdict is kept."""
+    pipeline = VoiceBiometricPipeline(rawnet2_detector=MockPADDetector(should_pass=False),
+                                      speaker_verifier=SpeakerVerifier(extractor=MockExtractor(), threshold=0.25))
+    result = pipeline.authenticate_factor(enrolled_voiceprint=np.ones(192) / np.sqrt(192), test_audio=np.ones(16000))
+    assert result["voice_factor_passed"] is True and result["factor_status"] == "PASSED"
+    assert result["pad_result"]["predicted_label"] == "SPOOF" and result["pad_result"]["pad_mode"] == "shadow"
+    assert result["verification_result"] is not None
