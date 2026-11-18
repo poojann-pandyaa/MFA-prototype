@@ -5,3 +5,5 @@ services:
     command: ["serve", "face", "--host", "0.0.0.0", "--port", "8101", "--workers", "1"]
   ueba:
     command: ["serve", "ueba", "--host", "0.0.0.0", "--port", "8103", "--workers", "1"]
+  bands:
+    command: ["serve", "bands", "--host", "0.0.0.0", "--port", "8104", "--workers", "1"]

@@ -40,8 +40,8 @@ def test_rules_and_model_are_put_on_the_same_scale(required, held, level):
 
 def test_the_view_holds_only_the_band_two_levels_and_four_small_categories():
     v = band_switch.view(ctx(), Plan(source="model", threatLevel="T1"), {})
-    assert set(v) == {"band", "rulesLevel", "modelLevel", "payeeKind", "deviceKind", "hardSign", "mode"}
-    assert v == {"band": 0, "rulesLevel": "T0", "modelLevel": "T1", "payeeKind": "KNOWN", "deviceKind": "KNOWN", "hardSign": False, "mode": "COLLECTING"}
+    assert set(v) == {"band", "rulesLevel", "modelLevel", "payeeKind", "deviceKind", "hardSign", "mode", "modelVersion"}
+    assert v == {"band": 0, "rulesLevel": "T0", "modelLevel": "T1", "payeeKind": "KNOWN", "deviceKind": "KNOWN", "hardSign": False, "mode": "COLLECTING", "modelVersion": None}
 
 
 @pytest.mark.parametrize("t", [TxnType.ADD_BENEFICIARY, TxnType.CHANGE_LIMIT, TxnType.PROFILE_CHANGE, TxnType.DEVICE_BINDING])

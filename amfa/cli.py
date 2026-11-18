@@ -6,9 +6,10 @@ import json
 import os
 import sys
 
-PORTS = {"core": 8000, "face": 8101, "voice": 8102, "ueba": 8103}
+PORTS = {"core": 8000, "face": 8101, "voice": 8102, "ueba": 8103, "bands": 8104}
 APPS = {"core": "amfa.core.app:app", "face": "amfa.factors.face.service:app",
-        "voice": "amfa.factors.voice.service:app", "ueba": "amfa.factors.ueba.service:app"}
+        "voice": "amfa.factors.voice.service:app", "ueba": "amfa.factors.ueba.service:app",
+        "bands": "amfa.bands.service:app"}
 
 
 def _password(prompt: str) -> str:
@@ -63,6 +64,13 @@ def main(argv: list[str] | None = None) -> None:
     cal.add_argument("--target-frr", type=float, default=0.01)
 
     sub.add_parser("purge", help="delete transactions and what derives from them older than AMFA_RETENTION_DAYS (90)")
+    rc = sub.add_parser("risk-candidate", help="the candidate risk model: it scores every payment silently and decides nothing")
+    rcs = rc.add_subparsers(dest="action", required=True)
+    rcs.add_parser("show")
+    rcs.add_parser("set").add_argument("version")
+    rcs.add_parser("clear")
+    rcs.add_parser("preview")
+    rcs.add_parser("promote").add_argument("--confirm-drops", action="store_true")
     bg = sub.add_parser("band-gates", help="grade every amount band of a bank now (rules against model) and print where each stands")
     bg.add_argument("--tenant", required=True)
 
@@ -70,6 +78,9 @@ def main(argv: list[str] | None = None) -> None:
     rs.add_argument("--factor", choices=["face", "voice", "ueba"], default=None,
                     help="re-seal a factor service's template store (run in that service's container)")
 
+    bm = sub.add_parser("bands-move", help="move band rows, band states and candidate progress from the core's database into "
+                                           "the band service's own (AMFA_BANDS_DB_URL); once, when the service is turned on")
+    bm.add_argument("--dry-run", action="store_true", help="count what the core holds, change nothing")
     sv = sub.add_parser("serve")
     sv.add_argument("service", choices=sorted(APPS))
     sv.add_argument("--host", default="127.0.0.1")
@@ -110,6 +121,14 @@ def main(argv: list[str] | None = None) -> None:
 
     if a.cmd == "reseal":
         print(json.dumps(_reseal_core()))
+        return
+
+    if a.cmd == "bands-move":
+        from amfa.bands.move import MoveError, move
+        try:
+            print(json.dumps(move(a.dry_run), indent=2))
+        except MoveError as e:
+            sys.exit(str(e))
         return
 
     if a.cmd == "calibrate":
@@ -162,6 +181,33 @@ def main(argv: list[str] | None = None) -> None:
         from amfa.core import retention
         with db.session() as s:
             print(json.dumps(retention.purge(s), indent=2))
+    elif a.cmd == "risk-candidate":
+        from amfa.engine.risk import scorer
+        if a.action == "set":
+            try:
+                scorer.set_candidate(a.version)
+            except scorer.RiskModelError as e:
+                raise SystemExit(f"not installed: {e}")
+            audit.record("cli", "risk.candidate.set", a.version, {})
+        elif a.action == "clear":
+            if scorer.clear_candidate():
+                audit.record("cli", "risk.candidate.clear", "-", {})
+        elif a.action in ("preview", "promote"):
+            from amfa.core import band_gate
+            try:
+                if a.action == "preview":
+                    with db.session() as s:
+                        print(json.dumps(band_gate.promotion_preview(s), indent=2))
+                else:
+                    print(json.dumps(band_gate.promote("cli", a.confirm_drops), indent=2))
+            except (band_gate.GateError, scorer.RiskModelError) as e:
+                raise SystemExit(f"not done: {getattr(e, 'message', e)}")
+            return
+        try:
+            active = scorer.active().version
+        except scorer.RiskModelError:
+            active = None
+        print(json.dumps({"active": active, "candidate": scorer.candidate_version()}, indent=2))
     elif a.cmd == "band-gates":
         from amfa.core import band_gate
         from amfa.engine.policy import TenantPolicy

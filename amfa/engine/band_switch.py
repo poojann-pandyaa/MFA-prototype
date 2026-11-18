@@ -63,11 +63,21 @@ def state_of(ctx: Context) -> Optional[str]:
     return ctx.policy.bandState if ctx.policy.bandState in (COLLECTING, ELIGIBLE, MODEL) else COLLECTING
 
 
+def effective_state(ctx: Context, plan: Plan) -> Optional[str]:
+    """The band's state for this payment once the model that scored it is known: MODEL only if that model's version is the one the
+    band was approved on. A different, unknown or missing version means the rules set the minimum (COLLECTING)."""
+    state = state_of(ctx)
+    if state != MODEL:
+        return state
+    approved = ctx.policy.bandModelVersion
+    return MODEL if approved and model_version(plan) == approved else COLLECTING
+
+
 def apply(plan: Plan, ctx: Context) -> Plan:
     """Until a band is on the model, the rules set the minimum: the plan keeps every check the model asked for and gains every check
     the rules ask for that it lacks, and its risk band is the higher of the two. Nothing is ever removed, so this can only add
     friction. A customer still in the learning phase keeps the learning plan (already fixed, light checks with limits)."""
-    state = state_of(ctx)
+    state = effective_state(ctx, plan)
     plan.bandState = state
     if state is None or state == MODEL or plan.source == "learning":
         return plan
@@ -84,8 +94,8 @@ def apply(plan: Plan, ctx: Context) -> Plan:
 
 
 def collecting(ctx: Context, plan: Plan) -> bool:
-    """Is this payment decided with the rules as the minimum (the band is not on the model)?"""
-    state = state_of(ctx)
+    """Is this payment decided with the rules as the minimum (the band is not on the model, or not on this model)?"""
+    state = plan.bandState if plan.bandState is not None else effective_state(ctx, plan)
     return state is not None and state != MODEL and plan.source != "learning"
 
 
@@ -105,6 +115,17 @@ def merge(plan: Plan, model_plan: Plan) -> Plan:
                                                                  model_plan.escalateReason)
     plan.scamRisk = plan.scamRisk or model_plan.scamRisk
     return plan
+
+
+def model_version(plan: Plan) -> Optional[str]:
+    """The risk model version that gave the plan's model level; None when no model scored (a failed model, a missing feature)."""
+    if plan.source == "learning" and plan.modelLevel is None:
+        return None
+    if plan.modelError:
+        return None
+    from .risk.scorer import VERSION_NAME
+    v = plan.modelVersion
+    return v if isinstance(v, str) and VERSION_NAME.match(v) else None
 
 
 def view(ctx: Context, plan: Plan, features: Optional[dict]) -> Optional[dict]:
@@ -128,4 +149,5 @@ def view(ctx: Context, plan: Plan, features: Optional[dict]) -> Optional[dict]:
             "modelLevel": model_level(plan),
             "payeeKind": payee, "deviceKind": device,
             "hardSign": bool(hard_signals(f)),
-            "mode": state_of(ctx) or COLLECTING}
+            "mode": effective_state(ctx, plan) or COLLECTING,
+            "modelVersion": model_version(plan)}

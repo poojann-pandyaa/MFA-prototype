@@ -263,7 +263,8 @@ def assemble(s, tenant: db.Tenant, customer: db.Customer, txn_id: str, t: TxnInp
         if policy.collection.enabled:            # the band switch: the state of this payment's band, read fail-closed
             from amfa.core import band_gate
             ctx.policy.bandSwitch = True
-            ctx.policy.bandState = band_gate.state_for(s, tenant.id, band_of(ctx.transaction.exposureMinor), now)
+            ctx.policy.bandState, ctx.policy.bandModelVersion = band_gate.decision_state(
+                s, tenant.id, band_of(ctx.transaction.exposureMinor), now)
     return Assembled(ctx=ctx, preview=preview, facts=facts, derived=derived, policy=policy, features=features)
 
 

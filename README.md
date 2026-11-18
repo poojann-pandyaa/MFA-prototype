@@ -200,7 +200,18 @@ The risk model was trained on simulated customers. A bank that shares no data of
 - **Earning the model:** a band that has enough evidence and wins 4 weeks running can be moved to the model by two different
   operators. It falls back to the rules on its own if the model starts losing.
 - **Admin API:** `/admin/api/band-gates`. Command line: `python -m amfa.cli band-gates --tenant <id>`.
+- **Model updates:** each band trusts one model version.
+  - Install new weights as a candidate (`python -m amfa.engine.risk.train --candidate`, or
+    `python -m amfa.cli risk-candidate set <version>`). It watches every payment and decides nothing.
+  - It earns each band on its own answers, and two operators trust it there.
+  - A platform operator promotes it (`python -m amfa.cli risk-candidate preview|promote`). Bands that trusted it keep the model
+    with no gap.
+  - Weights made active any other way are never trusted by a band that was not approved for them.
 - **Replay:** `python scripts/replay_band_switch.py` replays a simulated bank through it.
+- **Its own service:** by default the band switch runs inside the core. Set `AMFA_BANDS_URL` and it runs as the band service
+  (`python -m amfa.cli serve bands`, port 8104), with a database of its own. Only the core may call it, over signed requests. If
+  it is slow or down, payments get the stricter plan. The Docker deployment runs it this way. For a bank that already has band
+  data in the core, run `python -m amfa.cli bands-move` once (`--dry-run` first).
 
 Design, security and results: [docs/rbi-banded-data-collection.md](docs/rbi-banded-data-collection.md) and
 [docs/band-switch-replay.md](docs/band-switch-replay.md).
@@ -254,6 +265,9 @@ kept for the bank's `collection.retentionDays` (default 365).
 | `AMFA_VOICE_PROMPT_CHECK` | `advisory`, `enforce`, `off` |
 | `AMFA_RETENTION_DAYS` | days of transactions kept and read by the risk model (default 90; a model trained on a longer window is refused) |
 | `AMFA_BYPASS_CAPS` | the platform's ceiling for a customer's "no extra checks" limit per currency (default ₹50,000) |
+| `AMFA_BANDS_URL` | where the band service listens (`http://bands:8104` in Docker); unset, the band switch runs inside the core |
+| `AMFA_BANDS_TIMEOUT_S` | how long a payment waits for its band's state before taking the stricter plan (default 0.2) |
+| `AMFA_BANDS_DB_URL` | the band service's own database (PostgreSQL in production; `data/bands.db` in development) |
 | `AMFA_UEBA_TOUCH_MODE` | `live` (phone typing and shape count toward the decision; default), `shadow` (scored and logged only, never counted) |
 
 Per-bank policy (permitted factors, risk appetite, minimum checks, how many checks the AI may
@@ -266,6 +280,7 @@ authenticator from the customer flow; face or voice then serves as the dynamic f
 amfa/engine      decision engine: risk model, AI agent, bank policy
 amfa/core        platform API, orchestration, proofs, admin console, hosted pages
 amfa/factors     face, voice and behaviour services
+amfa/bands       the band switch: its logic, its tables, and the service it runs as
 sdk/python       bank client
 examples         demo bank (web) and its tests' fixtures
 mfa-android      native Android app

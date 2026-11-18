@@ -38,9 +38,8 @@ OUTCOMES = {"AUTHORIZED": "COMPLETED", "CONSUMED": "COMPLETED", "DENIED": "DECLI
             "EXPIRED": "EXPIRED"}
 VERIFIED = ("AUTHORIZED", "CONSUMED")
 MONEY_TYPES = tuple(t.value for t in MONEY)
-# who may label a row: the bank (through its scoped API key) and the four-eyes review. Anything else is ignored.
-LABEL_SOURCES = {"customer_report", "chargeback", "bank_ops", "review_verdict"}
-LABELS = {"FRAUD", "GENUINE"}
+# who may label a row, and with what: kept with the band switch's own logic (amfa/bands/engine.py)
+from amfa.bands.engine import LABEL_SOURCES, LABELS, apply_to_row as _apply  # noqa: E402,F401
 MODES = {"COLLECTING", "ELIGIBLE", "MODEL"}       # the band's state when the payment was decided
 
 
@@ -103,6 +102,20 @@ def _view(s, txn: db.Transaction) -> Optional[dict]:
     return v if ok else None
 
 
+def _version(v) -> Optional[str]:
+    """A model version as the decision logged it, or None for anything else: a row with no version is never graded."""
+    from amfa.engine.risk.scorer import VERSION_NAME
+    return v if isinstance(v, str) and VERSION_NAME.match(v) else None
+
+
+def _candidate(view: dict) -> dict:
+    """A candidate model's level and version, both or neither: a level without its version could be graded for the wrong model."""
+    level, version = view.get("candidateLevel"), _version(view.get("candidateVersion"))
+    if level in LEVELS and version:
+        return {"candidate_level": level, "candidate_version": version}
+    return {"candidate_level": None, "candidate_version": None}
+
+
 def record(s, txn: db.Transaction, now: Optional[float] = None, mode: str = "COLLECTING") -> Optional[db.LearningRow]:
     """Write the learning row for a payment that has just settled, if the bank has the band switch on. Writes at most one row per
     payment, whatever calls it twice. Never raises, and runs in a savepoint: a failure here rolls back only the row, never the
@@ -116,15 +129,17 @@ def record(s, txn: db.Transaction, now: Optional[float] = None, mode: str = "COL
         return None
 
 
-def _record(s, txn: db.Transaction, now: float, mode: str) -> Optional[db.LearningRow]:
+def _record(s, txn: db.Transaction, now: float, mode: str):
+    """Build the anonymous row from the core's own data (the payment, its decision, the customer's history, the daily cap, the link
+    key), then hand it to the band store, which keeps it (amfa/bands/engine.add_row). Only the row's categories cross: never the
+    customer, the amount, the payee or the payment id."""
+    from amfa.bands import store as band_store
+    from amfa.core import band_gate
     outcome = OUTCOMES.get(txn.status)
     if outcome is None or txn.type not in MONEY_TYPES:
         return None
     policy = _policy(s, txn.tenant_id)
     if policy is None or not policy.collection.enabled:
-        return None
-    link = link_of(txn.id)
-    if s.execute(select(db.LearningRow.id).where(db.LearningRow.link == link)).first() is not None:
         return None
     view = _view(s, txn)
     if view is None:                                   # decided before the switch was on, or not a payment
@@ -133,69 +148,55 @@ def _record(s, txn: db.Transaction, now: float, mode: str) -> Optional[db.Learni
     if not _within_daily_cap(s, txn, tz, policy.collection.dailyRowsPerCustomer):
         return None
     expires = math.ceil((now + config.get().retention_days * DAY) / DAY) * DAY      # a whole day, never the settle time
-    row = db.LearningRow(
-        id=uuid.uuid4().hex, tenant_id=txn.tenant_id, band=view["band"], band_vs_usual=_band_vs_usual(s, txn, view["band"]),
+    fields = dict(
+        tenant_id=txn.tenant_id, band=view["band"], band_vs_usual=_band_vs_usual(s, txn, view["band"]),
         payee_kind=view["payeeKind"], device_kind=view["deviceKind"], hard_sign=bool(view["hardSign"]),
         hour_bucket=hour_bucket(_local(txn.created_at, tz).hour), rules_level=view["rulesLevel"], model_level=view["modelLevel"],
-        mode=view.get("mode") if view.get("mode") in MODES else mode, outcome=outcome, label="UNKNOWN", label_source=None, week_start=week_start(txn.created_at, tz),
-        link=link, link_expires_at=expires)
-    s.add(row)
-    s.flush()
+        model_version=_version(view.get("modelVersion")), **_candidate(view),
+        mode=view.get("mode") if view.get("mode") in MODES else mode, outcome=outcome, label="UNKNOWN", label_source=None,
+        week_start=week_start(txn.created_at, tz), link=link_of(txn.id), link_expires_at=expires)
+    labelled = _Labels(fields["label"], fields["label_source"])
     for lab in s.execute(select(db.RiskLabel).where(db.RiskLabel.transaction_id == txn.id)
                          .order_by(db.RiskLabel.reported_at, db.RiskLabel.id)).scalars():
-        _apply(row, lab.label, lab.source)            # a label that arrived before the payment settled
-    _after_label(s, row)
+        _apply(labelled, lab.label, lab.source)       # a label that arrived before the payment settled
+    fields["label"], fields["label_source"] = labelled.label, labelled.label_source
+    row, events = band_store.for_session(s).add_row(fields, now)
+    band_gate.apply_events(s, events)
     return row
 
 
-def _after_label(s, row: db.LearningRow) -> None:
-    if row.label == "FRAUD":
-        from amfa.core import band_gate
-        band_gate.on_fraud_label(s, row)
-
-
-def _apply(row: db.LearningRow, label: str, source: str) -> bool:
-    """FRAUD sticks: a later GENUINE never clears it, so no report can make a fraud case vanish from the grading."""
-    if label not in LABELS or source not in LABEL_SOURCES:
-        return False
-    if row.label == "FRAUD" and label != "FRAUD":
-        return False
-    row.label, row.label_source = label, source
-    return True
+class _Labels:
+    """A row's label while it is being built, so the same FRAUD-sticks rule applies as to a stored row."""
+    def __init__(self, label, label_source):
+        self.label, self.label_source = label, label_source
 
 
 def apply_label(s, txn_id: str, label: str, source: str, now: Optional[float] = None) -> bool:
-    """A label for a payment: update its row if the row exists and its link has not expired. A fraud label in the top band may send
-    that band back to the rules (band_gate.on_fraud_label). Never raises, and runs in a savepoint so the label's own record stays."""
+    """A label for a payment: the store updates its row (found by the keyed-hash link) if the row exists and its link has not
+    expired; a fraud label in the top band may send that band back to the rules. Never raises, and runs in a savepoint so the
+    label's own record stays."""
+    from amfa.bands import store as band_store
+    from amfa.core import band_gate
     if label not in LABELS or source not in LABEL_SOURCES:
         return False
     now = now or time.time()
     try:
         with s.begin_nested():
-            row = s.execute(select(db.LearningRow).where(db.LearningRow.link == link_of(txn_id))).scalars().first()
-            if row is None or row.link_expires_at is None or row.link_expires_at <= now:
-                return False
-            if not _apply(row, label, source):
-                return False
-            _after_label(s, row)
-            return True
+            ok, events = band_store.for_session(s).apply_label(link_of(txn_id), label, source, now)
+            band_gate.apply_events(s, events)
+            return bool(ok)
     except Exception as e:
         log.error("learning row label not applied", extra={"error": type(e).__name__})
         return False
 
 
 def purge(s, now: Optional[float] = None) -> dict[str, int]:
-    """Wipe expired links (whether or not the switch is still on), then delete rows older than each bank's retention."""
+    """Wipe expired links (whether or not the switch is still on), then delete rows older than each bank's retention. The core
+    knows the banks and their settings; the store does the deleting (amfa/bands/engine.purge)."""
+    from amfa.bands import store as band_store
     now = now or time.time()
-    out = {"learning_link": s.execute(update(db.LearningRow).where(db.LearningRow.link_expires_at <= now)
-                                      .values(link=None, link_expires_at=None)).rowcount or 0}
-    gone = 0
-    for tenant_id in s.execute(select(db.LearningRow.tenant_id).distinct()).scalars().all():
-        policy = _policy(s, tenant_id)
-        keep = policy.collection.retentionDays if policy else 0          # a bank that is gone keeps nothing
-        tz = ZoneInfo(policy.timezone) if policy else ZoneInfo("UTC")
-        cutoff = (_local(now, tz).date() - timedelta(days=keep)).isoformat()
-        gone += s.execute(delete(db.LearningRow).where(db.LearningRow.tenant_id == tenant_id,
-                                                       db.LearningRow.week_start < cutoff)).rowcount or 0
-    out["learning_row"] = gone
-    return out
+    retention = {}
+    for t in s.execute(select(db.Tenant)).scalars().all():
+        p = TenantPolicy.model_validate(t.policy)
+        retention[t.id] = (p.collection.retentionDays, p.timezone)
+    return band_store.for_session(s).purge(now, retention)

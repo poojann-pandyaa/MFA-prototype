@@ -50,12 +50,41 @@ from Rs 20,000 payments decide how Rs 50 lakh payments are checked.
 bank's customers. Whether the model knows an individual customer is still the readiness test of section 11.3. The model chooses a
 customer's checks only when both have passed.
 
+## Also in section 11.5: when the model is updated
+
+A band trusts the version of the model that earned it, not "the model". New weights do not take over a band just because they are
+installed.
+
+**The new version first watches.**
+- It is installed as a candidate, scores every payment silently next to the current one, and decides nothing.
+- It is graded per band on its own answers, with the same tests.
+- Two operators of the bank then trust it in each band it has earned.
+
+**Promotion.** A platform operator promotes it, and is first shown what will happen to every band of every bank.
+- Bands that trusted it keep the model with no gap at all. Customers notice nothing.
+- A band still trusting the old version that the new one has not earned goes back to the rules, and the operator must confirm
+  that.
+- If new weights are made active any other way, every band approved on another version is decided by the rules from the very
+  next payment.
+
+**The cost:** a new version needs about 2 to 3½ months of watching before it takes over a band. The old version keeps deciding
+meanwhile.
+
+## Also in section 11.5: where the band records are kept
+
+The band switch runs as its own service, next to the face, voice and behaviour services. It has its own database, so the
+anonymous records are kept apart from everything the core knows about customers. The core still makes every decision, keeps the
+audit log and runs the two-person approvals. If the service cannot answer within 0.2 seconds, the payment is treated as
+collecting and gets the stricter checks. A small deployment can still run it inside the core: the logic is the same.
+
 ## Add to section 14 (Security and privacy by design), as new rows of the table
 
 | Protection | How it works | Why |
 |---|---|---|
 | Anonymous band records | The band switch keeps one record per payment with no customer, amount, payee, device, place or time. Its link to the payment is a keyed hash wiped after 90 days. A test fails the build if an identifying column is ever added. | The model can be judged on real outcomes without keeping more about anyone. |
 | Two people to relax | Moving a band to the model, turning the band switch off, or asking it for less evidence needs two different operators, and is refused on every other path (the bank's API key, a single operator, even a platform operator). A request is void if the settings change before it is approved. | The one change that lowers friction for many customers at once cannot be made by one person or one stolen key. |
+| Model updates earn trust | A band trusts only the model version graded and approved on it. A new version watches as a candidate, earns each band on its own answers and is trusted by two operators. Promotion keeps trusted bands with no gap and sends the rest back to the rules. Weights made active any other way are never trusted. | New weights cannot quietly lower checks in bands where they were never tested. |
+| A service of its own | The band records and band states live in a separate service with its own database, network and keys. Only the core can call it, with signed requests that cannot be replayed, and every request is checked field by field so nothing identifying can be sent to it. If it is slow or down, payments get the stricter plan and operator actions are refused. | The store that would be shared with analysts holds nothing else, and losing it can only add checks. |
 | Fails towards the rules | A missing, unreadable or stale band state (not graded for 48 hours) is decided by the rules. A model band that loses two weekly gradings goes back on its own; the Rs 1 lakh band goes back on the first fraud the model let through. | Security that fails open is worse than none (section 8.7). |
 
 ## Add to section 17 (How it was tested), a new paragraph
@@ -78,6 +107,23 @@ customer's checks only when both have passed.
 | 2,000 customers, the default gates | No band earned it within 150 days |
 
 The live smoke test passes all 83 checks with the switch on and off.
+
+## Also for section 17: exact amounts or bands?
+
+The band switch keeps exact amounts in the decision and stores only bands in its anonymous records. A system that knew *every*
+amount only by its band would be simpler to explain.
+
+**The test:** the same simulated customers, three times over, with one model trained on exact amounts and one on amounts known
+only by band, both tested on the same payments.
+
+**The result:**
+- **About 13 points less fraud money caught** at the strongest checks (98.7% → 85.5%), almost all of it on payments of Rs 1 lakh
+  and above. Above Rs 1 lakh every payment looks the same, so the largest frauds no longer stand out.
+- **The number of fraud cases caught hardly changed,** and honest customers saw slightly more checks (5.2% → 5.6%).
+- **Older customers were treated more evenly** (2.7× → 1.8× the average step-up). That is not worth the lost money.
+
+So the design keeps exact amounts where decisions are made, and bands where data is kept. Details are in
+[amount-bands-accuracy.md](amount-bands-accuracy.md).
 
 ## Add to section 18 (Known limits and honest findings)
 

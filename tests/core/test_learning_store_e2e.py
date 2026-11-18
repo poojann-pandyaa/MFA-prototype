@@ -77,6 +77,7 @@ def test_a_completed_payment_writes_one_anonymous_row(stack, app):
     _, row = _row(aid)
     assert row is not None
     assert (row.band, row.outcome, row.label, row.mode) == (1, "COMPLETED", "UNKNOWN", "COLLECTING")
+    assert row.model_version == "stub"                   # the version of the (scripted) model that scored the payment
     assert row.rules_level in ("T0", "T1", "T2", "T3", "T4") and row.model_level in ("T0", "T1", "T2", "T3", "T4")
 
 
@@ -161,6 +162,7 @@ def _band_state(stack, band, state, evaluated_at=None):
             st = db.BandGateState(tenant_id=stack.tenant["id"], band=band, figures={}, changed_at=time.time())
             s.add(st)
         st.state, st.evaluated_at = state, evaluated_at if evaluated_at is not None else time.time()
+        st.model_version = "stub"                        # the scripted model's version: a band on MODEL is approved on it
 
 
 def test_a_payment_is_decided_under_its_own_bands_state_and_a_split_payment_under_the_higher_band(stack, app):
@@ -184,6 +186,49 @@ def test_a_model_band_whose_grading_has_gone_stale_is_decided_by_the_rules(stack
         assert _decided_under(aid)[0] == "COLLECTING"
     finally:
         _band_state(stack, 0, "COLLECTING")
+
+
+def test_new_weights_swapped_in_are_not_trusted_on_the_next_payment_or_after_the_nights_grading(stack, app, monkeypatch):
+    """The band was approved on the scripted model ("stub"). Someone loads new weights directly: the very next payment in that
+    band is decided with the rules as the minimum, and the night's grading sends the band back to COLLECTING."""
+    from amfa.core import band_gate
+    from amfa.engine.risk import scorer
+    _band_state(stack, 1, "MODEL")
+    try:
+        before = act(app, "transfer", payeeRef="BEN-42", amountRupees=2_500).json()["action"]["id"]
+        assert _decided_under(before)[0] == "MODEL"
+        swapped = scorer.Result(score=0.5, raw=0.5, level="T1", reasons=[("payee_seen", 0.2)], version="stub-2")
+        monkeypatch.setattr(scorer, "active", lambda: type("M", (), {"score": lambda self, f: swapped, "version": "stub-2"})())
+        after = act(app, "transfer", payeeRef="BEN-42", amountRupees=2_500).json()["action"]["id"]
+        assert _decided_under(after)[0] == "COLLECTING"
+        with db.session() as s:
+            band_gate.evaluate(s, stack.tenant["id"], TenantPolicy.model_validate(s.get(db.Tenant, stack.tenant["id"]).policy))
+            st = s.get(db.BandGateState, (stack.tenant["id"], 1))
+            assert (st.state, st.model_version) == ("COLLECTING", "stub-2")
+    finally:
+        _band_state(stack, 1, "COLLECTING")
+
+
+def test_a_candidate_model_watches_real_payments_without_changing_them(stack, app, monkeypatch):
+    from amfa.engine.risk import scorer
+    first = act(app, "transfer", payeeRef="BEN-42", amountRupees=2_500).json()["action"]
+    watcher = scorer.Result(score=0.9, raw=0.9, level="T4", reasons=[], version="stub-candidate")
+    monkeypatch.setattr(scorer, "candidate", lambda: type("C", (), {"score": lambda self, f: watcher, "version": "stub-candidate"})())
+    started = act(app, "transfer", payeeRef="BEN-42", amountRupees=2_500).json()
+    second = started["action"]
+    assert second["checks"] == first["checks"] and second["reviewAfter"] == first["reviewAfter"]   # a T4 candidate changed nothing
+    verify(stack, started["challengeUrl"])
+    assert app.post(f"/api/actions/{second['id']}/complete").json()["action"]["status"] == "DONE"
+    _, row = _row(second["id"])
+    assert (row.candidate_version, row.model_version) == ("stub-candidate", "stub")
+    # its level is what it would decide as the active model, the bank's reliefs included: make it active for the same payment
+    monkeypatch.setattr(scorer, "active", lambda: type("A", (), {"score": lambda self, f: watcher, "version": "stub-candidate"})())
+    monkeypatch.setattr(scorer, "candidate", lambda: None)
+    third = act(app, "transfer", payeeRef="BEN-42", amountRupees=2_500).json()
+    verify(stack, third["challengeUrl"])
+    app.post(f"/api/actions/{third['action']['id']}/complete")
+    _, as_active = _row(third["action"]["id"])
+    assert row.candidate_level == as_active.model_level and as_active.model_version == "stub-candidate"
 
 
 def test_with_the_switch_off_payments_carry_no_band_state(stack, app):

@@ -56,6 +56,8 @@ class BandStats:
     model_day: Optional[int] = None
     fallback_days: list = field(default_factory=list)
     last_missing: list = field(default_factory=list)                      # what the last grading said was missing
+    last_streak: int = 0                                                  # weekly passes in a row at the last grading
+    candidate_approved_day: Optional[int] = None                          # two (simulated) people trusted the candidate here
 
 
 @dataclass
@@ -77,7 +79,7 @@ def _behaviour(risk: Optional[float]) -> Band:
     return Band.HIGH if risk >= 0.7 else Band.MEDIUM if risk >= 0.4 else Band.LOW
 
 
-def context_of(row, policy: TenantPolicy, state: Optional[str], switch: bool = True) -> Context:
+def context_of(row, policy: TenantPolicy, state: Optional[str], switch: bool = True, version: Optional[str] = None) -> Context:
     """A request context from a simulator row's own features, as close to the live context builder as the features allow."""
     f = row.features
     amount, exposure = int(round(row.amount * 100)), int(round(row.exposure * 100))
@@ -94,7 +96,7 @@ def context_of(row, policy: TenantPolicy, state: Optional[str], switch: bool = T
                          hourUnusual=bool(f.get("is_night"))),
         behavioural=BehaviouralCtx(band=_behaviour(f.get("ueba_risk"))), enrollment=ALL_FACTORS, org=org,
         policy=Policy(actionFloor=floor, smallPaymentCap=policy.smallPaymentCap, lowTouch=policy.lowTouch, phase="READY",
-                      bandSwitch=switch, bandState=state))
+                      bandSwitch=switch, bandState=state, bandModelVersion=version))
 
 
 def not_weaker(a: Plan, b: Plan) -> bool:
@@ -103,9 +105,10 @@ def not_weaker(a: Plan, b: Plan) -> bool:
 
 
 def replay(rows: Iterable, *, tenant_id: Optional[str] = None, policy: Optional[TenantPolicy] = None, approve: bool = True,
-           label_source: str = "chargeback", compare_off: bool = True, progress=None) -> Report:
+           label_source: str = "chargeback", compare_off: bool = True, progress=None, on_day=None) -> Report:
     """Replay [rows] (simulator rows, any order) day by day. Writes learning rows and band states into the database for [tenant_id]
-    (a throwaway bank is made if none is given)."""
+    (a throwaway bank is made if none is given). [on_day](day, report, tenant_id, day_start), if given, runs at the start of every
+    day, before its payments: that is where a model update (installing a candidate, promoting it) happens in a replay."""
     db.migrate()
     policy = policy or TenantPolicy.model_validate({"collection": {"enabled": True}})
     if tenant_id is None:
@@ -122,15 +125,18 @@ def replay(rows: Iterable, *, tenant_id: Optional[str] = None, policy: Optional[
     last_day = day_of(pays[-1].at)
     for day in range(last_day + 1):
         end = start + (day + 1) * DAY
+        if on_day is not None:
+            on_day(day, rep, tenant_id, end - DAY)
         with db.session() as s:
-            states = {b: band_gate.state_for(s, tenant_id, b, end - DAY / 2) for b in BANDS}
+            decided = {b: band_gate.decision_state(s, tenant_id, b, end - DAY / 2) for b in BANDS}
+        states = {b: st for b, (st, _) in decided.items()}
         out = []
         while i < len(pays) and pays[i].at < end:
             r = pays[i]
             i += 1
             band = band_of(int(round(r.exposure * 100)))
             state = states[band]
-            plan = decide(context_of(r, policy, state), features=r.features)
+            plan = decide(context_of(r, policy, state, version=decided[band][1]), features=r.features)
             st = rep.bands[band]
             mode = plan.bandState or band_switch.COLLECTING
             if compare_off:
@@ -149,7 +155,9 @@ def replay(rows: Iterable, *, tenant_id: Optional[str] = None, policy: Optional[
             out.append(db.LearningRow(
                 id=uuid.uuid4().hex, tenant_id=tenant_id, band=v["band"], band_vs_usual="SAME", payee_kind=v["payeeKind"],
                 device_kind=v["deviceKind"], hour_bucket=hour_bucket(datetime.fromtimestamp(r.at, IST).hour),
-                hard_sign=bool(v["hardSign"]), rules_level=v["rulesLevel"], model_level=v["modelLevel"], mode=v["mode"],
+                hard_sign=bool(v["hardSign"]), rules_level=v["rulesLevel"], model_level=v["modelLevel"],
+                model_version=v.get("modelVersion"), candidate_level=v.get("candidateLevel"),
+                candidate_version=v.get("candidateVersion"), mode=v["mode"],
                 outcome="COMPLETED", label="FRAUD" if r.label else "UNKNOWN", label_source=label_source if r.label else None,
                 week_start=week_start(r.at, IST)))
             rep.payments += 1
@@ -159,6 +167,7 @@ def replay(rows: Iterable, *, tenant_id: Optional[str] = None, policy: Optional[
             for b, gs in band_gate.evaluate(s, tenant_id, policy, end).items():
                 before = states[b]
                 rep.bands[b].last_missing = list((gs.figures or {}).get("missing", []))
+                rep.bands[b].last_streak = gs.streak or 0
                 if gs.state == band_gate.ELIGIBLE and rep.bands[b].eligible_day is None:
                     rep.bands[b].eligible_day = day
                 if gs.state == band_gate.ELIGIBLE and approve:
@@ -167,6 +176,12 @@ def replay(rows: Iterable, *, tenant_id: Optional[str] = None, policy: Optional[
                     rep.bands[b].model_day = day if rep.bands[b].model_day is None else rep.bands[b].model_day
                 if before == band_gate.MODEL and s.get(db.BandGateState, (tenant_id, b)).state == band_gate.COLLECTING:
                     rep.bands[b].fallback_days.append(day)
+                bc = s.get(db.BandCandidate, (tenant_id, b))
+                if approve and bc is not None and bc.state == band_gate.ELIGIBLE:      # the candidate earned it: two people agree
+                    req = band_gate.request_candidate(s, tenant_id, b, "sim_operator_1", end)
+                    band_gate.approve(s, req.id, "sim_operator_2", end)
+                    if rep.bands[b].candidate_approved_day is None:
+                        rep.bands[b].candidate_approved_day = day
             rep.timeline.append((day, {b: s.get(db.BandGateState, (tenant_id, b)).state for b in BANDS}))
         if progress and day % 10 == 0:
             progress(day, rep)

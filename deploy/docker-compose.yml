@@ -27,6 +27,7 @@ x-core-env: &core-env
   AMFA_FACE_URL: http://face:8101
   AMFA_VOICE_URL: http://voice:8102
   AMFA_UEBA_URL: http://ueba:8103
+  AMFA_BANDS_URL: http://bands:8104
   AMFA_DATABASE_URL: postgresql+psycopg://amfa_app:${DB_APP_PASSWORD:?set in .env}@postgres-core:5432/amfa_core
   AMFA_GEOIP_DB: ${AMFA_GEOIP_DB:-}
   AMFA_KEY_PROVIDER: ${AMFA_KEY_PROVIDER:-env}
@@ -80,6 +81,23 @@ services:
       interval: 10s
       retries: 10
 
+  postgres-bands:                    # the band switch's anonymous rows and band states, apart from everything else
+    image: postgres:17-alpine
+    <<: *hardening
+    read_only: false
+    cap_drop: []
+    environment:
+      POSTGRES_USER: amfa_bands
+      POSTGRES_PASSWORD: ${DB_BANDS_PASSWORD:?set in .env}
+      POSTGRES_DB: amfa_bands
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    volumes: ["pgbands:/var/lib/postgresql/data"]
+    networks: [bandsdata]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U amfa_bands -d amfa_bands"]
+      interval: 10s
+      retries: 10
+
   redis:
     image: redis:7-alpine
     <<: *hardening
@@ -98,6 +116,17 @@ services:
     command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}", "--save", "", "--appendonly", "no",
               "--maxmemory", "64mb", "--maxmemory-policy", "volatile-ttl"]
     networks: [factordata]
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+
+  redis-bands:                       # replay protection for the band service's signed requests
+    image: redis:7-alpine
+    <<: *hardening
+    user: "999:1000"
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}", "--save", "", "--appendonly", "no",
+              "--maxmemory", "32mb", "--maxmemory-policy", "volatile-ttl"]
+    networks: [bandsdata]
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 10s
@@ -124,6 +153,7 @@ services:
       face: { condition: service_healthy }
       voice: { condition: service_healthy }
       ueba: { condition: service_healthy }
+      bands: { condition: service_healthy }
     networks:
       edge: { ipv4_address: 172.30.0.10 }
       internal: {}
@@ -162,6 +192,38 @@ services:
     networks: [internal, factordata]
     deploy: { resources: { limits: { memory: 1g } } }
 
+  bands:                             # the band switch (amfa/bands/service.py): reachable from the core only, on the internal network
+    build: { context: .., dockerfile: deploy/Dockerfile, target: bands }
+    <<: *hardening
+    environment:
+      AMFA_ENV: production
+      AMFA_ROLE: bands
+      AMFA_MASTER_KEYS: ${AMFA_BANDS_MASTER_KEYS:?set in .env}
+      AMFA_INTERNAL_TOKEN: ${AMFA_INTERNAL_TOKEN}
+      AMFA_REDIS_URL: redis://:${REDIS_PASSWORD}@redis-bands:6379/0
+      AMFA_BANDS_DB_URL: postgresql+psycopg://amfa_bands:${DB_BANDS_PASSWORD}@postgres-bands:5432/amfa_bands
+    depends_on:
+      postgres-bands: { condition: service_healthy }
+      redis-bands: { condition: service_healthy }
+    networks: [internal, bandsdata]
+    deploy: { resources: { limits: { memory: 512m } } }
+
+  bands-move:                        # once, when turning the service on for a deployment that kept band data in the core:
+    profiles: ["tools"]              #   docker compose stop core && docker compose run --rm bands-move [--dry-run]
+    build: { context: .., dockerfile: deploy/Dockerfile, target: bands }
+    <<: *hardening
+    restart: "no"
+    environment:
+      <<: *core-env
+      AMFA_BANDS_URL: ""
+      AMFA_BANDS_DB_URL: postgresql+psycopg://amfa_bands:${DB_BANDS_PASSWORD}@postgres-bands:5432/amfa_bands
+    entrypoint: ["python", "-m", "amfa.cli", "bands-move"]
+    command: []
+    depends_on:
+      postgres-core: { condition: service_healthy }
+      postgres-bands: { condition: service_healthy }
+    networks: [coredata, bandsdata]
+
   caddy:
     image: caddy:2-alpine
     <<: *hardening
@@ -187,10 +249,13 @@ networks:
     internal: true
   factordata:
     internal: true
+  bandsdata:
+    internal: true
 
 volumes:
   pgcore: {}
   pgfactors: {}
+  pgbands: {}
   coredata: {}
   caddydata: {}
   caddyconfig: {}

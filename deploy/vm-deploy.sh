@@ -30,11 +30,13 @@ AMFA_PUBLIC_URL=https://{d}
 ACME_EMAIL=unused@invalid
 AMFA_MASTER_KEYS={k()}
 AMFA_FACTOR_MASTER_KEYS={k()}
+AMFA_BANDS_MASTER_KEYS={k()}
 AMFA_INTERNAL_TOKEN={t()}
 AMFA_IP_SALT={t()}
 DB_OWNER_PASSWORD={t(24)}
 DB_APP_PASSWORD={t(24)}
 DB_FACTOR_PASSWORD={t(24)}
+DB_BANDS_PASSWORD={t(24)}
 REDIS_PASSWORD={t(24)}
 AMFA_AGENT_BACKEND=local
 AMFA_KEY_PROVIDER=env
@@ -44,6 +46,15 @@ BANK_SESSION_SECRET={secrets.token_hex(32)}""")
 EOF
   umask 022
 fi
+# a .env from before the band service: give it the band service's own key and database password
+for v in AMFA_BANDS_MASTER_KEYS DB_BANDS_PASSWORD; do
+  if ! grep -q "^$v=" deploy/.env; then
+    if [ "$v" = AMFA_BANDS_MASTER_KEYS ]; then val="v1:$(python3 -c 'import base64,secrets;print(base64.b64encode(secrets.token_bytes(32)).decode())')"
+    else val="$(python3 -c 'import secrets;print(secrets.token_urlsafe(24))')"; fi
+    printf '%s=%s
+' "$v" "$val" >> deploy/.env
+  fi
+done
 set -a; . deploy/.env; set +a
 [ -f deploy/demo-bank.env ] || install -m 600 /dev/null deploy/demo-bank.env
 

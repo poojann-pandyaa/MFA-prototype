@@ -513,3 +513,348 @@ Tests: 229 in 8 new files:
 - the biometric consent.
 
 **Not built:** an admin console screen for the band figures and the pending requests. The API is there and tested.
+
+---
+
+## 6. Model updates: a new version earns each band before it decides
+
+**The gap.** The band switch approved "the model" for a band without remembering which version. New weights would have been
+trusted at once in every approved band, and the grading mixed records scored by old and new versions.
+
+**The design (shadow first).**
+- A new version is installed as a **candidate** next to the active one. It scores every payment silently and decides nothing; the
+  active version keeps deciding everything.
+- The candidate is graded per band on fresh payments it has never seen, with the same gates.
+- Two operators of the bank approve it per band. Promotion then moves approved bands to it with no gap, and sends a band still on
+  the old version that the candidate has not earned back to the rules. The preview shows this first.
+- **Safety net:** an active model changed any other way (for example, written directly by the training script) is never trusted
+  in a band that was not approved for that exact version.
+- **The cost:** about 2 to 3½ months of shadowing before a new version takes over a band. Customers feel nothing meanwhile.
+
+| Phase | What | Status |
+|---|---|---|
+| 1 | Record the version: the decision's `bandView.modelVersion`, `learning_row.model_version`, and `band_gate.model_version` (the version a state was graded on, or for MODEL, approved on and never overwritten by later gradings). Schema v6 adds the columns to older databases, keeping their rows. Rows without a version are never graded | **built** |
+| 2 | Safety net: grade only the active version's rows; a version change sends ELIGIBLE and MODEL bands not approved for it to the rules (audit and security event); the decision trusts a MODEL band only if the version that scored the payment is the approved one; approvals carry the version (`MODEL_CHANGED`) | **built** |
+| 3 | The candidate scores silently: a `CANDIDATE` pointer next to `ACTIVE`, commands to install or remove it, `train --candidate`; its level and version on each row; a failing candidate never touches a payment | **built** |
+| 4 | Grade the candidate per band; two-person approval tied to the candidate's version; a new candidate starts from zero | **built** |
+| 5 | Promotion: a preview per bank and band; band states first, then the pointer, failing closed if interrupted | **built** |
+| 6 | End-to-end replay with a candidate partway, the demo bank flow, full suite, smoke test on and off, security review, docs | **built** (see below for what was and was not run) |
+
+Phase 1 tests are in `tests/core/test_model_version.py`:
+- the version reaches the view and the row;
+- a model that could not score leaves none, and odd values are stored as none;
+- decisions are unchanged;
+- an older database gains the columns and keeps its rows, and running the upgrade again changes nothing;
+- gradings note their version, and an approved band keeps its version through later gradings;
+- the console shows each band's version.
+
+Also updated: the privacy column list (on purpose), the view's field list, and an end-to-end check that a demo-bank payment's row
+carries the scoring model's version.
+
+**Phase 2, as built.**
+
+`band_gate.evaluate`:
+- grades only rows whose `model_version` is the version deciding now;
+- does nothing at all when no model can be loaded, so a band on MODEL is then decided by the rules after 48 hours;
+- first runs `model_changed` on any band that is ELIGIBLE or on MODEL for another version. That band goes to COLLECTING, its
+  streak is reset and its pending requests are cancelled. This is audited (`band_gate.model_changed`, with both versions) and, for
+  a band that was on MODEL, raised as a `BAND_MODEL_CHANGED` security event (HIGH for ₹1 lakh+). Going back to the old version
+  later does not bring the approval back.
+
+`band_gate.decision_state` hands the decision the band's state and, for MODEL, its approved version.
+`band_switch.effective_state` then treats the band as MODEL only if the version that scored this very payment is that one. Any
+other, unknown or missing version means the stricter plan. So new weights loaded directly are not trusted, even before the night's
+grading. The model-only plan worked out while collecting is now computed with the switch off, rather than by claiming MODEL.
+
+Requests store `{"modelVersion": ...}`:
+- a request is refused with no loadable model (`NO_MODEL`), or for a band graded on another version (`MODEL_CHANGED`);
+- a pending request for another version is replaced;
+- approval is refused if the deciding version is not the one asked for (`MODEL_CHANGED`);
+- the instant ₹1 lakh+ fallback counts only frauds decided by the band's approved version.
+
+Phase 2 tests:
+- `tests/core/test_model_change.py`, 24 tests:
+  - grading by version, and nothing graded without a model;
+  - bands dropped on a change (MODEL, ELIGIBLE, the ₹1 lakh+ event, collecting untouched, same version kept, no comeback);
+  - decision-time trust only with the approved version;
+  - a wrong version is never weaker than the right one, at every level;
+  - every approval case.
+- An end-to-end demo-bank test: new weights swapped in mid-way are not trusted on the very next payment, and the night's grading
+  drops the band.
+- The existing band tests now give their rows and states a model version, as real ones have.
+
+**Phase 3, as built.**
+
+The model store (`amfa/engine/risk/scorer.py`) gains a `CANDIDATE` pointer next to `ACTIVE`:
+- `set_candidate(version)` installs one. It must be a plain folder name (letters, digits, `.`, `_`, `-`, at most 64 characters, no
+  path), not the active version, and must load with every file matching its manifest. The pointer is written all at once, and a
+  new candidate replaces the old.
+- `clear_candidate()` removes it.
+- `candidate()` returns None, and never raises, for: no pointer, a bad name, the active version, or a version that no longer
+  loads.
+- Commands: `python -m amfa.cli risk-candidate show|set <version>|clear` (audited), and
+  `python -m amfa.engine.risk.train --candidate`, which installs the new version as the candidate and leaves `ACTIVE` alone.
+  Without the flag, training behaves exactly as before.
+
+In `decide()`, once the real plan is final, the candidate scores the same payment:
+- it takes the same path the active model took (the learning plan or the model plan, with the same reliefs and policy) through
+  the same functions, which now take an optional model;
+- only its level and version are added to the band view (`candidateLevel`, `candidateVersion`);
+- it runs only when the bank has the switch on, and only for payments;
+- any failure, or a candidate whose result names another version, leaves no trace.
+
+The learning row keeps both values or neither (`candidate_level`, `candidate_version`; schema v6). The replay writes them too.
+Version names are checked with the model store's own rule wherever they are logged or stored, so a value like `../x` is never
+graded.
+
+Phase 3 tests:
+- `tests/core/test_candidate.py`, 68 tests:
+  - **decisions are identical with and without a candidate** on 30 combinations of active level, candidate level and band state,
+    compared on every decision field and the band view;
+  - its level equals what it says as the active model, at every level, for ready and learning customers;
+  - a failing, unloadable or mislabelled candidate leaves no trace;
+  - no scoring with the switch off or for account changes;
+  - the row keeps both values or neither;
+  - installing, replacing and removing; name, active-version and integrity refusals;
+  - a pointer that has gone bad;
+  - `train --candidate` installs and leaves `ACTIVE` alone.
+- An end-to-end demo-bank test: with a candidate installed, a real payment gets the same checks and goes through, and its row
+  carries the candidate's answer, equal to what it decides as the active model on the same payment.
+
+**Phase 4, as built.** A new `band_candidate` table holds the candidate's progress per bank and band, apart from `band_gate`, so
+grading the candidate can never move a band.
+
+The nightly grading also grades the installed candidate in every band. It uses only the rows it scored (`candidate_version`), its
+own answers (`candidate_level`), and the same gates, maturity and weekly streak:
+- after 4 passes it is ELIGIBLE;
+- two different operators make it APPROVED (`request_candidate`, then the usual `approve`, kind `CANDIDATE_FOR_BAND`, tied to the
+  candidate's version);
+- a candidate that starts losing goes back to COLLECTING and loses any approval;
+- installing another candidate replaces the old one's progress and approvals (audited, `band_candidate.replaced`);
+- removing it leaves nothing.
+
+**One grading per version, whichever role it played.** `level_for` grades a version on its answers as the deciding model *and*
+as the watching candidate. So a promoted candidate keeps the evidence it built while watching.
+
+**Phase 5, as built.** `promotion_preview` shows, for every bank with the switch on and every band, what promoting will do:
+- **MODEL:** the candidate was approved there;
+- **ELIGIBLE:** it has earned the band but was not approved yet;
+- **COLLECTING:** anything else.
+
+A band on the current model that the candidate has not earned is listed as a **drop**.
+
+`promote`:
+- refuses while there are drops unless they are confirmed (`WOULD_DROP`), and refuses a candidate that no longer loads
+  (`CANDIDATE_BROKEN`);
+- otherwise writes every band's new state, tied to the new version and carrying the candidate's streak, and commits it. It then
+  removes the candidate's progress, cancels pending requests, audits each band and the promotion, raises a security event for each
+  drop, and **only then** switches the active pointer (`scorer.promote_candidate`, all at once);
+- **fails closed if it stops between the two steps:** the bands name a version that is not deciding, so decisions use the stricter
+  plan and the night's grading takes them back.
+
+Entry points:
+- `GET /admin/api/risk/candidate` and `POST /admin/api/risk/candidate/promote` (`{"confirmDrops": bool}`), for platform operators
+  only;
+- `POST /admin/api/band-gates/{band}/request-candidate`, for bank operators;
+- `python -m amfa.cli risk-candidate preview|promote [--confirm-drops]`.
+
+The per-band console view shows the candidate's progress next to the band's own.
+
+**Phase 6, as built.** The replay takes an `on_day` hook, where a model update happens, and approves an eligible candidate the way
+it approves an eligible band. Two replays with perfect stand-in models (`tests/core/test_band_switch_e2e.py`):
+- **Shadow, then promote:** V1 earns the ₹10k–1 lakh band. V2 is installed as the candidate on day 5, earns the band while
+  watching, and is approved. It is promoted the night it is trusted there while V1 decides it. The band never spends a day on the
+  rules, and ends on V2.
+- **Weights swapped in directly,** with no candidate, the day after V1 has been put on the band: the band is on the rules that very
+  day, and V2 cannot earn it back within the 150 days.
+- **A note on timing:** a candidate installed late (day 60) could not be approved within the replay's 150 days. It needs about 7
+  weeks of its own payments for 2,000 genuine ones, plus 30 days to mature and 4 weekly passes. Promotion then correctly refused
+  (`WOULD_DROP`).
+
+Phase 4–6 tests:
+- `tests/core/test_candidate_bands.py`, 27 tests:
+  - candidate grading on its own answers, never moving the band;
+  - the streak, losing, and replaced or removed candidates;
+  - evidence carried into promotion;
+  - two-person approval and its refusals;
+  - every preview outcome;
+  - refusals for drops, no candidate and a broken candidate;
+  - promotion's band states, order and clean-up;
+  - failing closed when stopped before the pointer;
+  - an old version coming back needs trust again;
+  - platform-only endpoints;
+  - the store's own promotion.
+- 5 replay tests in `tests/core/test_band_switch_e2e.py`.
+
+**Security review of #7, by hand, no new findings:**
+- **Who:** installing a candidate needs server access (the command line). Trusting it in a band needs two operators of that bank,
+  tied to the candidate's version and scoped to the bank. Promotion needs a platform operator, and can only keep or tighten a band
+  (drops must be confirmed).
+- **Never the decision:** a candidate never reaches a decision, and its failures leave no trace.
+- **Version names:** checked with one rule wherever they are installed, logged or stored.
+- **Races:** promotion re-reads the candidate inside its own transaction, and the pointer switch refuses anything but that
+  candidate.
+- **Fail closed:** a stop between the two steps of promotion decides by the rules.
+- **Logs:** carry only the version and the kind of error.
+
+**Not run for #7:** the live smoke test against a running stack. It exercises payments with the switch on or off, which #7 does not
+change; the demo-bank end-to-end tests cover #7's paths through a real in-process core.
+
+
+---
+
+## 7. Option A or B: does storing only bands cost the model accuracy?
+
+The design keeps the exact amounts in the decision and the 90-day history (option A), and puts bands only in the anonymous records.
+This measures what option B would cost: a system that knows every amount only by its band. Method, how to run it, and results are
+in [amount-bands-accuracy.md](amount-bands-accuracy.md).
+
+| Phase | What | Status |
+|---|---|---|
+| 1 | `amfa/engine/risk/amount_view.py` (`exact`, `bands4`, `bands8`; one log-midpoint value per band) and an optional `amount_view` in the simulator's dataset step, applied to the payment, its history and the 24-hour total; the true amount stays on the row for measuring money | built |
+| 2 | `train.run(amount_view=...)`, recorded as `amountView` in the model card; training refuses to activate or install a banded model; the live scorer refuses to load one; a `by_collection_band` breakdown in the training test's measures | built |
+| 3 | `scripts/compare_amount_storage.py`: per data seed, one model per view on the same data, compared on the same test rows; mean over seeds and the paired change from exact | built |
+| 4 | Through the decision pipeline: covered by the training step's own test, which applies the reliefs and the habit rule to the banded inputs and banded 24-hour total. The script reports those figures next to the model-alone ones | built (no extra code needed) |
+| 5 | The write-up: [amount-bands-accuracy.md](amount-bands-accuracy.md) | **built, with results** |
+
+**Tested:** 33 tests in `tests/engine/test_amount_view.py`:
+- the views, band values and the band switch's own edges;
+- 8 bands never crossing the 4;
+- the simulator unchanged without a view, and the same payments in the same order with one;
+- inputs and the 24-hour total computed from banded amounts, the others untouched;
+- the true amount kept for counting money;
+- the model card's view and the per-band breakdown;
+- the live scorer refusing a banded model, even made active by hand;
+- training refusing to activate or install one;
+- the script comparing on the same rows, with a paired summary and a full report.
+
+The full suite passes, apart from the face-model file that fails on this Windows checkout. The comparison ran on 3 seeds × 3,000
+customers.
+
+**Result:** option B (bands only) costs about 13 points of fraud money caught at T3+, almost all of it on payments of ₹1 lakh and
+above, which all look the same when only the band is known. Counts of fraud caught barely change, honest customers see slightly
+more friction, and older customers are treated more evenly. **Option A stays.**
+
+
+---
+
+## 8. The band switch as its own service
+
+The band switch's rows, band states and candidate progress are the one store the core would hand to analysts or auditors. This
+moves them, and the logic that reads and writes them, out of the core into a service with a database of its own. The core keeps
+the decision, the keys, the two-person approvals and the audit log.
+
+**How it is split:**
+- `amfa/bands/models.py`: the three tables (`learning_row`, `band_gate`, `band_candidate`), on their own metadata.
+- `amfa/bands/engine.py`: all the band logic (grading, the gate, fallback, candidate progress, promotion's band states, rows,
+  labels, link expiry, retention). It never writes the core's tables. What a change needs recorded comes back as events.
+- `amfa/bands/store.py`: the one way the core reaches it.
+  - `LocalStore`, the default: the engine inside the core, in the core's database and the caller's transaction. Nothing changes
+    for a deployment that does not turn the service on.
+  - `RemoteStore`, chosen when `AMFA_BANDS_URL` is set (`amfa/bands/remote.py`).
+- `amfa/core/band_gate.py` and `amfa/core/learning_store.py`: what stays in the core. Two-person requests and approvals, the
+  policy guard, the keyed-hash link (its key never leaves the core), and writing the events into the audit log.
+- `amfa/bands/service.py`: the service, `python -m amfa.cli serve bands` (port 8104), with its database in `amfa/bands/db.py`
+  (`AMFA_BANDS_DB_URL`).
+
+**Security of the service:**
+- **Only the core may call it.** Every request is signed with the internal token under the key id `core`, and a replayed request
+  is refused (its own replay scope). It sits on the internal network only.
+- **Nothing identifying can reach it.** Every request body is a strict model that refuses unknown fields. A row may carry only
+  the allowed columns, each checked against its own pattern; a link must be 64 hex characters. Bodies are capped at 1 MB.
+- **Its own secrets and data.** Its own Postgres database and user, its own Redis for replay state, its own master key, and its
+  own network (`bandsdata`). In production it refuses to start under any role but `bands`, refuses the core's database URL, and
+  requires Postgres.
+- **Links expire on their own.** The service wipes links at their time, hourly and at start-up, even if the core is down.
+
+**Failing closed when the service is slow or down:**
+
+| Call | What happens |
+|---|---|
+| The payment's band state | One call, waiting at most `AMFA_BANDS_TIMEOUT_S` (0.2 s). No answer, a refusal or anything odd: COLLECTING, the stricter plan. |
+| Nightly grading | Not due, nothing moves. A band on the model is then decided by the rules once its last grading is two days old. |
+| A new row or label | Held in the core's `band_outbox` and sent again by the sweeper, less often each time. Dropped once its link would have expired. |
+| Operator actions (approve, revert, promote, read) | Refused with 503 (`BANDS_UNAVAILABLE`). Nothing is half-applied; a promotion never reaches the pointer switch. |
+
+**Deployment:** `deploy/docker-compose.yml` runs `bands`, `postgres-bands` and `redis-bands`, and the core points at it with
+`AMFA_BANDS_URL=http://bands:8104`. `deploy/vm-deploy.sh` adds the service's key and password to an older `.env`.
+
+**Moving existing data:** for a bank that already has band data in the core's database:
+1. Stop the core.
+2. `docker compose run --rm bands-move --dry-run` counts what the core holds.
+3. `bands-move` copies rows and states by their keys, so a second run copies nothing twice.
+4. It checks every row arrived, and only then deletes them from the core. If anything is missing, the core keeps all of them.
+
+| Phase | What | Status |
+|---|---|---|
+| 1 | Band tables and logic moved into `amfa/bands` behind a store; the core writes the returned events | built |
+| 2 | The service and its database, signed internal requests, strict request bodies | built |
+| 3 | `RemoteStore`, the 0.2 s fail-closed decision call, the outbox, 503s for operator actions, link expiry in the service | built |
+| 4 | Compose services, own Postgres, Redis and network, the `bands` role checks, `bands-move` | built |
+| 5 | This section, `architecture.md`, `README.md`, the report addendum | built |
+| Test | See below | **passed** |
+
+**Tested:** 84 new tests in 2 files, and every earlier band test still passes.
+- `tests/core/test_bands_service.py` (75 tests):
+  - **The same behaviour inside the core and through the service.** The same 9 scenarios run in both places: grading to ELIGIBLE,
+    two operators moving a band, a version change cancelling an approval, a fraud in the ₹1 lakh+ band sending it back, one row
+    per payment, labels and expired links, purge, a candidate trusted and promoted, and the admin view. In the service, the rows
+    are never in the core's database.
+  - **Only the core can call it.**
+    - Every one of the 14 endpoints refuses an unsigned request before reading its body.
+    - Signed requests are refused when they come from another caller, use the wrong secret, carry an old timestamp, have their
+      body changed, are replayed, or are signed for another endpoint.
+  - **Nothing identifying gets in.**
+    - A row is refused if it carries a customer, an amount, a payee, a device, a payment id or an IP address, and nothing is
+      stored.
+    - A row is refused if any field is outside its pattern.
+    - An extra field next to a row, or on a label, is refused.
+    - The engine itself refuses a field that is not a band row field.
+    - Bodies over 1 MB are refused, and the service publishes no API description.
+  - **Production settings.** The `bands` role loads only with its own Postgres database and without the core's database URL, and
+    the service will not start under another role.
+  - **Failing closed.**
+    - In 10 kinds of bad answer (down, timeout, 500, 401, not JSON, a list, MODEL with no version, an unknown state, an empty
+      answer), the payment is decided under COLLECTING.
+    - The decision call waits 0.2 s. Over a real network, a service that takes 1.5 s costs the payment under 0.8 s, and the payment
+      gets the stricter plan.
+    - With the service down, grading is skipped, and a band on the model goes back to the rules once its grading is stale.
+    - Operator actions are refused with 503 and nothing is half-applied: the request still waits for its second person and goes
+      through once the service is back.
+    - A promotion never reaches the pointer switch.
+  - **The outbox.**
+    - A row and its label held during an outage arrive once, in order.
+    - A row the service took when the core saw an error is still kept once.
+    - A row whose link would have expired is dropped unsent.
+    - Retries back off from 30 s to 120 s.
+    - Changes a held row causes when it arrives (a fallback) are recorded in the core.
+    - The outbox holds only the row's fields.
+  - **The move.**
+    - It counts, copies 2,500 rows and the band states exactly, empties the core only afterwards, and copies nothing twice.
+    - If any row is missing after the copy, the core keeps every row.
+    - It refuses to copy the core into itself.
+- `tests/core/test_bands_remote_e2e.py` (9 tests): the Demo Bank against a real in-process core whose band switch runs as the
+  service.
+  - Rows land only in the service's database.
+  - Labels and cancellations reach them.
+  - A payment is decided under the state the service holds.
+  - With the service down, slow, or answering 503, a payment still goes through. It is decided under COLLECTING, with never
+    fewer checks than with the service up, and its row arrives once the service is back, exactly once.
+  - With the switch off, nothing reaches the service. The customer and the bank see no new field.
+
+**Full suite:** 916 pass. The one failure is the face-model file that fails on this Windows checkout because of its line endings;
+it failed the same way before this change.
+
+**Found and fixed while testing:**
+- **The admin band view** (`GET /admin/api/band-gates`) answered 500 instead of 503 while the service was down. Every part of the
+  core now answers an unreachable band service with 503 `BANDS_UNAVAILABLE`.
+- **A row's label source and a label's value** were checked only for length. They are now limited to the four real sources and
+  the two real labels.
+- **The upgrade test** built its old database without the band tables, which now have their own metadata.
+- **The new end-to-end test** was the first to import the Demo Bank, which reads its bank once at import, so the customer-app
+  tests after it ran against the wrong bank. It now removes the module again when it was the one that imported it.
+
+**Known limit:** when the second operator approves a band, the service moves it first and the core then writes its audit entry.
+If the core's database failed in that instant, the band would stand on the model (both approvals were given and checked) without
+its audit entry in the core. Inside the core (the default) both are one transaction.
+

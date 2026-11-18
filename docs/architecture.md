@@ -16,8 +16,9 @@ It also answers one design question that came up: should the face, voice and typ
    |      +--> face service  (8101)   detection, match, liveness (PAD + custom veto)         |
    |      +--> voice service (8102)   speaker match, anti-spoof, phrase check                 |
    |      +--> ueba service  (8103)   typing, touch, line-tracing, replay guard              |
+   |      +--> band service  (8104)   band switch: anonymous rows, band states, grading       |
    +------------------------------------------------------------------------------------------+
-   each service: own container, own Postgres/Redis (factor data is not in the core's database)
+   each service: own container, own Postgres/Redis (factor and band data are not in the core's database)
 ```
 
 | Piece | Owns | Talks to | Scales by |
@@ -26,6 +27,7 @@ It also answers one design question that came up: should the face, voice and typ
 | **Face** (`amfa/factors/face`) | face templates, liveness models | core only | more replicas (CPU-bound; stateless apart from its own store) |
 | **Voice** (`amfa/factors/voice`) | voiceprints, anti-spoof models | core only | same |
 | **UEBA** (`amfa/factors/ueba`) | typing / touch / shape profiles | core only | same |
+| **Band switch** (`amfa/bands`) | the anonymous band rows, each band's state, a candidate model's progress, the nightly grading | core only | one or two replicas; its own Postgres |
 | **Bank / demo bank** | accounts, money | core's tenant API | the bank's own |
 | **Phone app** (`mfa-android`) | capture, coaching, encryption, the phone's own secure-hardware key | bank, core's customer API | the phones themselves |
 
@@ -38,6 +40,7 @@ The core never imports a factor's code. It calls it over HTTP with a signed requ
 |---|---|---|
 | A **liveness / match / voice model** | the factor service image (or its model directory) | core, the other factors, the app, the bank |
 | The **risk model** | train a new version; the `active` pointer file selects it, `active()` reads the pointer on every call, so a switch (or a rollback to the old version) needs no restart | everything else |
+| The **band switch** (grading, evidence, fallback) | the band service image (`amfa/bands`) | the core, the risk model, the factors |
 | **Rules / thresholds / which check at which level** | the tenant policy (JSON, per bank) | code |
 | **Add a factor** (say, a hardware key) | a new service that answers the same contract + one entry in the core's factor table | existing factors |
 | **One bank's behaviour** | that tenant's policy (`requireE2E`, OTP methods, branding) | other banks |
@@ -152,9 +155,14 @@ biometric, a name, an account number or an exact location; devices, payees and p
 | `known_payee` | which customers paid which payee and when: the basis of payee reputation (mule detection) | `core/payee_reputation.py` |
 | `bypass_limit` | a customer's own "no extra checks up to X a day", with a raise waiting out its cooling-off | `core/bypass.py` |
 | `trusted_helper` | a family member's phone the customer chose (a label and a keyed hash), with an invite code kept only as a hash | `core/helpers.py` |
-| `learning_row` | the band switch's anonymous record of each settled payment: amount band, small categories, what the rules and the model each asked for, the outcome and label, and the week. **No customer, amount, payee, device, place or time.** A keyed-hash link to its payment, only so a late fraud report can find it, is wiped at 90 days | `core/learning_store.py` |
-| `band_gate` | per bank and amount band: COLLECTING, ELIGIBLE or MODEL, and the last grading's counts and rates | `core/band_gate.py` |
-| `band_switch_request` | a change that relaxes the band switch, waiting for a second operator | `core/band_gate.py` |
+| `band_outbox` | band rows and labels the band service could not take yet, sent again by the sweeper, dropped once their link would have expired (only when the band service runs on its own) | `bands/remote.py` |
+| `learning_row` | the band switch's anonymous record of each settled payment: amount band, small categories, what the rules and the model each asked for, the outcome and label, and the week. **No customer, amount, payee, device, place or time.** A keyed-hash link to its payment, only so a late fraud report can find it, is wiped at 90 days | `core/learning_store.py`, `bands/engine.py` |
+| `band_gate` | per bank and amount band: COLLECTING, ELIGIBLE or MODEL, and the last grading's counts and rates | `bands/engine.py` |
+| `band_switch_request` | a change that relaxes the band switch, or trusts a candidate model in a band, waiting for a second operator | `core/band_gate.py` |
+| `band_candidate` | per bank and band: a candidate model's progress while it watches (COLLECTING, ELIGIBLE, APPROVED) | `bands/engine.py` |
+
+`learning_row`, `band_gate` and `band_candidate` belong to the band switch (`amfa/bands`). With `AMFA_BANDS_URL` unset they sit in
+the core's database; with it set they sit only in the band service's own database (section 8).
 
 Every one of these is optional per bank (`learning`, `payeeReputation`, `customerBypass`, `familyHelpers`, `collection` in the tenant
 policy) and off by default. Transactions and everything derived from them are deleted after 90 days (hourly, and `python -m amfa.cli purge`;
@@ -188,6 +196,38 @@ until real payments show it can.
   - customers in the learning phase and account changes;
   - the floors, hard warning signs, payee holds and proofs;
   - everything, when the bank has the switch off (the default).
+
+**Model updates.** A band trusts one model **version**, the one it was graded and approved on.
+- **The normal path:** a new version is installed as a **candidate** (`python -m amfa.engine.risk.train --candidate`, or
+  `python -m amfa.cli risk-candidate set <version>`). It scores every payment silently next to the active one and decides nothing.
+- **Earning bands:** it is graded per band on its own answers. Two operators of a bank trust it in a band it has earned.
+- **Promotion:** a platform operator promotes it (`/admin/api/risk/candidate/promote`). Trusted bands move to it with no gap; any
+  other band on the old version goes back to the rules, and must be confirmed. Band states are written before the pointer moves,
+  so an interrupted promotion fails closed.
+- **The safety net:** if new weights are made active any other way, a band approved on another version is decided by the rules, at
+  the very next payment and at the night's grading.
+
+**Its own service.** The band switch's data and logic live in `amfa/bands`, apart from the core:
+- `bands/engine.py` holds the logic; `bands/models.py` its three tables.
+- **One store, two places.** The core reaches it only through a store (`bands/store.py`).
+  - With `AMFA_BANDS_URL` unset (the default) it runs inside the core, in the core's database.
+  - With it set, it runs as the band service (`python -m amfa.cli serve bands`, port 8104), with a Postgres database, a Redis and a
+    network of its own (`deploy/docker-compose.yml`).
+- **Who may call it.** Only the core: every request is signed with the internal token as the core, and a replayed request is
+  refused. Every request body is a strict model that refuses unknown fields, so a customer, an amount or a payee cannot be sent
+  to it.
+- **It keeps nothing that identifies anyone.** A row's link is a keyed hash whose key stays in the core. The service expires links
+  at 90 days on its own, hourly and at start-up.
+- **The core keeps the record.** What a change needs recorded (audit entries, security events, approvals to cancel) comes back to
+  the core as events and goes into the core's hash-chained audit log. Two-person approval stays in the core.
+- **When the service is slow or down, it fails closed.**
+  - The payment's band state: one call that waits at most 0.2 s (`AMFA_BANDS_TIMEOUT_S`). No answer: COLLECTING, the stricter
+    plan.
+  - Nightly grading: skipped. A band on the model is then decided by the rules once its last grading is two days old.
+  - Rows and labels: held in the core's `band_outbox` and sent again.
+  - Operator actions: refused with 503. A promotion never reaches the pointer switch.
+- **Turning it on for a running bank:** stop the core, `docker compose run --rm bands-move --dry-run`, then `bands-move`. It
+  copies the rows and states into the service's database, checks every one arrived, and only then deletes them from the core.
 
 Turning it off, or asking it for less evidence, also needs two operators. The full design, the measurements and the security
 review are in [rbi-banded-data-collection.md](rbi-banded-data-collection.md); a simulated bank replayed through it is in

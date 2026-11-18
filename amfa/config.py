@@ -53,6 +53,9 @@ class Settings:
     voice_url: str = "http://127.0.0.1:8102"
     ueba_url: str = "http://127.0.0.1:8103"
     factor_timeout_s: float = 20.0
+    # the band switch as its own service (amfa/bands/service.py); empty: it runs inside the core, in the core's database
+    bands_url: str = ""
+    bands_timeout_s: float = 0.2        # a payment waits this long for its band's state, then is decided by the rules
     # transactions (and what is derived from them) older than this are deleted; the risk model reads at most 90 days anyway
     retention_days: int = 90
 
@@ -170,8 +173,8 @@ def load() -> Settings:
 
     geoip = _env("AMFA_GEOIP_DB")
     role = (_env("AMFA_ROLE", "core") or "core").lower()
-    if role not in ("core", "factor"):
-        raise ConfigError("AMFA_ROLE must be core or factor")
+    if role not in ("core", "factor", "bands"):
+        raise ConfigError("AMFA_ROLE must be core, factor or bands")
     s = Settings(
         env=env,
         role=role,
@@ -188,6 +191,8 @@ def load() -> Settings:
         voice_url=_env("AMFA_VOICE_URL", "http://127.0.0.1:8102"),
         ueba_url=_env("AMFA_UEBA_URL", "http://127.0.0.1:8103"),
         factor_timeout_s=float(_env("AMFA_FACTOR_TIMEOUT_S", "20")),
+        bands_url=(_env("AMFA_BANDS_URL", "") or "").rstrip("/"),
+        bands_timeout_s=float(_env("AMFA_BANDS_TIMEOUT_S", "0.2")),
         retention_days=max(1, int(_env("AMFA_RETENTION_DAYS", "90"))),
         agent_backend=(_env("AMFA_AGENT_BACKEND", "local") or "local").lower(),
         local_model=Path(_env("AMFA_LOCAL_MODEL",
@@ -224,7 +229,14 @@ def _assert_production_safe(s: Settings) -> None:
         if len(set(key)) < 8:
             problems.append(f"master key {ver} has implausibly low entropy")
 
-    if s.role == "factor":
+    if s.role == "bands":
+        if _env("AMFA_DATABASE_URL"):
+            problems.append("the band service must not be given AMFA_DATABASE_URL (the core database)")
+        if not _env("AMFA_BANDS_DB_URL", "").startswith("postgresql"):
+            problems.append("set the band service's own AMFA_BANDS_DB_URL to PostgreSQL")
+        if _env("AMFA_CORE_KEY_FINGERPRINT") and _env("AMFA_CORE_KEY_FINGERPRINT") == key_fingerprint(s):
+            problems.append("the band service must use its own AMFA_MASTER_KEYS, not the core's")
+    elif s.role == "factor":
         if _env("AMFA_DATABASE_URL"):
             problems.append("factor services must not be given AMFA_DATABASE_URL (the core database)")
         if not any(_env(f"AMFA_{f}_DB_URL", "").startswith("postgresql") for f in ("FACE", "VOICE", "UEBA")):

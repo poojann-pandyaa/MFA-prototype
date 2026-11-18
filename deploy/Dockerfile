@@ -80,6 +80,15 @@ HEALTHCHECK --interval=15s --timeout=3s --start-period=30s CMD \
 ENTRYPOINT ["python", "-m", "amfa.cli"]
 CMD ["serve", "ueba", "--host", "0.0.0.0", "--port", "8103", "--workers", "2"]
 
+FROM base AS bands
+RUN pip install -r requirements/base.txt
+COPY amfa ./amfa
+USER amfa
+EXPOSE 8104
+HEALTHCHECK --interval=15s --timeout=3s --start-period=20s CMD   python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8104/healthz',timeout=2).status==200 else 1)"
+ENTRYPOINT ["python", "-m", "amfa.cli"]
+CMD ["serve", "bands", "--host", "0.0.0.0", "--port", "8104", "--workers", "2"]
+
 FROM base AS demo-bank
 RUN pip install -r requirements/base.txt
 COPY sdk ./sdk

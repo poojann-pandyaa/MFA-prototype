@@ -3,6 +3,7 @@
 The behaviour service is replaced by a stand-in (calm for a payee and phone the customer already uses, unsure
 otherwise); the live service is exercised by `python -m amfa.demo.regression --live-behaviour`."""
 import uuid
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -11,6 +12,15 @@ from amfa.demo import personas as P
 from amfa.demo import regression as R
 from amfa.engine.policy import TenantPolicy
 from amfa.engine.risk import scorer, train
+
+
+def daytime() -> float:
+    """The most recent 11:00 in the bank's time zone. A scenario without an hour of its own is judged at this moment, and the hour
+    of a payment is one of the model's inputs: judging them at the real clock made the result depend on when the suite ran (late
+    at night a routine payment and a takeover could score exactly alike)."""
+    local = datetime.now(P.TZ)
+    at = local.replace(hour=11, minute=0, second=0, microsecond=0)
+    return (at - timedelta(days=1) if at > local else at).timestamp()
 
 
 @pytest.fixture(scope="module")
@@ -27,7 +37,7 @@ def rows():
         original = factors.ueba
         factors.ueba = R.stub_behaviour()
         try:
-            yield R.run(s, tenant)
+            yield R.run(s, tenant, now=daytime())
         finally:
             factors.ueba = original
             s.rollback()

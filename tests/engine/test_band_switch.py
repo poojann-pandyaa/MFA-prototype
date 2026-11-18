@@ -24,14 +24,14 @@ def model_says(monkeypatch):
     return say
 
 
-def ctx(*, state="COLLECTING", switch=True, exposure=1_500_00, new=False, known=True, place=True, odd=False, bband=Band.LOW,
+def ctx(*, state="COLLECTING", version="stub", switch=True, exposure=1_500_00, new=False, known=True, place=True, odd=False, bband=Band.LOW,
         dormant=False, enroll=EVERYTHING, floor=ActionFloor.L2, type=TxnType.TRANSFER, phase="READY", bank_band=Band.LOW):
     return Context(userId="cu_1", transactionId="txn_1",
                    transaction=TransactionCtx(amountBand=bank_band, exposureBand=bank_band, exposureMinor=exposure,
                                               isNewBeneficiary=new, type=type),
                    device=DeviceCtx(deviceKnown=known, locationKnown=place, hourUnusual=odd),
                    behavioural=BehaviouralCtx(band=bband, dormant=dormant), enrollment=enroll, org=OrgCtx(),
-                   policy=Policy(actionFloor=floor, phase=phase, bandSwitch=switch, bandState=state,
+                   policy=Policy(actionFloor=floor, phase=phase, bandSwitch=switch, bandState=state, bandModelVersion=version,
                                  learningDailyMinor=25_000_00, learningNewPayeeMinor=10_000_00))
 
 

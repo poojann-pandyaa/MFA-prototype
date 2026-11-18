@@ -200,10 +200,11 @@ def band_gates(tenant: Optional[str] = None, caller: OperatorCaller = Depends(op
 
 
 def _gate_call(fn):
+    from amfa.bands.remote import BandsUnavailable
     from amfa.core import band_gate
     try:
         return fn()
-    except band_gate.GateError as e:
+    except (band_gate.GateError, BandsUnavailable) as e:
         raise ApiError(e.status, e.code, e.message) from None
 
 
@@ -251,6 +252,45 @@ def band_approve(request_id: str, caller: OperatorCaller = Depends(operator_call
             raise ApiError(404, "REQUEST_NOT_FOUND", "no such request")
         caller.scope_tenant(r.tenant_id)
         return _gate_call(lambda: band_gate.approve(s, request_id, caller.operator.id))
+
+
+@router.post("/band-gates/{band}/request-candidate")
+def band_request_candidate(band: int, tenant: Optional[str] = None,
+                           caller: OperatorCaller = Depends(operator_caller(perm="policy:write"))):
+    """First of two people: trust the candidate model in this band once it is promoted. It must have earned the band."""
+    from amfa.core import band_gate
+    tid = caller.scope_tenant(tenant)
+    with db.session() as s:
+        r = _gate_call(lambda: band_gate.request_candidate(s, tid, band, caller.operator.id))
+        return {"id": r.id, "status": r.status, "expiresAt": int(r.expires_at), "needs": "a second, different operator to approve"}
+
+
+class Promote(Strict):
+    confirmDrops: bool = False
+
+
+@router.get("/risk/candidate")
+def risk_candidate(caller: OperatorCaller = Depends(operator_caller(perm="tenants:manage"))):
+    """The platform's candidate model and what promoting it would do to every bank's bands."""
+    from amfa.core import band_gate
+    with db.session() as s:
+        return _gate_call(lambda: band_gate.promotion_preview(s))
+
+
+@router.post("/risk/candidate/promote")
+def risk_promote(body: Promote, caller: OperatorCaller = Depends(operator_caller(perm="tenants:manage"))):
+    """A platform operator makes the candidate the deciding model. It only keeps or tightens the band switch: approved bands move
+    to it, any other band on the old model goes back to the rules (and needs confirmDrops)."""
+    from amfa.core import band_gate
+    try:
+        return _gate_call(lambda: band_gate.promote(caller.operator.id, body.confirmDrops))
+    except scorer_error() as e:
+        raise ApiError(409, "PROMOTE_FAILED", str(e)[:300]) from None
+
+
+def scorer_error():
+    from amfa.engine.risk import scorer
+    return scorer.RiskModelError
 
 
 @router.post("/band-gates/{band}/revert")

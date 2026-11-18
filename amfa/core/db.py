@@ -12,7 +12,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sess
 
 from amfa import config
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 
 def now() -> float:
@@ -444,46 +444,23 @@ class RiskLabel(Base):
     reported_at: Mapped[float] = mapped_column(Float, default=now, index=True)
 
 
-class LearningRow(Base):
-    """One settled payment for the band switch, by amount band and small categories only (amfa/core/learning_store.py). It holds no
-    customer, account, amount, payee, device, network, place, address or exact time, and its id is random so the order rows were
-    written in says nothing. `link` (a keyed hash of the transaction id) exists only so a label arriving later can find its row;
-    it and `link_expires_at` are set to null after 90 days, after which nothing can tie the row to a person. The allowed columns are
-    pinned by a test: adding one means changing that test on purpose."""
-    __tablename__ = "learning_row"
+# the band switch's own tables (anonymous rows, band states, a candidate's progress) live in amfa/bands/models.py, on their own table
+# registry, so the band service can keep them in its own database; here they are known by their old names
+from amfa.bands.models import BandBase, BandCandidate, BandGateState, LearningRow  # noqa: E402
+
+
+class BandOutbox(Base):
+    """A band row or label the band service could not take when it was sent (amfa/bands/remote.py). The same anonymous content as
+    the row itself, so nothing more about anyone is kept. Retried by the sweeper; dropped once the link it carries would have
+    expired anyway."""
+    __tablename__ = "band_outbox"
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
-    tenant_id: Mapped[str] = mapped_column(String(40), index=True)
-    band: Mapped[int] = mapped_column(Integer, index=True)              # 0..3, engine/risk/collection_bands.py
-    band_vs_usual: Mapped[str] = mapped_column(String(12))              # NEW, LOWER, SAME, ONE_HIGHER, TWO_HIGHER
-    payee_kind: Mapped[str] = mapped_column(String(8))                  # KNOWN, NEW, FLAGGED
-    device_kind: Mapped[str] = mapped_column(String(8))                 # KNOWN, NEW, HELPER
-    hour_bucket: Mapped[str] = mapped_column(String(10))                # NIGHT, MORNING, AFTERNOON, EVENING
-    hard_sign: Mapped[bool] = mapped_column(Boolean)
-    rules_level: Mapped[str] = mapped_column(String(2))                 # T0..T4, engine/band_switch.level_of
-    model_level: Mapped[str] = mapped_column(String(2))
-    mode: Mapped[str] = mapped_column(String(12))                       # COLLECTING, ELIGIBLE, MODEL when it was decided
-    outcome: Mapped[str] = mapped_column(String(10))                    # COMPLETED, DECLINED, CANCELLED, EXPIRED
-    label: Mapped[str] = mapped_column(String(8), default="UNKNOWN")    # UNKNOWN, GENUINE, FRAUD
-    label_source: Mapped[Optional[str]] = mapped_column(String(24), nullable=True)
-    week_start: Mapped[str] = mapped_column(String(10), index=True)     # the Monday of its week, YYYY-MM-DD
-    link: Mapped[Optional[str]] = mapped_column(String(64), unique=True, nullable=True)
-    link_expires_at: Mapped[Optional[float]] = mapped_column(Float, nullable=True, index=True)   # a whole day, never a time
-
-
-class BandGateState(Base):
-    """Where one amount band of one bank stands on its way from the rules to the model (amfa/core/band_gate.py). `figures` holds only
-    counts and rates from the last grading. Every change of `state` is also in the audit log."""
-    __tablename__ = "band_gate"
-    tenant_id: Mapped[str] = mapped_column(String(40), primary_key=True)
-    band: Mapped[int] = mapped_column(Integer, primary_key=True)
-    state: Mapped[str] = mapped_column(String(12), default="COLLECTING")     # COLLECTING, ELIGIBLE, MODEL
-    streak: Mapped[int] = mapped_column(Integer, default=0)                   # weekly gradings passed in a row
-    counted_week: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)   # the week whose passing grading counted last
-    evaluated_at: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    changed_at: Mapped[float] = mapped_column(Float, default=now)
-    figures: Mapped[dict] = mapped_column(JSON, default=dict)
-    losing: Mapped[int] = mapped_column(Integer, default=0)                   # on MODEL: weekly gradings lost in a row
-    losing_week: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
+    kind: Mapped[str] = mapped_column(String(8))                      # ROW, LABEL
+    payload: Mapped[dict] = mapped_column(JSON)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    next_at: Mapped[float] = mapped_column(Float, default=now, index=True)
+    expires_at: Mapped[float] = mapped_column(Float)
+    created_at: Mapped[float] = mapped_column(Float, default=now)
 
 
 class BandSwitchRequest(Base):
@@ -550,31 +527,44 @@ UPGRADES = [
     (3, "device", "sign_count", "BIGINT DEFAULT 0"),
     (4, "attempt", "detail", "JSON"),
     (5, "auth_session", "review_reason", "VARCHAR(300)"),
+    (6, "learning_row", "model_version", "VARCHAR(64)"),
+    (6, "band_gate", "model_version", "VARCHAR(64)"),
+    (6, "learning_row", "candidate_level", "VARCHAR(2)"),
+    (6, "learning_row", "candidate_version", "VARCHAR(64)"),
 ]
 
 
 def migrate() -> None:
-    from sqlalchemy import inspect, text
     eng = engine()
     Base.metadata.create_all(eng)
+    BandBase.metadata.create_all(eng)        # the band switch's tables, when it runs inside the core (no AMFA_BANDS_URL)
     with session() as s:
         row = s.get(SchemaMeta, "version")
         current = int(row.value) if row else SCHEMA_VERSION
         if current > SCHEMA_VERSION:
             raise RuntimeError(f"database schema v{current} is newer than this build "
                                f"(v{SCHEMA_VERSION}); refusing to start")
-    insp = inspect(eng)
-    with eng.begin() as c:
-        for ver, table, column, ddl in UPGRADES:
-            if column in {col["name"] for col in insp.get_columns(table)}:
-                continue
-            c.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
+    upgrade_columns(eng)
     with session() as s:
         row = s.get(SchemaMeta, "version")
         if row is None:
             s.add(SchemaMeta(key="version", value=str(SCHEMA_VERSION)))
         else:
             row.value = str(SCHEMA_VERSION)
+
+
+def upgrade_columns(eng) -> list[str]:
+    """Add the columns of UPGRADES that an older database lacks. Existing rows keep their values; the new column starts empty."""
+    from sqlalchemy import inspect, text
+    insp = inspect(eng)
+    added = []
+    with eng.begin() as c:
+        for ver, table, column, ddl in UPGRADES:
+            if column in {col["name"] for col in insp.get_columns(table)}:
+                continue
+            c.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
+            added.append(f"{table}.{column}")
+    return added
 
 
 @contextmanager

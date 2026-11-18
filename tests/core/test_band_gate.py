@@ -15,6 +15,14 @@ from amfa.engine.policy import BandGate, CollectionPolicy, TenantPolicy
 IST = ZoneInfo("Asia/Kolkata")
 DAY, WEEK = 86_400.0, 7 * 86_400.0
 NOW = datetime(2026, 11, 18, 14, 30, tzinfo=IST).timestamp()          # a Wednesday
+VERSION = "risk-test-v1"                 # the model deciding throughout these tests; every row below was scored by it
+
+
+@pytest.fixture(autouse=True)
+def one_model_decides(monkeypatch):
+    monkeypatch.setattr(band_gate, "active_version", lambda: VERSION)
+
+
 SMALL_GATE = BandGate(minGenuine=2_000, minFraud=50, minWeeks=4, passingEvaluations=4)    # the hard minimums, to keep data small
 
 
@@ -141,7 +149,8 @@ def seed(tenant_id, band=0, *, weeks, genuine_per_week=300, fraud_per_week=8, fr
 def _row(tenant_id, band, week, label, source, model, rules):
     return db.LearningRow(id=uuid.uuid4().hex, tenant_id=tenant_id, band=band, band_vs_usual="SAME", payee_kind="KNOWN",
                           device_kind="KNOWN", hour_bucket="MORNING", hard_sign=False, rules_level=rules, model_level=model,
-                          mode="COLLECTING", outcome="COMPLETED", label=label, label_source=source, week_start=week)
+                          mode="COLLECTING", outcome="COMPLETED", label=label, label_source=source, week_start=week,
+                          model_version=VERSION)
 
 
 def evaluate(tenant_id, now=NOW, policy=None):
@@ -268,7 +277,7 @@ def test_every_change_of_state_is_in_the_audit_log_and_the_chain_still_verifies(
 
 def test_a_band_on_model_is_graded_but_not_moved_by_grading(bank):
     with db.session() as s:
-        s.add(db.BandGateState(tenant_id=bank, band=2, state="MODEL", streak=9, figures={}, changed_at=NOW))
+        s.add(db.BandGateState(tenant_id=bank, band=2, state="MODEL", streak=9, figures={}, changed_at=NOW, model_version=VERSION))
     assert evaluate(bank)[2][0] == "MODEL"
 
 

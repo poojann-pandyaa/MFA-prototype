@@ -967,9 +967,17 @@ def simulate(n_customers: int, days: int, attack_rate: float, seed: int) -> Iter
             yield p, _life(p, rng, days, attack_rate, attacks, scripts)
 
 
-def dataset(n_customers: int = 4000, days: int = 150, attack_rate: float = .15, seed: int = 7) -> list[Row]:
+def dataset(n_customers: int = 4000, days: int = 150, attack_rate: float = .15, seed: int = 7,
+            amount_view: Optional[str] = None) -> list[Row]:
     """Feature rows for every fraud and a share of each genuine scenario (history is always full).
-    Each row carries the weight that restores the scenario's real share of traffic."""
+    Each row carries the weight that restores the scenario's real share of traffic.
+
+    [amount_view] (engine/risk/amount_view.py) is for the option A/B experiment only: every amount the model's inputs are computed
+    from, this payment's and the customer's past ones, is replaced by what a system storing only amount bands would know, and so
+    is the 24-hour total the reliefs look at. The row keeps the true amount, so money caught is still counted in real rupees.
+    None (the default) changes nothing."""
+    from .amount_view import get as amount_view_of
+    seen = amount_view_of(amount_view)
     rng = random.Random(seed + 1)
     rows: list[Row] = []
     for c, sims in simulate(n_customers, days, attack_rate, seed):
@@ -981,8 +989,12 @@ def dataset(n_customers: int = 4000, days: int = 150, attack_rate: float = .15, 
             share = 1.0 if s.label else SAMPLE.get(s.scenario, 1.0)
             if e.at >= START and rng.random() < share:
                 history = [x.event for x in sims[lo:i]]
-                rows.append(Row(build(e, history, s.profile), s.label, s.scenario, c.segment,
+                cur = e
+                if seen is not None:
+                    cur = replace(e, amount=seen(e.amount))
+                    history = [replace(x, amount=seen(x.amount)) for x in history]
+                rows.append(Row(build(cur, history, s.profile), s.label, s.scenario, c.segment,
                                 e.at, c.cid, c.arch, c.feed, c.weight / share, e.amount, c.age, c.age_group,
-                                exposure_24h(e, history)))
+                                exposure_24h(cur, history)))
 
     return rows

@@ -17,7 +17,8 @@ import numpy as np
 
 from .features import CATEGORICAL, FEATURES, HISTORY_DAYS, MONOTONE, vector
 from .scenarios import ATTACKS, FEEDS, START, amount_band, dataset, AMOUNT_BANDS
-from .scorer import ACTIVE, MANIFEST, RiskModel, root, sha256
+from .collection_bands import band_of as collection_band
+from .scorer import ACTIVE, MANIFEST, RiskModel, root, set_candidate, sha256
 from .threat import (GENUINE_SHARE_AT_OR_ABOVE, HABIT_SHARE_AT_OR_ABOVE, LEVELS, habit_level, level, raise_for_habit,
                      routine_relief, small_payment_cap)
 
@@ -95,6 +96,15 @@ def evaluate(raw, prob, y, w, scenario, segment, feed, rank, groups) -> dict:
         "by_situation": {t: {"rows": int(m.sum()), "stepped_up_T2+": share(m, 2), "T3+": share(m, 3),
                              "manual_review_T4": share(m, 4)}
                          for t in sorted(set(scenario[gen])) for m in [gen & (scenario == t)]},
+        "by_collection_band": {
+            str(b): {"genuine_rows": int((gen & (groups["cband"] == b)).sum()), "fraud_rows": int((fraud & (groups["cband"] == b)).sum()),
+                     "genuine_stepped_up_T2+": share(gen & (groups["cband"] == b), 2),
+                     "fraud_caught_T2+": share(fraud & (groups["cband"] == b), 2),
+                     "fraud_caught_T3+": share(fraud & (groups["cband"] == b), 3),
+                     "fraud_rupees_caught_T3+": rupees(fraud & (groups["cband"] == b), 3),
+                     "model_alone_genuine_stepped_up_T2+": share(gen & (groups["cband"] == b), 2, raw_rank),
+                     "model_alone_fraud_caught_T2+": share(fraud & (groups["cband"] == b), 2, raw_rank)}
+            for b in (0, 1, 2, 3)} if "cband" in groups else {},
         "by_feed": {f: {"fraud_caught_T3+": share(fraud & (feed == f), 3),
                         "genuine_stepped_up_T2+": share(gen & (feed == f), 2)} for f in FEEDS},
         "by_segment": {},
@@ -132,19 +142,24 @@ def evaluate(raw, prob, y, w, scenario, segment, feed, rank, groups) -> dict:
 
 def run(customers: int = 20000, days: int = 150, seed: int = 7, activate: bool = True,
         force: bool = False, out_root: Path | None = None, search: list[dict] | None = None,
-        seeds: int = ENSEMBLE_SEEDS) -> Path:
+        seeds: int = ENSEMBLE_SEEDS, candidate: bool = False, amount_view: str | None = None) -> Path:
     import lightgbm as lgb
     from sklearn.isotonic import IsotonicRegression
 
+    banded = amount_view not in (None, "exact")
+    if banded and (activate or candidate):
+        raise ValueError("a model trained on amounts known only by band is for the comparison only: train it with activate=False")
     t0 = time.time()
-    rows = dataset(n_customers=customers, days=days, seed=seed)
+    rows = dataset(n_customers=customers, days=days, seed=seed, amount_view=amount_view)
     X = np.array([vector(r.features) for r in rows])
     y = np.array([r.label for r in rows])
     w = np.array([r.weight for r in rows])
     feed = np.array([r.feed for r in rows])
     groups = {"amount": np.array([r.amount for r in rows]), "age": np.array([r.age_group for r in rows]),
               "archetype": np.array([r.archetype for r in rows]),
-              "band": np.array([amount_band(r.amount) if r.amount > 0 else "none" for r in rows])}
+              "band": np.array([amount_band(r.amount) if r.amount > 0 else "none" for r in rows]),
+              # the band switch's four bands, from the true amount, for the option A/B comparison (-1: no money moved)
+              "cband": np.array([collection_band(int(round(r.amount * 100))) if r.amount > 0 else -1 for r in rows])}
     day = (np.array([r.at for r in rows]) - START) / DAY
     scenario = np.array([r.scenario for r in rows])
     segment = np.array([r.segment for r in rows])
@@ -244,6 +259,7 @@ def run(customers: int = 20000, days: int = 150, seed: int = 7, activate: bool =
         "cutoffs": cutoffs, "frictionTargets": GENUINE_SHARE_AT_OR_ABOVE,
         "habit": {"cutoffs": habit_cutoffs, "genuineShare": HABIT_SHARE_AT_OR_ABOVE},
         "fairnessBoost": boost,
+        "amountView": amount_view or "exact",
         "data": {"source": "synthetic (amfa.engine.risk.scenarios)", "customers": customers, "days": days,
                  "seed": seed, "rows": len(rows), "fraudRows": int(y.sum()),
                  "scenarioRows": dict(sorted(Counter(scenario).items())),
@@ -256,7 +272,15 @@ def run(customers: int = 20000, days: int = 150, seed: int = 7, activate: bool =
     (out / "card.json").write_text(json.dumps(card, indent=2))
     (out / MANIFEST).write_text(json.dumps({"files": {n: sha256(out / n) for n in
                                                       names + ["calibration.json", "card.json"]}}, indent=2))
-    RiskModel(out)  # proves the written model loads and verifies
+    RiskModel(out, allow_banded=banded)  # proves the written model loads and verifies
+    if candidate:
+        # a bank using the band switch: the new version first watches every payment as the candidate, and decides nothing until
+        # it has earned each amount band (core/band_gate.py); the active version is left as it is
+        if gate["passed"] or force:
+            set_candidate(version, out.parent)
+        print(json.dumps({"version": version, "gate": gate, "metrics": metrics}, indent=2))
+        print(f"{'installed as the candidate' if gate['passed'] or force else 'NOT installed'}: {out}  ({time.time() - t0:.0f}s)")
+        return out
     if activate and (gate["passed"] or force):
         (out.parent / ACTIVE).write_text(version)
     print(json.dumps({"version": version, "gate": gate, "metrics": metrics}, indent=2))
@@ -272,8 +296,10 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--no-activate", action="store_true")
     ap.add_argument("--force", action="store_true", help="activate even if the release gate fails")
+    ap.add_argument("--candidate", action="store_true",
+                    help="install the new version as the candidate (scores silently next to the active one) instead of activating it")
     a = ap.parse_args()
-    run(a.customers, a.days, a.seed, activate=not a.no_activate, force=a.force)
+    run(a.customers, a.days, a.seed, activate=not a.no_activate, force=a.force, candidate=a.candidate)
 
 
 if __name__ == "__main__":

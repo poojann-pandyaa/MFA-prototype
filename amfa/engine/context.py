@@ -175,6 +175,8 @@ class Policy(BaseModel):
     # means the rules set the minimum and the model may only add to it
     bandSwitch: bool = False
     bandState: Optional[str] = None
+    # for a band on MODEL, the risk model version it was approved on: it is trusted only if that is the version scoring the payment
+    bandModelVersion: Optional[str] = None
 
 
 class Context(BaseModel):

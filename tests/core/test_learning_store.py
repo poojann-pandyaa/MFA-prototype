@@ -17,7 +17,7 @@ IST = ZoneInfo("Asia/Kolkata")
 NOON = datetime(2026, 11, 18, 14, 30, tzinfo=IST).timestamp()
 
 ALLOWED = {"id", "tenant_id", "band", "band_vs_usual", "payee_kind", "device_kind", "hour_bucket", "hard_sign", "rules_level",
-           "model_level", "mode", "outcome", "label", "label_source", "week_start", "link", "link_expires_at"}
+           "model_level", "model_version", "candidate_level", "candidate_version", "mode", "outcome", "label", "label_source", "week_start", "link", "link_expires_at"}
 BANNED = ("customer", "user", "account", "amount", "minor", "rupee", "payee_ref", "payee_display", "payee_key", "device_key",
           "device_id", "network", "place", "city", "country", "ip", "address", "phone", "email", "name", "created", "updated",
           "decided", "settled", "timestamp", "txn", "transaction", "session", "external")

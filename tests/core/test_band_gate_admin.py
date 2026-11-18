@@ -16,6 +16,12 @@ from amfa.core.auth import COOKIE, new_operator_session
 from amfa.engine.policy import TenantPolicy
 
 DAY, WEEK = 86_400.0, 7 * 86_400.0
+VERSION = "risk-test-v1"                 # the model deciding throughout these tests
+
+
+@pytest.fixture(autouse=True)
+def one_model_decides(monkeypatch):
+    monkeypatch.setattr(band_gate, "active_version", lambda: VERSION)
 
 
 def _policy(**collection):
@@ -71,6 +77,7 @@ def set_state(tenant_id, band, state, evaluated_at=None, **kw):
             st = db.BandGateState(tenant_id=tenant_id, band=band, figures={}, changed_at=time.time())
             s.add(st)
         st.state, st.evaluated_at = state, evaluated_at if evaluated_at is not None else time.time()
+        st.model_version = kw.pop("model_version", VERSION)
         for k, v in kw.items():
             setattr(st, k, v)
 
@@ -304,7 +311,7 @@ def _row(tenant_id, band, week, label, model, rules, mode="MODEL"):
     return db.LearningRow(id=uuid.uuid4().hex, tenant_id=tenant_id, band=band, band_vs_usual="SAME", payee_kind="KNOWN",
                           device_kind="KNOWN", hour_bucket="MORNING", hard_sign=False, rules_level=rules, model_level=model,
                           mode=mode, outcome="COMPLETED", label=label, label_source="bank_ops" if label != "UNKNOWN" else None,
-                          week_start=week)
+                          week_start=week, model_version=VERSION)
 
 
 def test_a_model_band_that_loses_two_weeks_in_a_row_goes_back_to_the_rules(bank):
@@ -362,7 +369,8 @@ def test_one_fraud_the_model_let_through_in_the_lakh_band_sends_it_back_at_once(
         s.flush()
         s.add(db.Decision(plan_id="p", tenant_id=tid, transaction_id=txn_id, customer_id=cust.id, context={}, preview={},
                           plan={"bandView": {"band": 3, "rulesLevel": "T2", "modelLevel": "T1", "payeeKind": "NEW",
-                                             "deviceKind": "KNOWN", "hardSign": False, "mode": "MODEL"}},
+                                             "deviceKind": "KNOWN", "hardSign": False, "mode": "MODEL",
+                                             "modelVersion": VERSION}},
                           source="model", floor="L2", floor_applied=False, risk_band="LOW", reasoning="", counterfactual="",
                           latency_ms=1, policy_version=1))
         s.flush()

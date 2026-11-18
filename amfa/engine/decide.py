@@ -19,10 +19,10 @@ class MonotonicityViolation(AssertionError):
     pass
 
 
-def _score(features: Optional[dict]):
+def _score(features: Optional[dict], model=None):
     if features is None:
         raise scorer.RiskModelError("no risk features for this request")
-    return scorer.active().score(features)
+    return (model or scorer.active()).score(features)
 
 
 def _relieved(r, features: dict, ctx: Context) -> tuple[str, Optional[str]]:
@@ -43,13 +43,13 @@ def _relieved(r, features: dict, ctx: Context) -> tuple[str, Optional[str]]:
     return lvl, (note or why)
 
 
-def select_by_model(features: Optional[dict], ctx: Context) -> Plan:
+def select_by_model(features: Optional[dict], ctx: Context, model=None) -> Plan:
     """The risk model sets the threat level for every request. If it cannot score (no model, a
     model that fails its integrity check, missing features), fail closed to manual review. A payment
     in the bank's LOW amount band that is usual for the customer is held at the lightest extra check
     unless a hard warning sign is present."""
     try:
-        r = _score(features)
+        r = _score(features, model)
     except Exception as e:
         err = f"{type(e).__name__}: {e}"[:200]
         return Plan(required=list(RESPONSE[REVIEW_LEVEL]), riskBand=BAND[REVIEW_LEVEL], source="model",
@@ -75,13 +75,13 @@ def select_by_model(features: Optional[dict], ctx: Context) -> Plan:
 LEARNING_HOLD_SCORE = 0.5
 
 
-def learning_plan(features: Optional[dict], ctx: Context) -> Plan:
+def learning_plan(features: Optional[dict], ctx: Context, model=None) -> Plan:
     """A customer the model does not know yet. The check is the phone's own fingerprint or screen lock (a signed challenge); a
     one-time code is added when the payment is beyond the learning limits or a hard warning sign is present. No face or voice here.
     The model still scores the payment, only to record what it would have asked for, and holds only when it is nearly sure."""
     r = None
     try:
-        r = _score(features)
+        r = _score(features, model)
     except Exception:
         pass                              # learning does not depend on the model; the limits and warning signs carry it
     shadow, why = _relieved(r, features, ctx) if r is not None else ("T1", None)
@@ -111,17 +111,41 @@ def decide(ctx: Context, agent: Optional[AgentClient] = None, features: Optional
     if band_switch.collecting(ctx, plan):
         # Until the band is on the model, the plan must hold everything the model's own final plan would: the regulatory filler,
         # the substitutes and the holds can differ once the rules have added checks, so take the model-only plan and add it in.
-        model_ctx = ctx.model_copy(update={"policy": ctx.policy.model_copy(update={"bandState": band_switch.MODEL})})
+        model_ctx = ctx.model_copy(update={"policy": ctx.policy.model_copy(update={"bandSwitch": False})})
         plan = band_switch.merge(plan, _decide(model_ctx, None, features))
+    _shadow_candidate(plan, ctx, features)
     return plan
+
+
+def _uses_learning_plan(ctx: Context) -> bool:
+    # The light plan needs the phone to sign (it is the whole check). A customer who cannot, such as one on a browser or on a phone
+    # with no screen lock, would have only a code, which cannot meet the two-factor minimum: they keep the normal plan instead.
+    return ctx.policy.phase == "LEARNING" and available(Factor.DEVICE, ctx)
+
+
+def _shadow_candidate(plan: Plan, ctx: Context, features: Optional[dict]) -> None:
+    """The candidate model, if one is installed, scores this payment through exactly the path the active model took (the learning
+    plan or the model plan, with the same reliefs and policy), and only its level and version are added to the band view for the
+    learning row. It never changes the plan: any failure, and any candidate that did not really score, leaves no trace."""
+    if not (ctx.policy.bandSwitch and plan.bandView):
+        return
+    try:
+        cand = scorer.candidate()
+        if cand is None:
+            return
+        shadow = learning_plan(features, ctx, cand) if _uses_learning_plan(ctx) else select_by_model(features, ctx, cand)
+        version = band_switch.model_version(shadow)
+        if version is None or version != cand.version:
+            return
+        plan.bandView = dict(plan.bandView) | {"candidateLevel": band_switch.model_level(shadow), "candidateVersion": version}
+    except Exception:
+        return
 
 
 def _decide(ctx: Context, agent: Optional[AgentClient] = None, features: Optional[dict] = None) -> Plan:
     started = time.perf_counter()
 
-    # The light plan needs the phone to sign (it is the whole check). A customer who cannot, such as one on a browser or on a phone
-    # with no screen lock, would have only a code, which cannot meet the two-factor minimum: they keep the normal plan instead.
-    learning = ctx.policy.phase == "LEARNING" and available(Factor.DEVICE, ctx)
+    learning = _uses_learning_plan(ctx)
     plan = learning_plan(features, ctx) if learning else select_by_model(features, ctx)
     plan.rulesBaseline = select_by_rules(ctx).required  # logged for comparison only; never decides
     plan.bandView = band_switch.view(ctx, plan, features)   # logged for the band switch's learning row, from the model's own call

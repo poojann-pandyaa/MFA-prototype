@@ -101,6 +101,13 @@ class Sweeper(threading.Thread):
                     orchestrator.expire_stale(s)
             except Exception:
                 log.exception("session sweep failed")
+            if config.get().bands_url:               # band rows and labels the band service could not take yet
+                try:
+                    from amfa.bands.remote import flush_outbox
+                    with db.session() as s:
+                        flush_outbox(s)
+                except Exception:
+                    log.exception("band outbox flush failed")
             if time.time() - last_purge > 3600:      # nothing older than the retention window is kept
                 last_purge = time.time()
                 try:
@@ -161,6 +168,17 @@ def create_app() -> FastAPI:
                                   ("/v1/", 256 * 1024)],
                 frame_ancestors=frame_ancestors)
     app.add_middleware(ClientCors)
+
+    from amfa.bands.remote import BandsUnavailable
+
+    @app.exception_handler(BandsUnavailable)
+    async def bands_unavailable(_request: Request, exc: BandsUnavailable):
+        # anywhere in the core: an operator's band action is refused, never half-applied (payments never get here, they fail
+        # closed to COLLECTING)
+        log.warning("band service unavailable: %s", exc.message)
+        return JSONResponse({"error": {"code": exc.code, "message": "the band service is unavailable; try again shortly"}},
+                            status_code=exc.status, headers={"retry-after": "30"})
+
     app.include_router(api_tenant.router)
     app.include_router(api_client.router)
     app.include_router(api_admin.router)
