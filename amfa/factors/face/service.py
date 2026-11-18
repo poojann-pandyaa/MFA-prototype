@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import time
 from contextlib import asynccontextmanager
 
@@ -17,8 +18,21 @@ from amfa.factors.face import matcher as fm
 from amfa.factors.face import pad as fpad
 
 FACTOR = "FACE"
-LIVENESS_THRESHOLD = 0.80
+# Liveness is judged on the whole burst, not by its single worst frame (see liveness() below):
+#   straight-on frames: their median live score >= LIVENESS_THRESHOLD, and at least LIVE_FRACTION_MIN
+#                       of them >= LIVENESS_FRAME_FLOOR (with setup's two straight-on frames: both)
+#   all frames:         at least LIVE_FRACTION_MIN of them >= LIVENESS_FRAME_FLOOR
+# A median, not a mean or a minimum: a face check sends ~17 straight-on frames and one blink or blur
+# (measured: one frame at 0.201 among sixteen at 0.95-0.99) must not turn a live face into a spoof.
+# Before 2026-11-18 it was mean >= 0.80 over all frames and every frame >= 0.50, which failed every phone
+# enrolment tested: one weak frame (a turned head, a blurred step) sank the whole burst. Straight-on frames
+# carry the decision because the MiniFASNet model is documented as reliable within ~30 degrees of frontal;
+# turned frames still count through the live fraction, so a turn spliced in from a photo is not accepted.
+# 0.70 is the "high security" setting commonly used with MiniFASNet, whose reference decision is the
+# arg-max of three classes. AMFA_FACE_LIVENESS_THRESHOLD may raise it; it is never allowed below 0.50.
+LIVENESS_THRESHOLD = max(float(os.getenv("AMFA_FACE_LIVENESS_THRESHOLD", "0.70")), 0.50)
 LIVENESS_FRAME_FLOOR = 0.50
+LIVE_FRACTION_MIN = 0.75
 FRONTAL_MAX_YAW = 0.12
 TURN_MIN_DELTA = 0.18
 TURN_MIN_IN_BETWEEN = 2
@@ -65,6 +79,17 @@ def _single_face(img) -> fm.DetectedFace | str:
     return f
 
 
+def liveness(lives: list[float], yaws: list[float]) -> tuple[bool, dict]:
+    """Burst-level liveness verdict and what it was based on (see the constants above)."""
+    frontal = [p for p, y in zip(lives, yaws) if abs(y) <= FRONTAL_MAX_YAW]
+    live = lambda ps: sum(p >= LIVENESS_FRAME_FLOOR for p in ps) / len(ps) if ps else 0.0
+    frontal_median = float(np.median(frontal)) if frontal else 0.0
+    ok = (bool(frontal) and frontal_median >= LIVENESS_THRESHOLD and live(frontal) >= LIVE_FRACTION_MIN
+          and live(lives) >= LIVE_FRACTION_MIN)
+    return ok, {"frontalFrames": len(frontal), "frontalLiveness": round(frontal_median, 3),
+                "frontalLiveFraction": round(live(frontal), 3), "liveFraction": round(live(lives), 3)}
+
+
 @app.post("/factor/enroll", response_model=EnrollResult, dependencies=[Depends(internal_auth)])
 def enroll(req: EnrollRequest) -> EnrollResult:
     t0 = time.perf_counter()
@@ -78,19 +103,21 @@ def enroll(req: EnrollRequest) -> EnrollResult:
     if len(set(digests)) != len(digests):
         return EnrollResult(factor=FACTOR, enrolled=False, reason="DUPLICATE_FRAMES", latencyMs=ms())
 
-    embs, live = [], []
+    embs, live, yaws = [], [], []
     for img, _ in frames:
         f = _single_face(img)
         if isinstance(f, str):
             return EnrollResult(factor=FACTOR, enrolled=False, reason=f, latencyMs=ms())
         p = fpad.get().score(img)
         live.append(p.live_prob)
+        yaws.append(f.yaw)
         embs.append(fm.get().embed(img, f))
 
     live_mean = float(np.mean(live))
-    if live_mean < LIVENESS_THRESHOLD or min(live) < LIVENESS_FRAME_FLOOR:
+    is_live, live_info = liveness(live, yaws)
+    if not is_live:
         return EnrollResult(factor=FACTOR, enrolled=False, reason="LIVENESS_NOT_ESTABLISHED",
-                            quality={"livenessMean": round(live_mean, 3)}, latencyMs=ms())
+                            quality={"livenessMean": round(live_mean, 3), **live_info}, latencyMs=ms())
 
     sims = [fm.cosine(embs[i], embs[j]) for i in range(len(embs)) for j in range(i + 1, len(embs))]
     if min(sims) < ENROLL_CONSISTENCY_MIN:
@@ -105,7 +132,7 @@ def enroll(req: EnrollRequest) -> EnrollResult:
     for img_digest, e in zip(digests, embs):
         guard.remember(req.tenantId, req.userId, img_digest, e)
     return EnrollResult(factor=FACTOR, enrolled=True, modelVersion=fm.get().version,
-                        quality={"frames": len(embs), "livenessMean": round(live_mean, 3),
+                        quality={"frames": len(embs), "livenessMean": round(live_mean, 3), **live_info,
                                  "minPairSimilarity": round(min(sims), 3)},
                         latencyMs=ms())
 
@@ -141,27 +168,32 @@ def verify(req: VerifyRequest) -> FactorResult:
         if hit:
             return result(SPOOF_DETECTED, hit, livenessPassed=False)
 
-    faces, lives = [], []
+    faces, lives, customs = [], [], []
     for img, _ in frames:
         f = _single_face(img)
         if isinstance(f, str):
             return result(FAILED, f)
         faces.append(f)
-        lives.append(fpad.get().score(img).live_prob)
+        p = fpad.get().score(img)
+        lives.append(p.live_prob)
+        customs.append(getattr(p, "custom_prob", None))
 
-    live_mean = float(np.mean(lives))
-    bonafide = live_mean >= LIVENESS_THRESHOLD and min(lives) >= LIVENESS_FRAME_FLOOR
+    bonafide, live_info = liveness(lives, [f.yaw for f in faces])
+    live_score = live_info["frontalLiveness"]
     pad = PadResult(ran=True, verdict="BONAFIDE" if bonafide else "SPOOF",
-                    score=round(live_mean, 4), threshold=LIVENESS_THRESHOLD,
+                    score=round(live_score, 4), threshold=LIVENESS_THRESHOLD,
                     model=fpad.get().version, mode=req.padMode)
-    common = dict(livenessPassed=bonafide, livenessScore=round(live_mean, 4), pad=pad)
+    common = dict(livenessPassed=bonafide, livenessScore=round(live_score, 4), pad=pad)
     if not bonafide and req.padMode is PadMode.TERMINAL:
         return result(SPOOF_DETECTED, "PRESENTATION_ATTACK_DETECTED", **common)
 
     live_idx = [i for i, p in enumerate(lives) if p >= LIVENESS_FRAME_FLOOR]
     active = {"action": action, "yaws": [round(f.yaw, 3) for f in faces],
               "liveFrames": len(live_idx), "needFrontalMax": FRONTAL_MAX_YAW,
-              "needTurnDelta": TURN_MIN_DELTA, "frameLiveness": [round(float(v), 3) for v in lives]}
+              "needTurnDelta": TURN_MIN_DELTA, "frameLiveness": [round(float(v), 3) for v in lives],
+              **live_info}
+    if any(c is not None for c in customs):   # the custom model's view, kept for re-calibrating it
+        active["frameCustom"] = [None if c is None else round(float(c), 3) for c in customs]
     if len(live_idx) < MIN_LIVE_FRAMES:
         return result(FAILED, "NOT_ENOUGH_LIVE_FRAMES", detail={"active": active}, **common)
 
@@ -225,4 +257,5 @@ def health() -> dict:
     face_pins = [a for a in artifacts.status() if a["path"].startswith("face/")]
     return {"service": "face", "status": "up" if all(a["verified"] for a in face_pins) else "degraded",
             "models": face_pins, "matchThreshold": fm.MATCH_THRESHOLD,
-            "livenessThreshold": LIVENESS_THRESHOLD, "store": store.ping()}
+            "livenessThreshold": LIVENESS_THRESHOLD, "livenessFrameFloor": LIVENESS_FRAME_FLOOR,
+            "liveFractionMin": LIVE_FRACTION_MIN, "padCustomMode": fpad.CUSTOM_MODE, "store": store.ping()}
