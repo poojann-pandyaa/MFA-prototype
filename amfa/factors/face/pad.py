@@ -15,13 +15,27 @@ from amfa.common import artifacts
 LIVE_CLASS = 1
 _MODELS = ("face/2.7_80x80_MiniFASNetV2.onnx", "face/4_0_0_80x80_MiniFASNetV1SE.onnx")
 
-# Custom MobileNetV3-Small (face-auth branch, ml/): one sigmoid live-probability from a 128 px crop.
-# It is a veto on top of MiniFASNet, not a replacement: a frame it scores below CUSTOM_THRESHOLD (the
-# point its own eval calibrated, APCER 8.7% / BPCER 12.7% per frame on LCC-FASD) has its live score
-# scaled down in proportion. Scores at or above it change nothing. AMFA_FACE_PAD_CUSTOM=0 turns it off.
+# Custom MobileNetV3-Small (face-auth branch, ml/): one sigmoid live-probability from a 128 px crop,
+# calibrated at CUSTOM_THRESHOLD on LCC-FASD (APCER 8.7% / BPCER 12.7% per frame). AMFA_FACE_PAD_CUSTOM:
+#   shadow (default)  scored and reported with every frame, never changes the decision
+#   veto              a frame it scores below CUSTOM_THRESHOLD has its live score scaled down in proportion
+#   off               not loaded
+# Why shadow: on real customers it rejects frames MiniFASNet is sure of. Measured 2026-11-16 on a phone
+# (dim room) and a laptop webcam: phone frames MiniFASNet scored 0.92-0.99 live it scored 0.05-0.33, and a
+# sharp, well-lit laptop frame MiniFASNet scored 1.000 it scored 0.007. Its in-domain BPCER of 12.7% per
+# frame alone fails ~42% of genuine 4-frame enrolments when every frame must pass. It goes back to veto
+# once it has been re-calibrated on this pipeline's own phone and webcam frames (INTEGRATION.md).
 CUSTOM_MODEL = "face/pad_custom.onnx"
 CUSTOM_SIZE, CUSTOM_SCALE, CUSTOM_THRESHOLD = 128, 1.5, 0.5
-CUSTOM_ENABLED = os.getenv("AMFA_FACE_PAD_CUSTOM", "1") != "0"
+SHADOW, VETO, OFF = "shadow", "veto", "off"
+
+
+def custom_mode(value: Optional[str]) -> str:
+    v = (value or SHADOW).strip().lower()
+    return {"0": OFF, "1": VETO}.get(v, v if v in (SHADOW, VETO, OFF) else SHADOW)
+
+
+CUSTOM_MODE = custom_mode(os.getenv("AMFA_FACE_PAD_CUSTOM"))
 
 
 def veto(live_prob: float, custom_prob: Optional[float]) -> float:
@@ -91,8 +105,10 @@ class PadFrame:
 
 
 class FacePAD:
-    def __init__(self) -> None:
+    def __init__(self, custom: Optional[str] = None) -> None:
         import onnxruntime as ort
+
+        self.custom_mode = custom_mode(custom) if custom is not None else CUSTOM_MODE
 
         proto = artifacts.verified("face/deploy.prototxt")
         weights = artifacts.verified("face/Widerface-RetinaFace.caffemodel")
@@ -110,12 +126,12 @@ class FacePAD:
             self._models.append((sess, sess.get_inputs()[0].name, h, w, scale))
         self._custom = None
         self.version = "minifasnet-v2+v1se-onnx"
-        if CUSTOM_ENABLED:
+        if self.custom_mode != OFF:
             artifacts.verified(CUSTOM_MODEL + ".data")
             path = artifacts.verified(CUSTOM_MODEL)
             sess = ort.InferenceSession(str(path), sess_options=opts, providers=["CPUExecutionProvider"])
             self._custom = (sess, sess.get_inputs()[0].name)
-            self.version += "+mobilenetv3-custom"
+            self.version += "+mobilenetv3-custom" + ("" if self.custom_mode == VETO else "-shadow")
 
     def _bbox(self, img) -> Optional[list[int]]:
         height, width = img.shape[:2]
@@ -149,8 +165,9 @@ class FacePAD:
             crop = _crop(img_bgr, bbox, CUSTOM_SCALE, CUSTOM_SIZE, CUSTOM_SIZE)
             x = np.ascontiguousarray((crop.astype(np.float32) / 255.0).transpose(2, 0, 1)[None])
             custom = float(sess.run(None, {name: x})[0].reshape(-1)[0])
-        return PadFrame(live_prob=veto(live, custom), label=int(np.argmax(probs)), bbox=bbox,
-                        custom_prob=custom)
+        if self.custom_mode == VETO:
+            live = veto(live, custom)
+        return PadFrame(live_prob=live, label=int(np.argmax(probs)), bbox=bbox, custom_prob=custom)
 
 
 @lru_cache(maxsize=1)

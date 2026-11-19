@@ -13,7 +13,7 @@ It also answers one design question that came up: should the face, voice and typ
    |                                                                                          |
    |   AMFA core  --- decides the plan, owns sessions/proofs/audit ---  risk engine (LightGBM)|
    |      | signed internal calls (HMAC, per-request)                                         |
-   |      +--> face service  (8101)   detection, match, liveness (PAD + custom veto)         |
+   |      +--> face service  (8101)   detection, match, liveness (PAD, custom in shadow)     |
    |      +--> voice service (8102)   speaker match, anti-spoof, phrase check                 |
    |      +--> ueba service  (8103)   typing, touch, line-tracing, replay guard              |
    |      +--> band service  (8104)   band switch: anonymous rows, band states, grading       |

@@ -463,6 +463,22 @@ Every significant choice, in the order it was made. Each entry says **what** was
 - **Decision:** after a face is seen, every kind of failure shows the same advice.
 - **Why:** specific feedback ("your liveness score was too low") teaches an attacker which part to improve.
 
+### D20a. Liveness judged on the whole burst; the custom model in shadow
+- **Decision:** a burst is live when the median of its straight-on frames is at least 0.70, at least 75% of those straight-on frames score 0.50 or more (both, in a setup's two), and at least 75% of all its frames do. It used to need an average of 0.80 over every frame and every frame at 0.50. The team's own MobileNetV3 model is still run on every frame and its scores are kept (`frameCustom`), but it no longer lowers them (`AMFA_FACE_PAD_CUSTOM=shadow`; `veto` restores the old behaviour).
+- **Why:** on the first real phone test, every face setup failed (6 of 6) and so did the laptop. Measured on the saved frames: MiniFASNet scored the phone's straight-on frames 0.92 to 0.99 live, while the custom model scored them 0.05 to 0.33 and its veto cut them below the line; on the laptop it vetoed a sharp, well-lit frame MiniFASNet scored 1.000. Its own in-domain error (12.7% of real frames rejected) fails about 42% of real 4-frame setups when every frame must pass. Straight-on frames carry the decision because MiniFASNet is documented as reliable within about 30 degrees of frontal; 0.70 is the setting commonly used with it for high security. Replayed through the real models, the same saved frames now pass (phone twice, laptop once); a photo, a middling screen replay, a turn faked with photos and a photo spliced into the straight-on frames still fail (`tests/factors/face/test_liveness.py`).
+- **Why a median:** a face check sends about 17 straight-on frames; on the phone one blink or blur scored 0.201 among sixteen at 0.95 to 0.99, and requiring every frame to pass turned that real face into a spoof warning.
+- **Cost:** with the veto off, liveness rests on MiniFASNet alone until the custom model is re-calibrated on this pipeline's phone and webcam frames. Not yet measured: how often real photo and screen attacks pass on a phone camera. That needs attack samples, which we don't have.
+
+### D20b. The voice anti-spoof model reports only, for now
+- **Decision:** the voice check still runs its anti-spoof model (RawNet2) on every recording and keeps the score, but its verdict (`SHADOW`) is not a warning and never rejects (`AMFA_VOICE_PAD=shadow`; `on` restores it). The speaker match, the spoken-words check and the replay checks are unchanged.
+- **Why:** on the first real phone test it called every real voice fake: 9 of 9 recordings from 3 people, setups and checks, at -11.5 to -11.98 against a line of -0.69. A detector that says "fake" to everyone tells real from fake no better than a constant, and AMFA allows one spoof warning per payment, so its warning plus any other (a blink in the face check) made the voice step ask to try again for ever.
+- **Found:** the model rejects quiet audio. On real recorded speech it scored about 0 (real) as recorded but -12 at a tenth of the volume, the same as silence and as every phone recording. It is now given each recording with the silence at its ends cut and at a fixed peak level (`models.pad_input`); then 5 of 7 real samples scored real whatever their volume, and white noise, which it had called real, scored fake.
+- **Cost:** it still called 2 of 7 real samples fake, and models trained on ASVspoof data are known to generalise poorly to real-world audio (Müller et al., 2022, "Does Audio Deepfake Detection Generalize?"). So it stays in shadow until it has been measured on this pipeline's own phone recordings and replays of them.
+
+### D20c. A phone that claims a key is asked to prove it
+- **Decision:** when a payment comes from a phone with a registered key that the plan did not ask for, the extra check added once the plan's checks pass is the phone key itself (fingerprint or screen lock), when the bank permits it; only otherwise a face, voice or typing check.
+- **Why:** the extra check used to be chosen only from face, voice and typing. When the plan already held all of them, or the customer had none set up, the payment went to a person (`DEVICE_KEY_UNPROVEN`), even though the missing proof was the one thing the phone could give in a second.
+
 ---
 
 ## One-time codes
