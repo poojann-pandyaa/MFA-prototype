@@ -10,6 +10,7 @@ services:
     environment:
       BANK_STATE_FILE: /var/lib/bank/bank.json
       BANK_SECURE_COOKIES: "1"
+      AMFA_OTP_WEBHOOK_SECRET: ${AMFA_OTP_WEBHOOK_SECRET:-}   # the same secret the core signs each code with (deploy/.env)
     volumes: ["bankdata:/var/lib/bank"]
     extra_hosts: ["${AMFA_DOMAIN}:172.30.0.2"]
     depends_on: [core]

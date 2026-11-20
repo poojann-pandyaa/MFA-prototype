@@ -55,6 +55,11 @@ for v in AMFA_BANDS_MASTER_KEYS DB_BANDS_PASSWORD; do
 ' "$v" "$val" >> deploy/.env
   fi
 done
+# one-time codes: there is no email or SMS here, so the core hands each code to the demo bank over a signed webhook
+# (the bank's address is fixed in docker-compose.demo.yml) and the bank shows it as "Show demo code". Without these two the
+# core fails any step that needs a code with "internal error". Added to a .env from before this too.
+grep -q '^AMFA_OTP_WEBHOOK_URL=' deploy/.env || echo 'AMFA_OTP_WEBHOOK_URL=http://172.30.0.20:8050/webhooks/otp' >> deploy/.env
+grep -q '^AMFA_OTP_WEBHOOK_SECRET=' deploy/.env || echo "AMFA_OTP_WEBHOOK_SECRET=$(python3 -c 'import secrets;print(secrets.token_urlsafe(36))')" >> deploy/.env
 set -a; . deploy/.env; set +a
 [ -f deploy/demo-bank.env ] || install -m 600 /dev/null deploy/demo-bank.env
 
