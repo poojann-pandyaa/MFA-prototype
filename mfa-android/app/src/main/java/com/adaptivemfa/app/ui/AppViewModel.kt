@@ -22,6 +22,9 @@ import com.adaptivemfa.app.data.Started
 import com.adaptivemfa.app.data.Settings
 import com.adaptivemfa.app.data.Submitted
 import com.adaptivemfa.app.logic.Outcome
+import com.adaptivemfa.app.logic.canCancel
+import com.adaptivemfa.app.logic.cancelledNotice
+import com.adaptivemfa.app.logic.statusLabel
 import com.adaptivemfa.app.logic.setupReason
 import com.adaptivemfa.app.logic.formatMoney
 import com.adaptivemfa.app.logic.deviceOutcome
@@ -476,11 +479,19 @@ class AppViewModel(
         pending = null
         try { refresh() } catch (_: ApiException) { }
         go(if (isLimit) Screen.Profile else Screen.Home)
-        notice = when {
-            kind == "device" -> "Cancelled. This phone is not verified yet."
-            isLimit -> "Cancelled. Nothing was changed."
-            else -> "Payment cancelled. Nothing was sent."
-        }
+        notice = cancelledNotice(kind)
+    }
+
+    /**
+     * Cancel a request from the Activity list. A failed call is shown as an error. The bank may have settled the request
+     * before the cancel arrived, so what the customer is told comes from the refreshed list, not from the tap.
+     */
+    fun cancelFromActivity(item: ActivityItem) = run {
+        if (!canCancel(item.status)) return@run
+        withContext(io) { bank.cancel(item.id) }
+        val status = try { refresh(); activity.firstOrNull { it.id == item.id }?.status } catch (_: ApiException) { "CANCELLED" }
+        notice = if (status == "CANCELLED") cancelledNotice(item.kind)
+                 else "That one had already moved on, so it could not be cancelled. It now shows as \"${statusLabel(status ?: item.status).first}\"."
     }
 
     fun refreshHome() = run { refresh() }

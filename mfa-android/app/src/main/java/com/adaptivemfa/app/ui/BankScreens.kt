@@ -18,12 +18,19 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -41,6 +48,7 @@ import com.adaptivemfa.app.data.Me
 import androidx.compose.ui.text.input.KeyboardType
 import com.adaptivemfa.app.logic.NO_CHECK_MAX
 import com.adaptivemfa.app.logic.NO_CHECK_MIN
+import com.adaptivemfa.app.logic.canCancel
 import com.adaptivemfa.app.logic.formatMoney
 import com.adaptivemfa.app.logic.helperStateText
 import com.adaptivemfa.app.logic.parseHelperCode
@@ -156,7 +164,7 @@ private fun Quick(icon: String, label: String, onClick: () -> Unit) {
 }
 
 @Composable
-private fun ActivityRow(a: ActivityItem) {
+private fun ActivityRow(a: ActivityItem, onClick: (() -> Unit)? = null) {
     val (label, tone) = statusLabel(a.status)
     val money = a.kind == "transfer" || a.kind == "bill"
     Item(
@@ -164,6 +172,7 @@ private fun ActivityRow(a: ActivityItem) {
         title = a.title.ifBlank { a.payee },
         sub = { if (a.status == "DONE") SubText(whenText(a.createdAt)) else Chip(label, tone) },
         trail = if (money) ({ Text((if (a.status == "DONE") "−" else "") + formatMoney(a.amountMinor), color = if (a.status in setOf("DECLINED", "EXPIRED", "CANCELLED", "FAILED")) C.muted else C.ink, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold) }) else null,
+        chevron = onClick != null, onClick = onClick,
     )
 }
 
@@ -323,15 +332,50 @@ fun ResultScreen(vm: AppViewModel, s: Screen.Result) {
 @Composable
 fun ActivityScreen(vm: AppViewModel) {
     var filter by rememberSaveable { mutableStateOf("all") }
+    var openId by rememberSaveable { mutableStateOf<String?>(null) }   // the row whose sheet is open
     LaunchedEffect(Unit) { vm.refreshHome() }
     val shown = vm.activity.filter { filter == "all" || (filter == "money") == (it.kind == "transfer" || it.kind == "bill") }
+    val open = vm.activity.firstOrNull { it.id == openId && canCancel(it.status) }   // closes by itself once it can no longer be cancelled
     Page {
         TopBar(title = "Activity")
         Messages(vm)
         Segmented(listOf("all" to "All", "money" to "Money", "account" to "Account changes"), filter) { filter = it }
         if (shown.isEmpty()) CardBox { Text("Nothing here yet", color = C.ink, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()); Muted("Payments and account changes will appear here.", align = TextAlign.Center, modifier = Modifier.fillMaxWidth()) }
-        else shown.groupBy { dayLabel(it.createdAt) }.forEach { (day, items) -> SectionLabel(day); ListCard(items.map { { ActivityRow(it) } }) }
+        else shown.groupBy { dayLabel(it.createdAt) }.forEach { (day, items) -> SectionLabel(day); ListCard(items.map { a -> { ActivityRow(a, if (canCancel(a.status)) ({ openId = a.id }) else null) } }) }
     }
+    if (open != null) CancelSheet(vm, open) { openId = null }
+}
+
+/** Opened from an Activity row that can still be cancelled: what it is, then a slide to cancel it, then a popup that asks once more. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CancelSheet(vm: AppViewModel, a: ActivityItem, onClose: () -> Unit) {
+    val money = a.kind == "transfer" || a.kind == "bill"
+    val (label, tone) = statusLabel(a.status)
+    val name = a.title.ifBlank { a.payee }
+    val who = a.payee.ifBlank { name }                   // the title already reads "Sent to ...", so the sentence below uses the payee
+    var confirming by remember { mutableStateOf(false) }
+    var resets by remember { mutableIntStateOf(0) }     // bumped when the popup is dismissed, so the thumb goes back to the start
+    ModalBottomSheet(onDismissRequest = onClose, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = C.card, contentColor = C.ink) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            if (a.kind == "transfer") Avatar(a.initials, 56) else Tile(if (a.kind == "bill") "bolt" else "shield", "grey", 56)
+            if (money) Text(formatMoney(a.amountMinor), color = C.ink, fontSize = 28.sp, fontWeight = FontWeight.ExtraBold)
+            Text(name, color = C.ink, fontSize = 16.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+            Chip(label, tone)
+            Muted(if (a.status == "UNDER_REVIEW") "Our team is taking a quick look. Your money hasn't left your account." else "You haven't finished confirming this yet. Nothing has been sent.", align = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+            Spacer(Modifier.height(4.dp))
+            SlideToCancel(if (money) "Slide to cancel this payment" else "Slide to cancel this request", onComplete = { confirming = true }, enabled = !vm.busy && !confirming, resetKey = resets)
+            LinkText("Keep it", small = true) { onClose() }
+        }
+    }
+    if (confirming) AlertDialog(
+        onDismissRequest = { confirming = false; resets++ },
+        containerColor = C.card, titleContentColor = C.ink, textContentColor = C.muted,
+        title = { Text(if (money) "Cancel this payment?" else "Cancel this request?", fontWeight = FontWeight.Bold) },
+        text = { Text(if (money) "${formatMoney(a.amountMinor)} to $who will not be sent. Your money stays in your account." else "$name will be cancelled and nothing will change.") },
+        confirmButton = { TextButton(onClick = { confirming = false; onClose(); vm.cancelFromActivity(a) }) { Text("Yes, cancel it", color = C.bad, fontWeight = FontWeight.Bold) } },
+        dismissButton = { TextButton(onClick = { confirming = false; resets++ }) { Text("Keep it", color = C.ink) } },
+    )
 }
 
 @Composable

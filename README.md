@@ -243,7 +243,7 @@ A tag like `android-v1.0.4` publishes the APK on a GitHub Release.
 .venv/bin/python scripts/evaluate_datasets.py 4000 --md=docs/dataset-evaluation.md   # five different dummy banks end to end
 .venv/bin/python scripts/smoke_demo.py                          # a running stack: sign-up, payments, limit, helper, retention
 .venv/bin/python scripts/replay_band_switch.py 2000             # a simulated bank through the band switch from day one
-(cd mfa-android && ./gradlew :app:testDebugUnitTest)           # 131 Android unit tests
+(cd mfa-android && ./gradlew :app:testDebugUnitTest)           # 138 Android unit tests
 ```
 
 Latest five-bank result: 63 of 65 checks met ([docs/dataset-evaluation.md](docs/dataset-evaluation.md)). Known and

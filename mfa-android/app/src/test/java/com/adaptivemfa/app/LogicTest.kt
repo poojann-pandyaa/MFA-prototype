@@ -122,6 +122,29 @@ class DisplayLogicTest {
         assertEquals("bad", com.adaptivemfa.app.logic.statusLabel("DECLINED").second)
     }
 
+    @Test fun onlyWaitingOrReviewedRequestsCanBeCancelled() {
+        // the same two states the bank accepts on POST /api/actions/{id}/cancel (examples/demo_bank/bank.py)
+        assertTrue(com.adaptivemfa.app.logic.canCancel("AWAITING_VERIFICATION"))
+        assertTrue(com.adaptivemfa.app.logic.canCancel("UNDER_REVIEW"))
+        for (s in listOf("DONE", "DECLINED", "EXPIRED", "CANCELLED", "FAILED", "", "under_review")) assertFalse(s, com.adaptivemfa.app.logic.canCancel(s))
+    }
+
+    @Test fun aSlideCountsOnlyWhenLetGoNearTheEnd() {
+        assertFalse(com.adaptivemfa.app.logic.slideCompleted(0f))
+        assertFalse(com.adaptivemfa.app.logic.slideCompleted(0.5f))
+        assertFalse(com.adaptivemfa.app.logic.slideCompleted(0.89f))
+        assertTrue(com.adaptivemfa.app.logic.slideCompleted(0.9f))
+        assertTrue(com.adaptivemfa.app.logic.slideCompleted(1f))
+    }
+
+    @Test fun cancelledNoticesSayWhetherMoneyWasInvolved() {
+        assertEquals("Payment cancelled. Nothing was sent.", com.adaptivemfa.app.logic.cancelledNotice("transfer"))
+        assertEquals("Payment cancelled. Nothing was sent.", com.adaptivemfa.app.logic.cancelledNotice(null))
+        assertEquals("Cancelled. This phone is not verified yet.", com.adaptivemfa.app.logic.cancelledNotice("device"))
+        assertEquals("Cancelled. Nothing was changed.", com.adaptivemfa.app.logic.cancelledNotice("nocheck"))
+        assertEquals("Cancelled. Nothing was changed.", com.adaptivemfa.app.logic.cancelledNotice("helper"))
+    }
+
     @Test fun outcomesReadLikeTheWebResultScreen() {
         val ok = com.adaptivemfa.app.logic.outcomeFor("DONE", null, "₹5,000.00", "V. Mehta", false)
         assertEquals("ok", ok.kind); assertEquals("₹5,000.00 sent", ok.title); assertEquals("to V. Mehta", ok.text)
