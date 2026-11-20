@@ -20,7 +20,7 @@ if [ ! -f deploy/.env ]; then
   say "generating deploy/.env for $DOMAIN"
   umask 077
   python3 - "$DOMAIN" > deploy/.env <<'EOF'
-import base64, secrets, sys
+import base64, os, secrets, sys
 d = sys.argv[1]
 k = lambda: "v1:" + base64.b64encode(secrets.token_bytes(32)).decode()
 t = lambda n=32: secrets.token_urlsafe(n)
@@ -38,7 +38,7 @@ DB_APP_PASSWORD={t(24)}
 DB_FACTOR_PASSWORD={t(24)}
 DB_BANDS_PASSWORD={t(24)}
 REDIS_PASSWORD={t(24)}
-AMFA_AGENT_BACKEND=local
+AMFA_AGENT_BACKEND={os.environ.get('AMFA_AGENT_BACKEND', 'local')}
 AMFA_KEY_PROVIDER=env
 AMFA_VOICE_PROMPT_CHECK=advisory
 ADMIN_PASSWORD=Amfa-{t(15)}
