@@ -103,10 +103,16 @@ sys.path.insert(0, "sdk/python")
 from amfa_client import AmfaClient
 c = AmfaClient(os.environ["AMFA_BASE_URL"], os.environ["AMFA_KEY_ID"], os.environ["AMFA_KEY_SECRET"])
 cur = c.request("GET", "/v1/policy"); pol = cur["policy"]
-if pol.get("allowedEmbedOrigins") != [sys.argv[1]]:
-    pol["allowedEmbedOrigins"] = [sys.argv[1]]
+changed = pol.get("allowedEmbedOrigins") != [sys.argv[1]]
+pol["allowedEmbedOrigins"] = [sys.argv[1]]
+# The Android app makes a key in the phone at sign-up. The phone proves that key with a fingerprint or screen lock, the DEVICE
+# check; if the bank does not permit it, nothing can prove the key and every payment from that phone goes to review.
+if "DEVICE" not in pol.get("permittedFactors", []):
+    pol["permittedFactors"] = [*pol.get("permittedFactors", []), "DEVICE"]
+    changed = True
+if changed:
     c.request("PUT", "/v1/policy", {"expectedVersion": cur["version"], "policy": pol})
-print("embed origin:", sys.argv[1])
+print("embed origin:", sys.argv[1], "| permitted checks:", pol["permittedFactors"])
 EOF
 
 say "checks"
