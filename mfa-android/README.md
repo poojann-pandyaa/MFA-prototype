@@ -27,9 +27,10 @@ card, pay again, protection and recent payments, pay (people and bills), the key
 AMFA's plan and scam warning, the verify step (a face circle with a progress ring and turn arrow, or six code boxes), the
 result screens, activity with filters, and a profile tab. Also in the app, beyond the web bank: the phone's own key (fingerprint
 or screen lock confirms a payment), "No extra checks" (the customer's own daily limit), the optional sign-up questions ("About
-you"), the optional family helper, and "Is this your new phone?" for a phone the bank has not verified. Not ported: adding a
-payee, changing contact details or password, the "Behind the scenes" demo drawer, and opening an activity item to continue or
-report it.
+you"), the optional family helper, and "Is this your new phone?" for a phone the bank has not verified. In Activity, a request
+that is waiting for the customer or under review opens a sheet with a "slide to cancel" control; sliding all the way asks once more
+in a popup, and only "Yes, cancel it" tells the bank (`POST /api/actions/{id}/cancel`). Not ported: adding a payee, changing
+contact details or password, the "Behind the scenes" demo drawer, and opening an activity item to continue or report it.
 
 Every request shows a loader: a thin bar on top, taps ignored while it runs, a spinner on the pressed button only. Requests time
 out after 20 seconds (60 for face and voice uploads), and a slow server is reported as slow. Screens are scrollable, so a short

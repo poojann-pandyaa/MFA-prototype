@@ -104,6 +104,21 @@ fun statusLabel(status: String): Pair<String, String> = when (status) {
     else -> status.lowercase().replace('_', ' ') to ""
 }
 
+/** The bank lets a customer cancel only while a request is waiting for them or being reviewed (POST /api/actions/{id}/cancel). */
+fun canCancel(status: String): Boolean = status == "AWAITING_VERIFICATION" || status == "UNDER_REVIEW"
+
+/** How far along its track the "slide to cancel" thumb must be let go to count; any less and it springs back. */
+const val SLIDE_CONFIRM_AT = 0.9f
+
+fun slideCompleted(progress: Float): Boolean = progress >= SLIDE_CONFIRM_AT
+
+/** What the customer is told once a request is cancelled; the kind decides whether money was involved. */
+fun cancelledNotice(kind: String?): String = when (kind) {
+    "device" -> "Cancelled. This phone is not verified yet."
+    "nocheck", "helper" -> "Cancelled. Nothing was changed."
+    else -> "Payment cancelled. Nothing was sent."
+}
+
 /** Same rule as the web bank: drop masks and digits, take the first word longer than an initial. */
 fun shortName(display: String): String {
     val words = display.replace(Regex("[•\\d]"), " ").split(Regex("\\s+")).filter { it.isNotEmpty() }

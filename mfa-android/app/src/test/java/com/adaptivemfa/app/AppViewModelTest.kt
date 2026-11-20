@@ -207,6 +207,51 @@ class AppViewModelTest {
         assertTrue(vm.notice!!.contains("cancelled"))
     }
 
+    private fun held(status: String) = ok("""{"activity":[{"id":"ACT1","kind":"transfer","title":"Sent to V. Mehta","amountMinor":5500000,"status":"$status","payee":{"display":"V. Mehta"}}],"balance":50000000}""")
+
+    @Test fun aHeldPaymentCanBeCancelledFromActivity() {
+        val http = RoutedHttp("POST /api/login" to LOGIN, "GET /api/me" to ME_FACE, "GET /api/activity" to held("UNDER_REVIEW"),
+            "POST /api/actions/ACT1/cancel" to done("CANCELLED"))
+        val vm = signedIn(http)
+        val item = vm.activity.single()
+        http.routes["GET /api/activity"] = held("CANCELLED")          // what the bank lists once the cancel went through
+        vm.cancelFromActivity(item)
+        assertTrue(http.called("/api/actions/ACT1/cancel"))
+        assertEquals("CANCELLED", vm.activity.single().status)
+        assertEquals("Payment cancelled. Nothing was sent.", vm.notice)
+        assertNull(vm.error)
+    }
+
+    @Test fun aRequestThatAlreadyMovedOnIsReportedNotCalledCancelled() {
+        // the bank settles it instead of cancelling when the decision arrived first; the list then says so
+        val http = RoutedHttp("POST /api/login" to LOGIN, "GET /api/me" to ME_FACE, "GET /api/activity" to held("UNDER_REVIEW"),
+            "POST /api/actions/ACT1/cancel" to done("DONE"))
+        val vm = signedIn(http)
+        val item = vm.activity.single()
+        http.routes["GET /api/activity"] = held("DONE")
+        vm.cancelFromActivity(item)
+        assertTrue(vm.notice!!.contains("already moved on"))
+        assertTrue(vm.notice!!.contains("Done"))
+        assertFalse(vm.notice!!.contains("Payment cancelled"))
+    }
+
+    @Test fun aFailedCancelShowsAnErrorAndSaysNothingWasCancelled() {
+        val http = RoutedHttp("POST /api/login" to LOGIN, "GET /api/me" to ME_FACE, "GET /api/activity" to held("UNDER_REVIEW"),
+            "POST /api/actions/ACT1/cancel" to HttpResult(502, """{"detail":"the approval service is not available right now"}"""))
+        val vm = signedIn(http)
+        vm.cancelFromActivity(vm.activity.single())
+        assertEquals("the approval service is not available right now", vm.error)
+        assertNull(vm.notice)
+        assertEquals("UNDER_REVIEW", vm.activity.single().status)
+    }
+
+    @Test fun anAlreadyFinishedPaymentIsNotSentToTheBankToCancel() {
+        val http = RoutedHttp("POST /api/login" to LOGIN, "GET /api/me" to ME_FACE, "GET /api/activity" to held("DONE"))
+        val vm = signedIn(http)
+        vm.cancelFromActivity(vm.activity.single())
+        assertFalse(http.called("/api/actions/ACT1/cancel"))
+    }
+
     @Test fun anExpiredBankSessionSignsTheCustomerOut() {
         val http = RoutedHttp("POST /api/login" to LOGIN, "GET /api/me" to ME_FACE, "GET /api/activity" to ACTIVITY)
         val vm = signedIn(http)
