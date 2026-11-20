@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Adaptive MFA — Project Presentation</title>
+<style>
+  @page { size: 1280px 720px; margin: 0; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --ink: #14213d; --muted: #5b6475; --line: #dfe3ea; --soft: #f4f6fa;
+    --accent: #0f766e; --accent-soft: #e6f4f2; --warn: #b45309; --warn-soft: #fdf3e6;
+    --red: #b91c1c; --red-soft: #fbeaea;
+  }
+  body { font-family: -apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif; color: var(--ink);
+         -webkit-print-color-adjust: exact; print-color-adjust: exact; background: #fff; }
+  .slide { width: 1280px; height: 720px; padding: 56px 72px 48px; position: relative; overflow: hidden;
+           page-break-after: always; break-after: page; display: flex; flex-direction: column; }
+  .slide:last-child { page-break-after: auto; break-after: auto; }
+  .num { position: absolute; right: 40px; bottom: 26px; font-size: 14px; color: var(--muted); }
+  .tag { position: absolute; left: 72px; bottom: 26px; font-size: 14px; color: var(--muted); letter-spacing: .02em; }
+  .kicker { font-size: 15px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--accent); margin-bottom: 10px; }
+  h1 { font-size: 40px; line-height: 1.15; font-weight: 750; margin-bottom: 26px; }
+  h3 { font-size: 21px; font-weight: 700; margin-bottom: 8px; }
+  p, li { font-size: 19px; line-height: 1.45; }
+  ul { padding-left: 22px; } li { margin-bottom: 9px; } li::marker { color: var(--accent); }
+  .muted { color: var(--muted); }
+  .grid { display: grid; gap: 20px; }
+  .g2 { grid-template-columns: 1fr 1fr; } .g3 { grid-template-columns: repeat(3, 1fr); }
+  .g4 { grid-template-columns: repeat(4, 1fr); } .g5 { grid-template-columns: repeat(5, 1fr); }
+  .card { background: var(--soft); border: 1px solid var(--line); border-radius: 14px; padding: 20px 22px; }
+  .card p, .card li { font-size: 17px; }
+  .card.accent { background: var(--accent-soft); border-color: #b9e0db; }
+  .card.warn { background: var(--warn-soft); border-color: #f3d3a8; }
+  .card.red { background: var(--red-soft); border-color: #f1c4c4; }
+  .banner { margin-top: auto; background: var(--ink); color: #fff; border-radius: 12px; padding: 18px 26px; font-size: 20px; line-height: 1.4; }
+  .banner b { color: #7ee0d4; }
+  .icon { font-size: 30px; margin-bottom: 8px; }
+  table { border-collapse: collapse; width: 100%; font-size: 17px; }
+  th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 14px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 700; }
+  .lvl { display: inline-block; min-width: 44px; text-align: center; font-weight: 800; border-radius: 6px; padding: 2px 8px; color: #fff; }
+  .t0 { background: #16a34a; } .t1 { background: #65a30d; } .t2 { background: #ca8a04; } .t3 { background: #ea580c; } .t4 { background: #b91c1c; }
+  /* flow */
+  .flow { display: flex; align-items: stretch; gap: 0; }
+  .step { flex: 1; background: var(--soft); border: 1px solid var(--line); border-radius: 12px; padding: 16px 14px; }
+  .step .n { width: 30px; height: 30px; border-radius: 50%; background: var(--accent); color: #fff; font-weight: 800;
+             display: flex; align-items: center; justify-content: center; font-size: 16px; margin-bottom: 10px; }
+  .step h3 { font-size: 17px; margin-bottom: 6px; } .step p { font-size: 14.5px; line-height: 1.4; color: var(--muted); }
+  .arrow { width: 26px; display: flex; align-items: center; justify-content: center; color: var(--accent); font-size: 34px; font-weight: 800; }
+  .pill { display: inline-block; background: #fff; border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; font-size: 15px; margin: 0 8px 8px 0; }
+  .big { font-size: 46px; font-weight: 800; color: var(--accent); line-height: 1; }
+  /* architecture */
+  .box { border: 2px solid var(--ink); border-radius: 12px; padding: 12px 16px; text-align: center; background: #fff; }
+  .box small { display: block; color: var(--muted); font-size: 13.5px; margin-top: 3px; }
+  .box b { font-size: 17px; }
+  .down { text-align: center; color: var(--muted); font-size: 22px; line-height: 1; margin: 6px 0; }
+  .check li { list-style: none; position: relative; padding-left: 30px; }
+  .check li::before { content: "✓"; position: absolute; left: 0; top: 0; color: var(--accent); font-weight: 900; }
+  .x li { list-style: none; position: relative; padding-left: 30px; }
+  .x li::before { content: "!"; position: absolute; left: 6px; top: 0; color: var(--warn); font-weight: 900; }
+  .title-slide { background: var(--ink); color: #fff; justify-content: center; padding-left: 96px; }
+  .title-slide h1 { font-size: 68px; margin-bottom: 18px; }
+  .title-slide .sub { font-size: 28px; color: #c9d3e4; max-width: 900px; line-height: 1.35; }
+  .title-slide .meta { margin-top: 56px; font-size: 19px; color: #9fb0cc; }
+  .title-slide .bar { width: 90px; height: 6px; background: #2dd4bf; border-radius: 3px; margin-bottom: 30px; }
+</style>
+</head>
+<body>
+
+<!-- 1 Title -->
+<section class="slide title-slide">
+  <div class="bar"></div>
+  <h1>Adaptive MFA</h1>
+  <div class="sub">Risk-based multi-factor authentication for bank payments — the right amount of proof for every transaction</div>
+  <div class="meta">Project presentation · November 2026</div>
+</section>
+
+<!-- 2 Problem -->
+<section class="slide">
+  <div class="kicker">The problem</div>
+  <h1>One OTP for everything is both too weak and too annoying</h1>
+  <div class="grid g2" style="gap:28px">
+    <div class="card red">
+      <h3>How banks confirm payments today</h3>
+      <ul>
+        <li>The same SMS code for ₹50 of groceries and a ₹5 lakh transfer</li>
+        <li>OTPs are stolen through SIM swaps, phishing pages and malware</li>
+        <li>No look at <i>who</i> is paying or whether the request is normal for this customer</li>
+        <li>Scam victims are talked into reading out the code themselves</li>
+      </ul>
+    </div>
+    <div class="card accent">
+      <h3>What we set out to build</h3>
+      <ul>
+        <li><b>Light</b> checks when a payment looks normal for this customer</li>
+        <li><b>Strong</b> checks (face, voice, behaviour) when it looks risky</li>
+        <li>Money moves only with a proof tied to <b>that exact</b> amount and payee</li>
+        <li>A platform any bank can plug in, with its own policy</li>
+      </ul>
+    </div>
+  </div>
+  <div class="banner">Adaptive MFA scores every sensitive request, chooses the checks, runs them on the customer's own phone, and returns a <b>signed, single-use approval</b>.</div>
+  <div class="num">2</div>
+</section>
+
+<!-- 3 Cast -->
+<section class="slide">
+  <div class="kicker">The big picture</div>
+  <h1>Who is involved</h1>
+  <div class="grid g5">
+    <div class="card"><div class="icon">👤</div><h3>Customer</h3><p>Uses the bank app on a phone or laptop.</p></div>
+    <div class="card"><div class="icon">🏦</div><h3>Bank app</h3><p>Holds accounts and money. Decides <i>what</i> needs approval, never <i>how</i>.</p></div>
+    <div class="card accent"><div class="icon">🛡️</div><h3>AMFA platform</h3><p>Scores the risk, picks the checks, runs them, signs the approval.</p></div>
+    <div class="card"><div class="icon">🔍</div><h3>Check services</h3><p>Face, voice and typing-behaviour checkers called by AMFA.</p></div>
+    <div class="card"><div class="icon">🧑‍💼</div><h3>Reviewers</h3><p>People who look at the few requests AMFA won't settle alone.</p></div>
+  </div>
+  <div style="margin-top:28px">
+    <p class="muted" style="margin-bottom:10px">Every action that moves money or changes the account goes through AMFA:</p>
+    <span class="pill">Send money</span><span class="pill">Pay a bill</span><span class="pill">Add a payee</span>
+    <span class="pill">Change daily limit</span><span class="pill">Change mobile / email / password</span><span class="pill">Verify a new device</span>
+  </div>
+  <div class="banner">Key rule: the bank moves money <b>only</b> when AMFA hands back a signed approval for <b>that exact action</b>.</div>
+  <div class="num">3</div>
+</section>
+
+<!-- 4 Flow -->
+<section class="slide">
+  <div class="kicker">App flow</div>
+  <h1>The journey of one payment</h1>
+  <div class="flow">
+    <div class="step"><div class="n">1</div><h3>Customer asks</h3><p>Enters payee and amount, taps send. Nothing moves yet.</p></div>
+    <div class="arrow">›</div>
+    <div class="step"><div class="n">2</div><h3>Bank sanity checks</h3><p>Frozen account? Unverified phone? Balance, daily limit, saved payee.</p></div>
+    <div class="arrow">›</div>
+    <div class="step"><div class="n">3</div><h3>AMFA scores risk</h3><p>Risk model + bank policy + legal minimum → threat level T0–T4.</p></div>
+    <div class="arrow">›</div>
+    <div class="step"><div class="n">4</div><h3>Checks chosen</h3><p>Calm = one code. Risky = face, voice, behaviour on top.</p></div>
+    <div class="arrow">›</div>
+    <div class="step"><div class="n">5</div><h3>Customer verifies</h3><p>AMFA's screens open inside the bank app, one step at a time.</p></div>
+    <div class="arrow">›</div>
+    <div class="step"><div class="n">6</div><h3>Signed approval</h3><p>Bound to amount + payee, valid ~2 minutes, usable once.</p></div>
+    <div class="arrow">›</div>
+    <div class="step"><div class="n">7</div><h3>Bank acts once</h3><p>Verifies the signature and binding, then moves the money.</p></div>
+  </div>
+  <div class="grid g3" style="margin-top:26px">
+    <div class="card"><h3>What the customer sees</h3><p>Review screen (what, to whom, which checks and why, scam warning if needed) → "Confirm it's you" → result.</p></div>
+    <div class="card"><h3>Possible results</h3><p><b>Sent</b>, <b>held for review</b> with a live timeline, or <b>not sent</b> with what to do next.</p></div>
+    <div class="card"><h3>Never shown</h3><p>Scores, thresholds or which signal tipped it — that would teach a fraudster how to get past.</p></div>
+  </div>
+  <div class="num">4</div>
+</section>
+
+<!-- 5 Risk -->
+<section class="slide">
+  <div class="kicker">Deciding the checks</div>
+  <h1>Three inputs, the strictest one wins</h1>
+  <div class="grid" style="grid-template-columns: 1fr 1.35fr; gap:30px">
+    <div style="display:flex; flex-direction:column; gap:14px">
+      <div class="card accent"><h3>1 · AI risk model</h3><p>~38 signals compared with the customer's own last 90 days: amount vs. usual, new payee / phone / place, odd hour, recent SIM or password change, failed checks.</p></div>
+      <div class="card"><h3>2 · Bank policy</h3><p>Each bank sets a minimum per action — a password change always needs more than a small bill.</p></div>
+      <div class="card"><h3>3 · Regulatory minimum</h3><p>At least two kinds of proof, one of them "live" (code, face or voice).</p></div>
+    </div>
+    <div>
+      <table>
+        <tr><th>Level</th><th>Meaning</th><th>Checks asked</th></tr>
+        <tr><td><span class="lvl t0">T0</span></td><td>Very ordinary</td><td>One-time code</td></tr>
+        <tr><td><span class="lvl t1">T1</span></td><td>Ordinary, light check</td><td>Code + typing behaviour</td></tr>
+        <tr><td><span class="lvl t2">T2</span></td><td>Somewhat unusual</td><td>+ face check, scam warning</td></tr>
+        <tr><td><span class="lvl t3">T3</span></td><td>Unusual</td><td>+ voice check</td></tr>
+        <tr><td><span class="lvl t4">T4</span></td><td>Severe</td><td>Every check the customer has set up</td></tr>
+      </table>
+      <p class="muted" style="font-size:16px; margin-top:16px">If a needed check isn't set up, face and voice stand in for each other. A customer is never queued for a person just because they haven't added voice or typing.</p>
+    </div>
+  </div>
+  <div class="num">5</div>
+</section>
+
+<!-- 6 Factors -->
+<section class="slide">
+  <div class="kicker">Features</div>
+  <h1>The five ways a customer proves it's them</h1>
+  <div class="grid g5" style="gap:16px">
+    <div class="card"><div class="icon">🔢</div><h3>One-time code</h3><p>Email, SMS or authenticator app. 6 digits, 3-minute expiry, the message names the amount and payee.</p></div>
+    <div class="card"><div class="icon">🙂</div><h3>Face</h3><p>Face match (YuNet + SFace) and liveness models that catch photos, screens and replays. A random head turn defeats pre-recorded video.</p></div>
+    <div class="card"><div class="icon">🎙️</div><h3>Voice</h3><p>Speaker match (ECAPA), a deepfake detector (RawNet2), and speech recognition (Vosk) to confirm the random words were said.</p></div>
+    <div class="card"><div class="icon">⌨️</div><h3>Typing behaviour</h3><p>How the customer types a phrase and traces a line, scored by an anomaly model (Isolation Forest). Separate keyboard and touch profiles.</p></div>
+    <div class="card"><div class="icon">📱</div><h3>Phone key</h3><p>Fingerprint or screen lock signs AMFA's challenge with a key in the phone's secure hardware.</p></div>
+  </div>
+  <div class="grid g2" style="margin-top:22px">
+    <div class="card accent"><h3>Progressive setup</h3><p>Sign-up asks only for the face (about a minute). Voice, typing and an authenticator are added later from Security — each one means fewer interruptions.</p></div>
+    <div class="card"><h3>Failures</h3><p>Ordinary mistakes only use up retries. Repeated fake-face or fake-voice flags decline the request and lock the account until a reviewer clears it.</p></div>
+  </div>
+  <div class="num">6</div>
+</section>
+
+<!-- 7 Security -->
+<section class="slide">
+  <div class="kicker">Security</div>
+  <h1>Why an approval can't be forged, replayed or reused</h1>
+  <div class="grid g3">
+    <div class="card accent"><h3>Signed proof</h3><ul><li>Bound to the exact amount and payee</li><li>Valid ~2 minutes, single use</li><li>Changing anything afterwards voids it</li></ul></div>
+    <div class="card"><h3>End-to-end encrypted biometrics</h3><ul><li>Phone encrypts face / voice / typing to AMFA's key (P-256 + AES-256-GCM)</li><li>Each box tied to its session and challenge</li><li>The bank never sees a frame or recording</li></ul></div>
+    <div class="card"><h3>Isolated services</h3><ul><li>Services talk via signed (HMAC) requests</li><li>Templates live only in their own service</li><li>Hash-chained, tamper-evident audit log</li></ul></div>
+  </div>
+  <div class="grid g3" style="margin-top:20px">
+    <div class="card"><h3>Device trust</h3><p>A new phone must pass strong checks before banking. A trusted phone later proves itself with a key it keeps.</p></div>
+    <div class="card"><h3>Customer controls</h3><p>"Freeze my account" blocks everything. "This wasn't me" raises an alert and records a fraud label.</p></div>
+    <div class="card"><h3>Data kept 90 days</h3><p>Transactions are purged after 90 days; the risk model never reads further back.</p></div>
+  </div>
+  <div class="num">7</div>
+</section>
+
+<!-- 8 Light for genuine customers -->
+<section class="slide">
+  <div class="kicker">Customer experience</div>
+  <h1>Keeping everyday payments light</h1>
+  <div class="grid g2" style="gap:24px">
+    <div>
+      <h3 style="margin-bottom:12px">Automatic reliefs (switched off on any warning sign)</h3>
+      <ul>
+        <li><b>Small payments</b> under the bank's low band stay at a light level</li>
+        <li><b>Regular payees</b> — rent, bills, the same shop — stay light even at a higher amount</li>
+        <li><b>Own habit</b> — a weekly ₹1 lakh to a wholesaler is routine; ₹10,000 from someone who pays ₹1,500 is a jump</li>
+        <li><b>Mule payees</b> reported by others are flagged for every customer</li>
+      </ul>
+    </div>
+    <div>
+      <h3 style="margin-bottom:12px">New customers and optional controls</h3>
+      <ul>
+        <li><b>Learning phase:</b> until the model knows a new customer, the phone's fingerprint confirms each payment</li>
+        <li>Two optional sign-up questions (typical payment, monthly total) give a head start</li>
+        <li><b>"No extra checks up to ₹X a day"</b> set by the customer, never below the legal minimum</li>
+        <li><b>Family helper:</b> register a relative's phone that helps with payments</li>
+      </ul>
+    </div>
+  </div>
+  <div class="banner">Large <b>first</b> payments to a new payee always show a scam warning — biometrics prove identity, not that the customer isn't being coached.</div>
+  <div class="num">8</div>
+</section>
+
+<!-- 9 Human review -->
+<section class="slide">
+  <div class="kicker">Human review</div>
+  <h1>A person is called in only when checks can't settle it</h1>
+  <div class="grid g2" style="gap:28px">
+    <div class="card warn">
+      <h3>Held for a reviewer</h3>
+      <ul>
+        <li>Payee is on a risk list</li>
+        <li>SIM, contact or password changed recently, then money to a new payee (takeover + cash-out)</li>
+        <li>Suspected fake face or recording</li>
+        <li>Customer on the bank's watchlist</li>
+        <li>The legal minimum can't be met with the checks the customer has</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>How a held request proceeds</h3>
+      <ul>
+        <li>Customer first completes every check they can</li>
+        <li><b>Two different reviewers</b> must approve (four-eyes)</li>
+        <li>Approval allowed only if a live check passed</li>
+        <li>Rejected cases become fraud labels for retraining</li>
+        <li>The customer can cancel at any time</li>
+      </ul>
+    </div>
+  </div>
+  <p class="muted" style="margin-top:22px">A high threat level alone is answered with the strongest <i>automated</i> checks, not a queue.</p>
+  <div class="num">9</div>
+</section>
+
+<!-- 10 AI -->
+<section class="slide">
+  <div class="kicker">The AI inside</div>
+  <h1>AI judges and recognises; rules decide</h1>
+  <div class="grid g2" style="gap:24px">
+    <div class="card accent">
+      <h3>Risk model</h3>
+      <ul>
+        <li>Ensemble of 5 gradient-boosted tree models (LightGBM), calibrated to a fraud probability</li>
+        <li>One-way constraints: a bigger amount can never look <i>safer</i></li>
+        <li>Level cut-offs set by a "friction budget" of genuine traffic</li>
+        <li>Every decision logged with its top reasons</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Trained on a fraud simulator</h3>
+      <ul>
+        <li>20,000 customers × 150 days ≈ 1.2 million requests</li>
+        <li>14 customer types, 47 genuine look-alike situations</li>
+        <li>25 attack types: account takeover, SIM swap, coached scams, mules, bots, slow drip…</li>
+        <li>Must beat a logistic-regression baseline before release</li>
+      </ul>
+    </div>
+  </div>
+  <div class="grid g2" style="margin-top:20px; gap:24px">
+    <div class="card"><h3>Local language model (Qwen2.5-3B)</h3><p>Runs on the server, sees only coarse flags, may <b>add</b> a check — never remove one.</p></div>
+    <div class="card"><h3>Band switch</h3><p>The model earns the right to lower checks per amount band, only after real outcomes prove it, with two operators approving.</p></div>
+  </div>
+  <div class="num">10</div>
+</section>
+
+<!-- 11 Architecture -->
+<section class="slide">
+  <div class="kicker">Architecture</div>
+  <h1>Independent services behind one platform</h1>
+  <div class="grid" style="grid-template-columns: 1.25fr 1fr; gap:34px; align-items:start">
+    <div>
+      <div class="grid g2" style="gap:14px">
+        <div class="box"><b>Phone app / web bank</b><small>capture + encryption</small></div>
+        <div class="box"><b>Bank backend</b><small>signed API + webhooks</small></div>
+      </div>
+      <div class="down">↓</div>
+      <div class="box" style="border-style:dashed"><b>Edge (Caddy)</b><small>HTTPS, rate limits</small></div>
+      <div class="down">↓</div>
+      <div class="box" style="background:var(--accent-soft); border-color:var(--accent)"><b>AMFA core + risk engine</b><small>sessions · plans · proofs · audit · admin console</small></div>
+      <div class="down">↓ <span style="font-size:14px">signed calls</span></div>
+      <div class="grid g4" style="gap:10px">
+        <div class="box"><b>Face</b><small>:8101</small></div>
+        <div class="box"><b>Voice</b><small>:8102</small></div>
+        <div class="box"><b>Behaviour</b><small>:8103</small></div>
+        <div class="box"><b>Bands</b><small>:8104</small></div>
+      </div>
+      <p class="muted" style="font-size:15px; text-align:center; margin-top:10px">Each service: own container, own database — swappable on its own</p>
+    </div>
+    <div>
+      <h3 style="margin-bottom:12px">Tech stack</h3>
+      <table>
+        <tr><td><b>Backend</b></td><td>Python, FastAPI, SQLAlchemy</td></tr>
+        <tr><td><b>Data</b></td><td>PostgreSQL, Redis</td></tr>
+        <tr><td><b>ML</b></td><td>LightGBM, scikit-learn, PyTorch, ONNX Runtime, OpenCV, SpeechBrain, Vosk, llama.cpp</td></tr>
+        <tr><td><b>Web</b></td><td>HTML / JavaScript, no build step</td></tr>
+        <tr><td><b>Android</b></td><td>Kotlin, Jetpack Compose, CameraX, ML Kit</td></tr>
+        <tr><td><b>Deploy</b></td><td>Docker Compose, Caddy, GitHub Actions</td></tr>
+      </table>
+    </div>
+  </div>
+  <div class="num">11</div>
+</section>
+
+<!-- 12 Implemented -->
+<section class="slide">
+  <div class="kicker">What we've implemented</div>
+  <h1>Built and working end to end</h1>
+  <div class="grid g2" style="gap:30px">
+    <ul class="check">
+      <li><b>AMFA platform</b> — risk scoring, plans, signed proofs, audit log</li>
+      <li><b>Face, voice and behaviour services</b> with anti-spoofing</li>
+      <li><b>Demo Bank web app</b> (phone-first) — pay, payees, limits, security, activity</li>
+      <li><b>Native Android app</b> — camera checks, fingerprint key; APK built by GitHub</li>
+      <li><b>Admin console</b> — per-bank policies, review queue, unlocks</li>
+    </ul>
+    <ul class="check">
+      <li><b>Multi-bank platform</b> with a Python SDK for banks to integrate</li>
+      <li><b>One-time codes</b> by email, SMS or authenticator app</li>
+      <li><b>End-to-end encryption</b> of biometrics from the phone</li>
+      <li><b>Learning phase, payee reputation, band switch</b></li>
+      <li><b>Docker deployment</b> with HTTPS and a public demo</li>
+    </ul>
+  </div>
+  <div class="grid g4" style="margin-top:26px">
+    <div class="card"><div class="big">~690</div><p class="muted">automated Python tests</p></div>
+    <div class="card"><div class="big">131</div><p class="muted">Android unit tests</p></div>
+    <div class="card"><div class="big">~20k</div><p class="muted">lines of Python</p></div>
+    <div class="card"><div class="big">5</div><p class="muted">simulated banks evaluated end to end</p></div>
+  </div>
+  <div class="num">12</div>
+</section>
+
+<!-- 13 Results -->
+<section class="slide">
+  <div class="kicker">Results</div>
+  <h1>Tested on five different simulated banks</h1>
+  <table>
+    <tr><th>Bank</th><th>Fraud caught (T3+)</th><th>Genuine asked for face+</th><th>PR-AUC</th><th>Mule payees flagged</th></tr>
+    <tr><td>1 · Baseline, new population</td><td>86.2%</td><td>5.5%</td><td>0.920</td><td>100%</td></tr>
+    <tr><td>2 · High-value bank</td><td>92.4%</td><td>5.4%</td><td>0.907</td><td>96%</td></tr>
+    <tr><td>3 · Everyday micro-payments</td><td>82.4%</td><td>3.5%</td><td>0.873</td><td>96%</td></tr>
+    <tr><td>4 · Senior-heavy bank</td><td>85.3%</td><td>5.6%</td><td>0.895</td><td>100%</td></tr>
+    <tr><td>5 · Under attack, few signals</td><td>84.4%</td><td>6.0%</td><td>0.943</td><td>92%</td></tr>
+  </table>
+  <div class="grid g3" style="margin-top:24px">
+    <div class="card accent"><div class="big">63 / 65</div><p class="muted">evaluation checks met</p></div>
+    <div class="card"><div class="big">99.6%</div><p class="muted">of fraud <i>money</i> caught at T3+ (bank 1)</p></div>
+    <div class="card"><div class="big">~50</div><p class="muted">payments (median) before a new customer is "known"</p></div>
+  </div>
+  <p class="muted" style="font-size:15px; margin-top:16px">4,000 customers × 150 days per bank. All numbers are on simulated customers; there are no real fraud labels yet.</p>
+  <div class="num">13</div>
+</section>
+
+<!-- 14 Limits -->
+<section class="slide">
+  <div class="kicker">Honest limits</div>
+  <h1>Limitations and next steps</h1>
+  <div class="grid g2" style="gap:28px">
+    <div class="card warn">
+      <h3>Known limitations</h3>
+      <ul class="x">
+        <li>Trained on <b>simulated</b> data — no real fraud labels yet</li>
+        <li>Fairness gate fails for older customers (step-up ratio ~2.3 vs. limit 1.25)</li>
+        <li>Coached scams: the real customer passes every check</li>
+        <li>Low-and-slow attacks are caught less often</li>
+        <li>Web check pages don't yet encrypt end to end</li>
+      </ul>
+    </div>
+    <div class="card accent">
+      <h3>Next steps</h3>
+      <ul class="check">
+        <li>Retrain on real reviewer verdicts and fraud reports</li>
+        <li>Rebalance training to fix the fairness gap</li>
+        <li>Scam signals: active call, screen sharing, pasted account numbers</li>
+        <li>Pick the lightest checks that meet the risk target</li>
+        <li>Device attestation; encryption in the web SDK</li>
+      </ul>
+    </div>
+  </div>
+  <div class="num">14</div>
+</section>
+
+<!-- 15 Thanks -->
+<section class="slide title-slide">
+  <div class="bar"></div>
+  <h1>Thank you</h1>
+  <div class="sub">Live demo: Demo Bank on a phone → a payment → AMFA's checks → signed approval</div>
+  <div class="meta">Questions?</div>
+</section>
+
+</body>
+</html>

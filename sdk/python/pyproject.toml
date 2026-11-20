@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "amfa-client"
+version = "1.0.0"           # a release build takes its version from the sdk-v* tag (.github/workflows/sdk.yml)
+description = "Python client for Adaptive MFA: sign requests, create customers, ask for an approval, verify the signed proof"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+dependencies = ["httpx>=0.27"]
+
+[project.optional-dependencies]
+# verify_proof_offline() checks the proof's EdDSA signature on the bank's own server
+offline-proof = ["pyjwt[crypto]>=2.9"]
+
+[tool.setuptools]
+py-modules = ["amfa_client"]
