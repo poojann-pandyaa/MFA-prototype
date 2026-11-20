@@ -27,6 +27,9 @@ COPY requirements/core.txt requirements/core.txt
 RUN pip install --find-links /wheels -r requirements/core.txt && rm -rf /wheels
 COPY amfa ./amfa
 COPY scripts ./scripts
+# models/risk is gitignored: put a trained version and its ACTIVE pointer there before building
+# (python -m amfa.engine.risk.train --force, or copy one; the release gate still fails for older customers, hence --force)
+COPY --chown=root:root models/risk models/risk
 COPY --chown=root:root models/llm/qwen2.5-3b-instruct-q4_k_m.gguf models/llm/
 RUN python -c "from pathlib import Path; from amfa.common.artifacts import verify_llm; \
 verify_llm(Path('models/llm/qwen2.5-3b-instruct-q4_k_m.gguf'))"
@@ -58,6 +61,9 @@ RUN pip install -r requirements/voice.txt
 COPY amfa ./amfa
 COPY scripts ./scripts
 COPY --chown=root:root models/voice models/voice
+# SpeechBrain reads label_encoder.ckpt, a copy of the pinned label_encoder.txt, and writes it on first load; the
+# container's filesystem is read-only, so make the copy now (a development run on a writable disk makes it by itself)
+RUN cp models/voice/ecapa/label_encoder.txt models/voice/ecapa/label_encoder.ckpt
 USER amfa
 RUN python -c "from amfa.common import artifacts as a; a.verified('voice/pre_trained_DF_RawNet2.pth'); \
 a.verify_directory(a.ECAPA_DIR, a.ECAPA_PINS); a.verify_directory(a.ASR_DIR, a.ASR_PINS)"
