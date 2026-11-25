@@ -234,6 +234,9 @@ class Plan(BaseModel):
     phase: Optional[str] = None            # LEARNING or READY
     capReason: Optional[str] = None
     riskReasons: list[tuple[str, float]] = Field(default_factory=list)
+    # the risk model's router: the most likely kind of fraud (UNAUTHORISED, COACHED, PAYEE_RISK, FIRST_PARTY), for the
+    # explanation and the audit log; it never changes the checks. None when the active model has no router.
+    threatFamily: Optional[str] = None
     modelVersion: str = ""
     modelError: Optional[str] = None
     engineVersion: str = "risk-model-1.0"

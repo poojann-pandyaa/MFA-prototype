@@ -1,7 +1,12 @@
 """Train, evaluate and (if it passes the release gate) activate a risk model.
 
-    python -m amfa.engine.risk.train                 # 20k simulated customers
+    python -m amfa.engine.risk.train                 # 20k simulated customers + 6000 DemoPay UPI users (30%)
     python -m amfa.engine.risk.train --customers 2000 --no-activate
+    python -m amfa.engine.risk.train --upi-users 0   # the platform's simulator only, as before the merge
+
+Two simulators feed one model (merged_data.py): the platform's (scenarios.py) and DemoPay's UPI scams (upi/simulate.py), which
+add the phone signals and payee intelligence in features.SIGNALS. A small router, trained on fraud payments only, names the
+likely kind of fraud (UNAUTHORISED, COACHED, PAYEE_RISK, FIRST_PARTY); it explains, it never sets the level.
 
 Data is split by time (train on the past, test on the future). Writes models/risk/<version>/ with the
 boosters, isotonic calibration, a model card (data, params, metrics, gate) and a checksum manifest."""
@@ -16,6 +21,7 @@ from pathlib import Path
 import numpy as np
 
 from .features import CATEGORICAL, FEATURES, HISTORY_DAYS, MONOTONE, vector
+from . import merged_data
 from .scenarios import ATTACKS, FEEDS, START, amount_band, dataset, AMOUNT_BANDS
 from .collection_bands import band_of as collection_band
 from .scorer import ACTIVE, MANIFEST, RiskModel, root, set_candidate, sha256
@@ -96,7 +102,7 @@ def evaluate(raw, prob, y, w, scenario, segment, feed, rank, groups) -> dict:
         "fraud_caught_at_or_above": {l: share(fraud, i) for i, l in enumerate(LEVELS) if i},
         "by_scenario": {sc: {"rows": int((scenario == sc).sum()), "caught_T2+": share(scenario == sc, 2),
                              "caught_T3+": share(scenario == sc, 3)}
-                        for sc in ATTACKS if (scenario == sc).any()},
+                        for sc in [a for a in ATTACKS if (scenario == a).any()] + sorted(set(scenario[fraud]) - set(ATTACKS))},
         # how often genuine customers in each situation are stepped up: the false-alarm view
         "by_situation": {t: {"rows": int(m.sum()), "stepped_up_T2+": share(m, 2), "T3+": share(m, 3),
                              "manual_review_T4": share(m, 4)}
@@ -111,7 +117,8 @@ def evaluate(raw, prob, y, w, scenario, segment, feed, rank, groups) -> dict:
                      "model_alone_fraud_caught_T2+": share(fraud & (groups["cband"] == b), 2, raw_rank)}
             for b in (0, 1, 2, 3)} if "cband" in groups else {},
         "by_feed": {f: {"fraud_caught_T3+": share(fraud & (feed == f), 3),
-                        "genuine_stepped_up_T2+": share(gen & (feed == f), 2)} for f in FEEDS},
+                        "genuine_stepped_up_T2+": share(gen & (feed == f), 2)}
+                    for f in list(FEEDS) + sorted(set(feed) - set(FEEDS))},
         "by_segment": {},
         # who is stepped up and who is caught, by customer age and by size of payment
         "by_age": {}, "by_amount_range": {},
@@ -145,9 +152,14 @@ def evaluate(raw, prob, y, w, scenario, segment, feed, rank, groups) -> dict:
     return out
 
 
+EXPERT_MIN_FRAUD = 50   # fraud rows a kind of payment needs in training before it gets its own specialist
+UPI_SHARE = 0.3       # DemoPay UPI users per platform customer when not given: 20000 customers -> 6000, DemoPay's own size
+
+
 def run(customers: int = 20000, days: int = 150, seed: int = 7, activate: bool = True,
         force: bool = False, out_root: Path | None = None, search: list[dict] | None = None,
-        seeds: int = ENSEMBLE_SEEDS, candidate: bool = False, amount_view: str | None = None) -> Path:
+        seeds: int = ENSEMBLE_SEEDS, candidate: bool = False, amount_view: str | None = None,
+        upi_users: int | None = None) -> Path:
     import lightgbm as lgb
     from sklearn.isotonic import IsotonicRegression
 
@@ -155,10 +167,21 @@ def run(customers: int = 20000, days: int = 150, seed: int = 7, activate: bool =
     if banded and (activate or candidate):
         raise ValueError("a model trained on amounts known only by band is for the comparison only: train it with activate=False")
     t0 = time.time()
-    rows = dataset(n_customers=customers, days=days, seed=seed, amount_view=amount_view)
+    if upi_users is None:
+        upi_users = round(customers * UPI_SHARE)
+    if amount_view is None:
+        rows = merged_data.platform_rows(customers, days, seed=seed)
+        if upi_users:
+            rows += merged_data.upi_rows(upi_users, seed=seed)
+    else:   # the amount-storage comparison is the platform's own experiment: its simulator only
+        rows, upi_users = dataset(n_customers=customers, days=days, seed=seed, amount_view=amount_view), 0
     X = np.array([vector(r.features) for r in rows])
     y = np.array([r.label for r in rows])
     w = np.array([r.weight for r in rows])
+    source = np.array([getattr(r, "source", "platform") for r in rows])
+    upi = source == "upi"
+    day0 = (np.array([r.at for r in rows]) - START) / DAY
+    w = merged_data.balance_weights(w, upi, day0 < TRAIN_END)     # DemoPay's rows weigh a quarter of the platform's
     feed = np.array([r.feed for r in rows])
     groups = {"amount": np.array([r.amount for r in rows]), "age": np.array([r.age_group for r in rows]),
               "archetype": np.array([r.archetype for r in rows]),
@@ -194,8 +217,19 @@ def run(customers: int = 20000, days: int = 150, seed: int = 7, activate: bool =
         d = lgb.Dataset(X[tr], y[tr], weight=w[tr] * f, feature_name=FEATURES, categorical_feature=cat, free_raw_data=False)
         return [_fit(lgb, _base_params(seed + k) | params, d, dva) for k in range(seeds)]
 
+    experts: dict[str, list] = {}
+    has_signals = X[:, FEATURES.index("signals_present")] == 1
+
     def raw_of(m, bs=None):
-        return np.mean([b.predict(X[m], num_iteration=b.best_iteration) for b in (bs or boosters)], axis=0)
+        """The model's raw score for rows [m]: the general boosters, and, once trained, half from the specialist for each
+        kind of payment (as scorer.RiskModel.raw does). [bs] scores with those boosters alone (the fairness rounds)."""
+        out = np.mean([b.predict(X[m], num_iteration=b.best_iteration) for b in (bs or boosters)], axis=0)
+        if bs is None:
+            for name, kind in (("signals", has_signals[m]), ("no_signals", ~has_signals[m])):
+                if experts.get(name) and kind.any():
+                    out[kind] = (out[kind] + np.mean([b.predict(X[m][kind], num_iteration=b.best_iteration)
+                                                      for b in experts[name]], axis=0)) / 2
+        return out
 
     def segment_ratios(bs):  # per segment: share of genuine validation payments at T2+ over the overall share
         rv = raw_of(va, bs)
@@ -216,6 +250,18 @@ def run(customers: int = 20000, days: int = 150, seed: int = 7, activate: bool =
         for s, r in over.items():
             boost[s] = min(FAIR_MAX_BOOST, boost.get(s, 1.0) * r)
         boosters = fit_all(boost)
+
+    # specialists: one per kind of payment (the bank sent phone/network signals, or not), trained on that kind only, with the
+    # same settings and fairness weights. Only when both kinds are in the data and the kind has enough fraud to learn from.
+    for name, kind in (("signals", has_signals), ("no_signals", ~has_signals)):
+        if (tr & kind & (y == 1)).sum() >= EXPERT_MIN_FRAUD and (tr & ~kind).any():
+            f = (np.array([boost.get(sg, 1.0) for sg in segment]) * (y == 0) + (y == 1)) * w
+            dk = lgb.Dataset(X[tr & kind], y[tr & kind], weight=f[tr & kind], feature_name=FEATURES, categorical_feature=cat,
+                             free_raw_data=False)
+            vk = lgb.Dataset(X[va & kind], y[va & kind], weight=w[va & kind], reference=dk, free_raw_data=False)
+            experts[name] = [_fit(lgb, _base_params(seed + k) | params, dk, vk) for k in range(seeds)]
+            print(f"  specialist {name}: {int((tr & kind).sum())} training rows")
+    router = _router(lgb, X, y, rows, tr, te, seed)
 
     iso = IsotonicRegression(y_min=0.0, y_max=1.0, out_of_bounds="clip").fit(raw_of(va), y[va], sample_weight=w[va])
     gv = y[va] == 0
@@ -258,6 +304,16 @@ def run(customers: int = 20000, days: int = 150, seed: int = 7, activate: bool =
         b.save_model(str(out / names[-1]), num_iteration=b.best_iteration)
     (out / "calibration.json").write_text(json.dumps({"x": iso.X_thresholds_.tolist(),
                                                       "y": iso.y_thresholds_.tolist()}))
+    names_extra, expert_files = [], {}
+    for name, bs in experts.items():
+        expert_files[name] = []
+        for k, b in enumerate(bs):
+            expert_files[name].append(f"expert_{name}_{k}.txt")
+            b.save_model(str(out / expert_files[name][-1]), num_iteration=b.best_iteration)
+        names_extra += expert_files[name]
+    if router is not None:
+        router["booster"].save_model(str(out / "router.txt"))
+        names_extra.append("router.txt")
     card = {
         "version": version, "createdAt": int(time.time()), "features": FEATURES, "monotone": MONOTONE,
         "historyDays": HISTORY_DAYS,
@@ -266,18 +322,21 @@ def run(customers: int = 20000, days: int = 150, seed: int = 7, activate: bool =
         "habit": {"cutoffs": habit_cutoffs, "genuineShare": HABIT_SHARE_AT_OR_ABOVE},
         "fairnessBoost": boost,
         "amountView": amount_view or "exact",
-        "data": {"source": "synthetic (amfa.engine.risk.scenarios)", "customers": customers, "days": days,
+        **({"router": {"file": "router.txt", "classes": router["classes"], "testAccuracy": router["accuracy"]}} if router else {}),
+        **({"experts": expert_files} if expert_files else {}),
+        "data": {"source": "synthetic (amfa.engine.risk.scenarios" + (" + DemoPay's UPI simulator, amfa.engine.risk.upi)" if upi_users else ")"),
+                 "customers": customers, "upiUsers": upi_users, "days": days,
                  "seed": seed, "rows": len(rows), "fraudRows": int(y.sum()),
                  "scenarioRows": dict(sorted(Counter(scenario).items())),
                  "split": {"trainDays": TRAIN_END, "validDays": VALID_END - TRAIN_END,
                            "testDays": days - VALID_END}},
         "metrics": metrics, "gate": gate,
-        "limits": "Trained only on simulated customers and the attack types in scenarios.py. "
+        "limits": "Trained only on simulated customers and the attack types in scenarios.py and upi/simulate.py. "
                   "Retrain on real labelled outcomes before trusting these numbers.",
     }
     (out / "card.json").write_text(json.dumps(card, indent=2))
     (out / MANIFEST).write_text(json.dumps({"files": {n: sha256(out / n) for n in
-                                                      names + ["calibration.json", "card.json"]}}, indent=2))
+                                                      names + names_extra + ["calibration.json", "card.json"]}}, indent=2))
     RiskModel(out, allow_banded=banded)  # proves the written model loads and verifies
     if candidate:
         # a bank using the band switch: the new version first watches every payment as the candidate, and decides nothing until
@@ -295,17 +354,36 @@ def run(customers: int = 20000, days: int = 150, seed: int = 7, activate: bool =
     return out
 
 
+def _router(lgb, X, y, rows, tr, te, seed) -> dict | None:
+    """Which kind of fraud a fraud payment is, learned from fraud payments only. None if there is only one kind."""
+    fam = np.array([getattr(r, "family", None) or "" for r in rows])
+    classes = [str(c) for c in sorted(set(fam[(y == 1) & tr]) - {""})]
+    if len(classes) < 2:
+        return None
+    m = tr & (y == 1) & (fam != "")
+    b = lgb.train(dict(objective="multiclass", num_class=len(classes), learning_rate=0.1, num_leaves=15, min_child_samples=10,
+                       verbose=-1, seed=seed), lgb.Dataset(X[m], np.array([classes.index(f) for f in fam[m]]),
+                                                           weight=merged_data.class_balanced(fam[m])), num_boost_round=200)
+    t = te & (y == 1) & (fam != "")
+    pred = np.array(classes)[b.predict(X[t]).argmax(1)] if t.any() else np.array([])
+    acc = {c: round(float((pred[fam[t] == c] == c).mean()), 4) for c in classes if (fam[t] == c).any()}
+    print(f"  router: test accuracy by family {acc}")
+    return {"booster": b, "classes": classes, "accuracy": acc}
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--customers", type=int, default=20000)
     ap.add_argument("--days", type=int, default=150)
     ap.add_argument("--seed", type=int, default=7)
+    ap.add_argument("--upi-users", type=int, default=None,
+                    help="DemoPay UPI users to learn the phone and payee signals from (default 30%% of --customers; 0: the platform's simulator only)")
     ap.add_argument("--no-activate", action="store_true")
     ap.add_argument("--force", action="store_true", help="activate even if the release gate fails")
     ap.add_argument("--candidate", action="store_true",
                     help="install the new version as the candidate (scores silently next to the active one) instead of activating it")
     a = ap.parse_args()
-    run(a.customers, a.days, a.seed, activate=not a.no_activate, force=a.force, candidate=a.candidate)
+    run(a.customers, a.days, a.seed, activate=not a.no_activate, force=a.force, candidate=a.candidate, upi_users=a.upi_users)
 
 
 if __name__ == "__main__":

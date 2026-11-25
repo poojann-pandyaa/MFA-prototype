@@ -390,6 +390,49 @@ class AccountEvents(Strict):
     payeeRiskFlag: bool = False
 
 
+class RiskSignals(Strict):
+    """What the bank's app and the payment network know about this payment, for the risk model (all optional; see
+    amfa/engine/risk/features.py, SIGNALS). Phone signals should come from an attested app: a compromised phone can forge them."""
+    callActive: Optional[bool] = None                       # a phone or video call is in progress (never its content)
+    callMinutes: Optional[float] = Field(default=None, ge=0, le=1440)
+    callUnknownNumber: Optional[bool] = None                # the caller is not in the contacts
+    remoteAccessActive: Optional[bool] = None               # a screen-sharing or remote-control app is running
+    overlayAccessibility: Optional[bool] = None             # an app is drawing over the screen
+    integrityFail: Optional[bool] = None                    # rooted phone or tampered app
+    sideloadHours: Optional[float] = Field(default=None, ge=0)
+    bioSimilarity: Optional[float] = Field(default=None, ge=0, le=1)
+    loginToPaySeconds: Optional[float] = Field(default=None, ge=0)
+    requesterIsContact: Optional[bool] = None               # a collect request from a saved contact
+    payeeAccountAgeDays: Optional[float] = Field(default=None, ge=0)
+    payeeFanIn24h: Optional[int] = Field(default=None, ge=0)
+    payeeIsMerchant: Optional[bool] = None
+    payeeRiskyCategory: Optional[bool] = None
+    payeeFraudRiskBand: Optional[int] = Field(default=None, ge=0, le=3)   # government Fraud Risk Indicator: 0 none .. 3 very high
+    payeeComplaints: Optional[int] = Field(default=None, ge=0)
+    paymentKind: Optional[Literal["pay", "collect", "qr"]] = None
+    deviceBoundHours: Optional[float] = Field(default=None, ge=0)
+    oldDeviceActive: Optional[bool] = None
+    failedPinAttempts: Optional[int] = Field(default=None, ge=0)
+    ipGeoKm: Optional[float] = Field(default=None, ge=0)
+    balanceMinor: Optional[int] = Field(default=None, ge=0)            # the account balance before this payment
+
+    def as_features(self) -> dict:
+        d = self.model_dump()
+        out = {"call_active": d["callActive"], "call_minutes": d["callMinutes"], "call_unknown_number": d["callUnknownNumber"],
+               "remote_access_active": d["remoteAccessActive"], "overlay_accessibility": d["overlayAccessibility"],
+               "integrity_fail": d["integrityFail"], "sideload_hours": d["sideloadHours"], "bio_similarity": d["bioSimilarity"],
+               "login_to_pay_s": d["loginToPaySeconds"], "requester_is_contact": d["requesterIsContact"],
+               "payee_account_age_days": d["payeeAccountAgeDays"], "payee_fan_in_24h": d["payeeFanIn24h"],
+               "payee_is_merchant": d["payeeIsMerchant"], "payee_risky_category": d["payeeRiskyCategory"],
+               "payee_fri": d["payeeFraudRiskBand"], "payee_complaints": d["payeeComplaints"],
+               "device_bound_hours": d["deviceBoundHours"], "old_device_active": d["oldDeviceActive"],
+               "failed_pin_attempts": d["failedPinAttempts"], "ip_geo_km": d["ipGeoKm"],
+               "balance": None if d["balanceMinor"] is None else d["balanceMinor"] / 100.0}
+        if d["paymentKind"] is not None:
+            out["channel_collect"], out["channel_qr"] = float(d["paymentKind"] == "collect"), float(d["paymentKind"] == "qr")
+        return out
+
+
 class InitiateTxn(Strict):
     userId: str = REF
     externalId: str = REF
@@ -403,6 +446,7 @@ class InitiateTxn(Strict):
     capability: Optional[CapabilityInfo] = None
     session: Optional[SessionInfo] = None
     accountEvents: Optional[AccountEvents] = None
+    signals: Optional[RiskSignals] = None
 
 
 def _txn_view(s, txn: db.Transaction, include_proof: bool = True) -> dict:
@@ -462,7 +506,8 @@ def initiate(body: InitiateTxn, request: Request,
             ip=body.device.ip, payee_created_at=body.payee.createdAt,
             device_first_seen=body.device.firstSeenAt, capability=cap,
             session=body.session.model_dump() if body.session else None,
-            account_events=body.accountEvents.model_dump() if body.accountEvents else None))
+            account_events=body.accountEvents.model_dump() if body.accountEvents else None,
+            signals=body.signals.as_features() if body.signals else None))
 
         agent = build_agent() if policy.agent.enabled else None
         try:

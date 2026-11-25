@@ -36,9 +36,13 @@ MONOTONE = {
     "payee_seen": -1, "amount_vs_payee_avg": 1,
     "device_seen": -1, "helper_device": -1, "network_seen": -1, "place_seen": -1,
     "sim_changed_hours": -1, "contact_changed_hours": -1, "password_reset_hours": -1,
+    # DemoPay's directions for its signals (same rule: only where the direction is unambiguous)
+    "remote_access_active": 1, "integrity_fail": 1, "overlay_accessibility": 1, "bio_similarity": -1, "failed_pin_attempts": 1,
+    "ip_geo_km": 1, "payee_fan_in_24h": 1, "payee_account_age_days": -1, "device_bound_hours": -1, "sideload_hours": -1,
+    "payee_fri": 1, "payee_complaints": 1, "amount_over_balance": 1, "outflow_24h_over_balance": 1, "new_payees_72h": 1,
 }
 
-FEATURES = [
+CORE_FEATURES = [
     "amount_log", "amount_ratio", "amount_vs_max", "amount_24h_ratio", "amount_z_self", "payee_z", "habit_surprise", "amount_vs_declared", "declared_gap",
     "velocity_1h", "velocity_24h", "new_payees_24h", "sensitive_actions_24h",
     "payee_seen", "payee_age_days", "days_since_payee_last_paid", "amount_vs_payee_avg",
@@ -49,6 +53,37 @@ FEATURES = [
     "ueba_risk", "sim_changed_hours", "contact_changed_hours", "password_reset_hours",
     "payee_risk_flag", "txn_type", "channel", "segment",
 ]
+
+# From DemoPay (branch Research/face-auth): what the phone and the payment network can report about one payment. All are
+# optional. A caller that does not have them passes nothing and they reach the model as missing, never as zero, so every
+# existing caller behaves as before. See docs/merged-risk-model.md.
+PHONE_SIGNALS = [
+    "call_active", "call_minutes", "call_unknown_number",       # a call in progress while paying (flag and minutes, never content)
+    "remote_access_active", "overlay_accessibility",            # a screen-sharing / remote-control app; an app drawing over the screen
+    "integrity_fail", "sideload_hours",                         # a rooted or tampered phone; an app installed from outside the store
+    "bio_similarity", "login_to_pay_s",                         # touch/typing like the owner's (0-1); seconds from sign-in to paying
+    "requester_is_contact",                                     # a collect request from someone in the contacts
+]
+NETWORK_SIGNALS = [
+    "payee_account_age_days", "payee_fan_in_24h",               # how old the receiving account is; how many people paid it today
+    "payee_is_merchant", "payee_risky_category",
+    "payee_fri", "payee_complaints",                            # the government fraud-risk band (0-3); complaints against the payee
+    "channel_collect", "channel_qr",                            # a collect request or a QR payment
+    "device_bound_hours", "old_device_active",                  # the payments app was bound to this phone recently; the old one still on
+    "failed_pin_attempts", "ip_geo_km",                         # wrong PINs on this attempt; distance from the customer's usual place
+]
+SIGNALS = PHONE_SIGNALS + NETWORK_SIGNALS
+# not model inputs themselves: facts the model's inputs are worked out from
+CONTEXT_SIGNALS = ["balance"]                                   # the account balance before this payment (rupees), if the bank gives it
+# worked out from the customer's own history (and the balance, when given), like the core features
+DERIVED_FEATURES = [
+    "escalating_to_payee",          # rising amounts to a payee first paid in the last 3 days (task and investment scams)
+    "new_payees_72h",               # new payees in the last 3 days (scams that run over several days)
+    "amount_over_balance",          # share of the balance this payment takes
+    "outflow_24h_over_balance",     # share of the balance sent in the last 24 hours, this payment included
+    "signals_present",              # 1 when the bank sent any phone or network signal: tells "not sent" apart from "all quiet"
+]
+FEATURES = CORE_FEATURES + DERIVED_FEATURES + SIGNALS
 
 
 @dataclass(frozen=True)
@@ -139,11 +174,13 @@ def exposure_24h(cur: Event, history: list[Event]) -> float:
         e.amount for e in history if e.type in MONETARY_TYPES and cur.at - DAY <= e.at < cur.at)
 
 
-def build(cur: Event, history: list[Event], profile: Profile) -> dict[str, Optional[float]]:
+def build(cur: Event, history: list[Event], profile: Profile, signals: Optional[dict] = None) -> dict[str, Optional[float]]:
     """The model's inputs for one decision: the transaction `cur`, the customer's earlier events and the
     account facts. Only the last HISTORY_DAYS of history count, and only verified payments teach what is
     "known" (a payee, device, network or place). A value that cannot be known yet is None, which the
-    model treats as missing, never as zero. Returns exactly the keys in FEATURES."""
+    model treats as missing, never as zero. [signals]: what the phone and the payment network report about
+    this payment (keys in SIGNALS, plus the account "balance" in rupees; all optional; unknown keys are ignored).
+    Returns exactly the keys in FEATURES."""
     now = cur.at
     since = now - HISTORY_DAYS * DAY
     has_payee, monetary = cur.type in PAYEE_TYPES, cur.type in MONETARY_TYPES
@@ -153,6 +190,7 @@ def build(cur: Event, history: list[Event], profile: Profile) -> dict[str, Optio
     payee_seen = device_seen = network_seen = place_seen = 0
     payee_first = device_first = None
     known_before_24h: set[str] = set()
+    known_before_72h: set[str] = set()
     recent_payees = {cur.payee} if has_payee else set()
     paid_at: list[float] = []      # when this payee was verifiably paid in the window
     paid_amounts: list[float] = []
@@ -185,6 +223,8 @@ def build(cur: Event, history: list[Event], profile: Profile) -> dict[str, Optio
                 amount30 += e.amount
         if age > DAY and e.type in PAYEE_TYPES:
             known_before_24h.add(e.payee)
+        if age > 3 * DAY and e.type in PAYEE_TYPES:
+            known_before_72h.add(e.payee)
         if has_payee and e.type in PAYEE_TYPES and e.payee == cur.payee:
             payee_seen += 1
             paid_at.append(e.at)
@@ -210,7 +250,20 @@ def build(cur: Event, history: list[Event], profile: Profile) -> dict[str, Optio
     z_payee = habit_z(cur.amount, paid_amounts, min_n=2, floor=.2, prior=.5, k=2) if monetary and has_payee else None
     # a payee paid before, at amounts like this one, is routine whatever the overall spread; otherwise judge against everything
     surprise = max(0.0, z_payee if z_payee is not None else z_self) if (z_payee is not None or z_self is not None) else None
+    escalating = (int(payee_first is not None and now - payee_first <= 3 * DAY and bool(paid_amounts) and cur.amount > paid_amounts[-1])
+                  if monetary and has_payee else None)
+    sig = signals or {}
+    balance = _num(sig.get("balance"))
+    balance = balance if balance and balance > 0 else None
+    recent_72h = {e.payee for e in history if e.type in PAYEE_TYPES and now - 3 * DAY <= e.at < now} | ({cur.payee} if has_payee else set())
+    new_72h = len(recent_72h - known_before_72h)
     return {
+        "escalating_to_payee": escalating,
+        "new_payees_72h": new_72h,
+        "amount_over_balance": cur.amount / balance if balance and monetary else None,
+        "outflow_24h_over_balance": (amount24 + cur.amount) / balance if balance and monetary else None,
+        "signals_present": int(any(_num(sig.get(k)) is not None for k in SIGNALS)),
+        **{k: _num(sig.get(k)) for k in SIGNALS},
         "amount_z_self": z_self, "payee_z": z_payee, "habit_surprise": surprise,
         "amount_vs_declared": cur.amount / profile.declared_typical if monetary and profile.declared_typical else None,
         "declared_gap": (amount30 + cur.amount) / profile.declared_month if monetary and profile.declared_month else None,
@@ -259,10 +312,19 @@ def build(cur: Event, history: list[Event], profile: Profile) -> dict[str, Optio
     }
 
 
+def _num(v) -> Optional[float]:
+    if v is None or isinstance(v, str):
+        return None
+    f = float(v)
+    return None if f != f else f
+
+
 def _code(name: str, value: str) -> Optional[int]:
     values = CATEGORICAL[name]
     return values.index(value) if value in values else None
 
 
-def vector(features: dict[str, Optional[float]]) -> list[float]:
-    return [math.nan if features.get(k) is None else float(features[k]) for k in FEATURES]
+def vector(features: dict[str, Optional[float]], names: Optional[list[str]] = None) -> list[float]:
+    """The model's input row, in the order of [names] (default FEATURES). A model records the list it was trained on, so an
+    older model trained before the phone and network signals existed still scores correctly."""
+    return [math.nan if features.get(k) is None else float(features[k]) for k in (names or FEATURES)]

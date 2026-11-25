@@ -117,3 +117,18 @@ def test_a_payment_the_bank_has_completed_still_counts_as_the_customers_history(
         f = context_builder.assemble(s, tenant, customer, "txn_c", txn(2_000, "grocer-c")).features
         s.rollback()
     assert f["payee_seen"] == 2
+
+
+def test_phone_and_payee_signals_reach_the_model_and_are_optional(tenant, customer):
+    from amfa.core.api_tenant import RiskSignals
+    from amfa.engine.risk.features import SIGNALS
+    sig = RiskSignals(callActive=True, callMinutes=25, callUnknownNumber=True, payeeFraudRiskBand=2, paymentKind="collect")
+    with db.session() as s:
+        with_sig = context_builder.assemble(s, tenant, customer, "txn_new", txn(20_000, "officer", signals=sig.as_features())).features
+        without = context_builder.assemble(s, tenant, customer, "txn_new", txn(20_000, "officer")).features
+    assert with_sig["call_active"] == 1 and with_sig["call_minutes"] == 25 and with_sig["payee_fri"] == 2
+    assert with_sig["channel_collect"] == 1 and with_sig["channel_qr"] == 0 and with_sig["remote_access_active"] is None
+    assert all(without[k] is None for k in SIGNALS)
+    assert with_sig["signals_present"] == 1 and without["signals_present"] == 0
+    same = lambda f: {k: v for k, v in f.items() if k not in SIGNALS and k != "signals_present"}  # noqa: E731
+    assert same(with_sig) == same(without)

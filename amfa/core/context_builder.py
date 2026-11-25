@@ -40,6 +40,7 @@ class TxnInput:
     capability: Optional[dict] = None
     session: Optional[dict] = None
     account_events: Optional[dict] = None
+    signals: Optional[dict] = None          # phone and payment-network signals for the risk model (features.SIGNALS)
     at: float = field(default_factory=time.time)
 
 
@@ -251,7 +252,7 @@ def assemble(s, tenant: db.Tenant, customer: db.Customer, txn_id: str, t: TxnInp
         declared_month=declared.month_of(declared_row.month_band) if declared_row else None,
         peer=peers.prior(s, tenant.id, declared_row), helpers=helper_keys)
     history = risk_history(s, customer, now, ZoneInfo(policy.timezone))
-    features = risk_features.build(cur, history, profile)
+    features = risk_features.build(cur, history, profile, t.signals)
     if policy.routineEasesHighValue and band is Band.HIGH and not new_payee and is_routine(features):
         floor, org = policy.derive(t.type, Band.MEDIUM, t.amount_minor, t.currency, segment, new_payee)
         ctx.policy.actionFloor, ctx.org = floor, org

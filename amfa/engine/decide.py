@@ -65,7 +65,7 @@ def select_by_model(features: Optional[dict], ctx: Context, model=None) -> Plan:
             lvl, why = lowered, note
     plan = Plan(required=list(RESPONSE[lvl]), riskBand=BAND[lvl], source="model", riskScore=r.score,
                 threatLevel=lvl, modelLevel=r.level, habitLevel=getattr(r, "habit", "T0"), capReason=why,
-                riskReasons=r.reasons, modelVersion=r.version, phase="READY")
+                riskReasons=r.reasons, modelVersion=r.version, phase="READY", threatFamily=getattr(r, "family", None))
     if lvl == REVIEW_LEVEL:
         plan.escalate, plan.escalateKind = "MANUAL_REVIEW", "LEVEL"
         plan.escalateReason = f"threat level {lvl} (risk {r.score:.2f})"
@@ -99,7 +99,7 @@ def learning_plan(features: Optional[dict], ctx: Context, model=None) -> Plan:
     plan = Plan(required=required, riskBand=Band.MEDIUM if stepped else Band.LOW, source="learning", phase="LEARNING",
                 threatLevel="T2" if stepped else "T1", shadowLevel=shadow, modelLevel=getattr(r, "level", None),
                 habitLevel=getattr(r, "habit", None), riskScore=getattr(r, "score", None),
-                riskReasons=getattr(r, "reasons", []), modelVersion=getattr(r, "version", ""),
+                riskReasons=getattr(r, "reasons", []), modelVersion=getattr(r, "version", ""), threatFamily=getattr(r, "family", None),
                 capReason="; ".join(over + signs) or "getting to know the customer: light checks")
     if r is not None and r.score >= LEARNING_HOLD_SCORE:
         plan.escalate, plan.escalateKind = "MANUAL_REVIEW", "HOLD"      # a hold, not a heavier check: the customer has none to give

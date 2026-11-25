@@ -11,6 +11,7 @@ import re
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 
@@ -38,6 +39,10 @@ class Result:
     reasons: list[tuple[str, float]]
     version: str
     habit: str = "T0"      # the level the customer's own habit alone asks for (T0 = no opinion)
+    # the most likely kind of fraud if this is one (UNAUTHORISED, COACHED, PAYEE_RISK, FIRST_PARTY) and the router's
+    # probability for each; None for a model trained without a router. It explains the level; it never changes it.
+    family: Optional[str] = None
+    family_probs: Optional[dict] = None
 
 
 def root() -> Path:
@@ -65,8 +70,11 @@ class RiskModel:
             # trained for the option A/B comparison on amounts known only by band; live inputs are exact amounts, which such a
             # model would misread. Only scripts/compare_amount_storage.py opens one, and it asks for that explicitly
             raise RiskModelError(f"model was trained on amounts known only by band ({view}); it is for the comparison only")
-        if self.card["features"] != FEATURES:
-            raise RiskModelError("model was trained on a different feature list")
+        # the model scores with the list it was trained on: a model from before the phone and network signals still loads
+        self.features = list(self.card["features"])
+        unknown = [f for f in self.features if f not in FEATURES]
+        if unknown:
+            raise RiskModelError(f"model was trained on features this build does not compute: {unknown[:5]}")
         if self.card.get("historyDays") != HISTORY_DAYS:
             raise RiskModelError(f"model was trained on a {self.card.get('historyDays')}-day history window, "
                                  f"this build uses {HISTORY_DAYS}")
@@ -76,22 +84,66 @@ class RiskModel:
         cal = json.loads((path / "calibration.json").read_text())
         self.iso_x, self.iso_y = np.array(cal["x"]), np.array(cal["y"])
         self.boosters = [lgb.Booster(model_file=str(path / n)) for n in self.card["boosters"]]
+        # specialists (merged model): for a payment where the bank sent phone/network signals, or one where it did not, the
+        # matching specialists score half and the general boosters half. A model without them is the general boosters alone.
+        self.experts = {k: [lgb.Booster(model_file=str(path / n)) for n in v] for k, v in self.card.get("experts", {}).items() if v}
+        self._cols = [FEATURES.index(f) for f in self.features]
+        self._sig = self.features.index("signals_present") if "signals_present" in self.features else None
+        router = self.card.get("router")
+        self.router = lgb.Booster(model_file=str(path / router["file"])) if router else None
+        self.families = list(router["classes"]) if router else []
+
+    def _model_columns(self, X) -> np.ndarray:
+        """Rows in this model's input order. Accepts rows built in this build's FEATURES order (vector(f)) or already in the
+        model's own order (vector(f, model.features)), so callers written for either keep working."""
+        X = np.asarray(X, dtype=float)
+        if X.shape[1] == len(self.features):
+            return X
+        if X.shape[1] == len(FEATURES):
+            return X[:, self._cols]
+        raise RiskModelError(f"expected {len(self.features)} or {len(FEATURES)} inputs, got {X.shape[1]}")
+
+    def _groups(self, Xm: np.ndarray) -> list[tuple[np.ndarray, list]]:
+        """(rows, specialist boosters) per kind of payment; empty boosters where the model has no specialist for it."""
+        if not self.experts or self._sig is None:
+            return [(np.ones(len(Xm), dtype=bool), [])]
+        has = Xm[:, self._sig] == 1
+        return [(has, self.experts.get("signals", [])), (~has, self.experts.get("no_signals", []))]
 
     def raw(self, X: np.ndarray) -> np.ndarray:
-        return np.mean([b.predict(X) for b in self.boosters], axis=0)
+        Xm = self._model_columns(X)
+        out = np.mean([b.predict(Xm) for b in self.boosters], axis=0)
+        for rows, experts in self._groups(Xm):
+            if experts and rows.any():
+                out[rows] = (out[rows] + np.mean([b.predict(Xm[rows]) for b in experts], axis=0)) / 2
+        return out
+
+    def _contrib(self, Xm: np.ndarray) -> np.ndarray:
+        """Each input's contribution to the raw score of one row, weighted as raw() weights the boosters."""
+        c = np.mean([b.predict(Xm, pred_contrib=True)[0][:-1] for b in self.boosters], axis=0)
+        for rows, experts in self._groups(Xm):
+            if experts and rows[0]:
+                c = (c + np.mean([b.predict(Xm, pred_contrib=True)[0][:-1] for b in experts], axis=0)) / 2
+        return c
 
     def calibrate(self, raw: np.ndarray) -> np.ndarray:
         return np.interp(raw, self.iso_x, self.iso_y)
 
     def score(self, features: dict) -> Result:
-        X = np.array([vector(features)])
+        X = np.array([vector(features, self.features)])
         raw = float(self.raw(X)[0])
-        contrib = np.mean([b.predict(X, pred_contrib=True)[0][:-1] for b in self.boosters], axis=0)
-        top = sorted(((FEATURES[i], float(c)) for i, c in enumerate(contrib) if c > 0),
+        contrib = self._contrib(X)
+        top = sorted(((self.features[i], float(c)) for i, c in enumerate(contrib) if c > 0),
                      key=lambda kv: -kv[1])[:3]
+        family = probs = None
+        if self.router is not None:
+            p = self.router.predict(X)[0]
+            probs = {f: round(float(v), 4) for f, v in zip(self.families, p)}
+            family = max(probs, key=probs.get)
         return Result(score=round(float(self.calibrate(np.array([raw]))[0]), 4), raw=raw,
                       level=level(raw, self.cutoffs), reasons=[(k, round(v, 3)) for k, v in top],
-                      version=self.version, habit=habit_level(features.get("habit_surprise"), self.habit_cutoffs))
+                      version=self.version, habit=habit_level(features.get("habit_surprise"), self.habit_cutoffs),
+                      family=family, family_probs=probs)
 
 
 @lru_cache(maxsize=4)

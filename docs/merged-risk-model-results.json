@@ -1,0 +1,1274 @@
+{
+ "settings": {
+  "customers": 2000,
+  "upi_users": 2000,
+  "seeds": "17,19,23",
+  "out": "docs/merged-risk-model-results.json"
+ },
+ "summary": {
+  "mean": {
+   "platform": {
+    "platform_test": {
+     "average_precision": 0.8677,
+     "caught_at_T2": 0.9982,
+     "incidents_caught_at_T2": 1.0,
+     "caught_at_T3": 0.9581,
+     "incidents_caught_at_T3": 0.9716,
+     "caught_at_T4": 0.8745,
+     "incidents_caught_at_T4": 0.8749
+    },
+    "upi_test": {
+     "average_precision": 0.5497,
+     "caught_at_T2": 0.82,
+     "incidents_caught_at_T2": 0.8308,
+     "caught_at_T3": 0.6715,
+     "incidents_caught_at_T3": 0.7033,
+     "caught_at_T4": 0.5279,
+     "incidents_caught_at_T4": 0.5815
+    }
+   },
+   "demopay": {
+    "platform_test": {
+     "average_precision": 0.075,
+     "caught_at_T2": 0.504,
+     "incidents_caught_at_T2": 0.5412,
+     "caught_at_T3": 0.2612,
+     "incidents_caught_at_T3": 0.2738,
+     "caught_at_T4": 0.0591,
+     "incidents_caught_at_T4": 0.103
+    },
+    "upi_test": {
+     "average_precision": 0.8694,
+     "caught_at_T2": 0.977,
+     "incidents_caught_at_T2": 0.988,
+     "caught_at_T3": 0.9442,
+     "incidents_caught_at_T3": 0.9709,
+     "caught_at_T4": 0.8908,
+     "incidents_caught_at_T4": 0.9328
+    }
+   },
+   "merged": {
+    "platform_test": {
+     "average_precision": 0.8752,
+     "caught_at_T2": 0.9982,
+     "incidents_caught_at_T2": 1.0,
+     "caught_at_T3": 0.9586,
+     "incidents_caught_at_T3": 0.9779,
+     "caught_at_T4": 0.8866,
+     "incidents_caught_at_T4": 0.8686
+    },
+    "upi_test": {
+     "average_precision": 0.9052,
+     "caught_at_T2": 0.9923,
+     "incidents_caught_at_T2": 0.9861,
+     "caught_at_T3": 0.9577,
+     "incidents_caught_at_T3": 0.9522,
+     "caught_at_T4": 0.8964,
+     "incidents_caught_at_T4": 0.9134
+    }
+   },
+   "platform_both_data": {
+    "platform_test": {
+     "average_precision": 0.871,
+     "caught_at_T2": 0.9976,
+     "incidents_caught_at_T2": 0.9937,
+     "caught_at_T3": 0.9588,
+     "incidents_caught_at_T3": 0.9842,
+     "caught_at_T4": 0.8769,
+     "incidents_caught_at_T4": 0.8638
+    },
+    "upi_test": {
+     "average_precision": 0.6682,
+     "caught_at_T2": 0.8835,
+     "incidents_caught_at_T2": 0.8986,
+     "caught_at_T3": 0.749,
+     "incidents_caught_at_T3": 0.7823,
+     "caught_at_T4": 0.6582,
+     "incidents_caught_at_T4": 0.6997
+    }
+   }
+  },
+  "merged_at_least_as_good": {
+   "platform_test.average_precision": {
+    "mean": true,
+    "seeds": 3,
+    "of": 3
+   },
+   "platform_test.caught_at_T2": {
+    "mean": true,
+    "seeds": 3,
+    "of": 3
+   },
+   "platform_test.incidents_caught_at_T2": {
+    "mean": true,
+    "seeds": 3,
+    "of": 3
+   },
+   "platform_test.caught_at_T3": {
+    "mean": true,
+    "seeds": 2,
+    "of": 3
+   },
+   "platform_test.incidents_caught_at_T3": {
+    "mean": true,
+    "seeds": 3,
+    "of": 3
+   },
+   "platform_test.caught_at_T4": {
+    "mean": true,
+    "seeds": 3,
+    "of": 3
+   },
+   "platform_test.incidents_caught_at_T4": {
+    "mean": false,
+    "seeds": 2,
+    "of": 3
+   },
+   "upi_test.average_precision": {
+    "mean": true,
+    "seeds": 3,
+    "of": 3
+   },
+   "upi_test.caught_at_T2": {
+    "mean": true,
+    "seeds": 3,
+    "of": 3
+   },
+   "upi_test.incidents_caught_at_T2": {
+    "mean": false,
+    "seeds": 2,
+    "of": 3
+   },
+   "upi_test.caught_at_T3": {
+    "mean": true,
+    "seeds": 3,
+    "of": 3
+   },
+   "upi_test.incidents_caught_at_T3": {
+    "mean": false,
+    "seeds": 1,
+    "of": 3
+   },
+   "upi_test.caught_at_T4": {
+    "mean": true,
+    "seeds": 2,
+    "of": 3
+   },
+   "upi_test.incidents_caught_at_T4": {
+    "mean": false,
+    "seeds": 0,
+    "of": 3
+   }
+  },
+  "difference_ci": {
+   "platform_test.average_precision": {
+    "mean": 0.0076,
+    "ci95": [
+     -0.0007,
+     0.0187
+    ],
+    "verdict": "no measurable difference"
+   },
+   "platform_test.caught_at_T2": {
+    "mean": 0.0,
+    "ci95": [
+     0.0,
+     0.0
+    ],
+    "verdict": "no measurable difference"
+   },
+   "platform_test.caught_at_T3": {
+    "mean": 0.0024,
+    "ci95": [
+     -0.0082,
+     0.0148
+    ],
+    "verdict": "no measurable difference"
+   },
+   "platform_test.caught_at_T4": {
+    "mean": 0.0115,
+    "ci95": [
+     -0.0066,
+     0.0338
+    ],
+    "verdict": "no measurable difference"
+   },
+   "platform_test.incidents_caught_at_T2": {
+    "mean": 0.0,
+    "ci95": [
+     0.0,
+     0.0
+    ],
+    "verdict": "no measurable difference"
+   },
+   "platform_test.incidents_caught_at_T3": {
+    "mean": 0.006,
+    "ci95": [
+     -0.0054,
+     0.019
+    ],
+    "verdict": "no measurable difference"
+   },
+   "platform_test.incidents_caught_at_T4": {
+    "mean": -0.0012,
+    "ci95": [
+     -0.0262,
+     0.0189
+    ],
+    "verdict": "no measurable difference"
+   },
+   "upi_test.average_precision": {
+    "mean": 0.0351,
+    "ci95": [
+     0.0136,
+     0.0571
+    ],
+    "verdict": "better"
+   },
+   "upi_test.caught_at_T2": {
+    "mean": 0.0152,
+    "ci95": [
+     0.0064,
+     0.0252
+    ],
+    "verdict": "better"
+   },
+   "upi_test.caught_at_T3": {
+    "mean": 0.014,
+    "ci95": [
+     -0.002,
+     0.0317
+    ],
+    "verdict": "no measurable difference"
+   },
+   "upi_test.caught_at_T4": {
+    "mean": 0.0103,
+    "ci95": [
+     -0.0153,
+     0.0368
+    ],
+    "verdict": "no measurable difference"
+   },
+   "upi_test.incidents_caught_at_T2": {
+    "mean": -0.0013,
+    "ci95": [
+     -0.0097,
+     0.0071
+    ],
+    "verdict": "no measurable difference"
+   },
+   "upi_test.incidents_caught_at_T3": {
+    "mean": -0.0164,
+    "ci95": [
+     -0.0335,
+     -0.0005
+    ],
+    "verdict": "worse"
+   },
+   "upi_test.incidents_caught_at_T4": {
+    "mean": -0.0137,
+    "ci95": [
+     -0.0408,
+     0.0117
+    ],
+    "verdict": "no measurable difference"
+   }
+  }
+ },
+ "per_seed": {
+  "17": {
+   "data": {
+    "platform_rows": 115960,
+    "upi_rows": 90448,
+    "test_fraud_rows": {
+     "platform": 157,
+     "upi": 388
+    }
+   },
+   "params": {
+    "platform": {
+     "num_leaves": 31,
+     "min_child_samples": 60,
+     "lambda_l2": 5.0,
+     "learning_rate": 0.1
+    },
+    "demopay": "three detectors (DemoPay CONFIGS search)",
+    "merged": {
+     "general": {
+      "num_leaves": 63,
+      "min_child_samples": 60,
+      "lambda_l2": 5.0,
+      "learning_rate": 0.05
+     },
+     "specialists": [
+      "no_signals",
+      "signals"
+     ]
+    },
+    "platform_both_data": {
+     "num_leaves": 63,
+     "min_child_samples": 60,
+     "lambda_l2": 5.0,
+     "learning_rate": 0.05
+    }
+   },
+   "results": {
+    "platform": {
+     "platform_test": {
+      "fraud_rows": 157,
+      "genuine_rows": 17097,
+      "average_precision": 0.8076,
+      "caught_at_T2": 0.9945,
+      "incidents_caught_at_T2": 1.0,
+      "caught_at_T3": 0.9349,
+      "incidents_caught_at_T3": 0.9434,
+      "caught_at_T3_by_family": {
+       "COACHED": 0.6774,
+       "FIRST_PARTY": 0.85,
+       "UNAUTHORISED": 0.9811
+      },
+      "caught_at_T4": 0.8273,
+      "incidents_caught_at_T4": 0.8679
+     },
+     "upi_test": {
+      "fraud_rows": 388,
+      "genuine_rows": 18623,
+      "average_precision": 0.5701,
+      "caught_at_T2": 0.8351,
+      "incidents_caught_at_T2": 0.8435,
+      "caught_at_T3": 0.6985,
+      "incidents_caught_at_T3": 0.6957,
+      "caught_at_T3_by_family": {
+       "COACHED": 0.6615,
+       "PAYEE_RISK": 0.125,
+       "UNAUTHORISED": 0.8198
+      },
+      "caught_at_T4": 0.5464,
+      "incidents_caught_at_T4": 0.5826
+     }
+    },
+    "demopay": {
+     "platform_test": {
+      "fraud_rows": 157,
+      "genuine_rows": 17097,
+      "average_precision": 0.0115,
+      "caught_at_T2": 0.3038,
+      "incidents_caught_at_T2": 0.3774,
+      "caught_at_T3": 0.051,
+      "incidents_caught_at_T3": 0.0943,
+      "caught_at_T3_by_family": {
+       "COACHED": 0.0,
+       "FIRST_PARTY": 0.0,
+       "UNAUTHORISED": 0.0849
+      },
+      "caught_at_T4": 0.0118,
+      "incidents_caught_at_T4": 0.0377
+     },
+     "upi_test": {
+      "fraud_rows": 388,
+      "genuine_rows": 18623,
+      "average_precision": 0.8783,
+      "caught_at_T2": 0.9742,
+      "incidents_caught_at_T2": 0.9913,
+      "caught_at_T3": 0.9407,
+      "incidents_caught_at_T3": 0.9826,
+      "caught_at_T3_by_family": {
+       "COACHED": 0.9062,
+       "PAYEE_RISK": 0.9167,
+       "UNAUTHORISED": 0.9826
+      },
+      "caught_at_T4": 0.8711,
+      "incidents_caught_at_T4": 0.9478
+     }
+    },
+    "merged": {
+     "platform_test": {
+      "fraud_rows": 157,
+      "genuine_rows": 17097,
+      "average_precision": 0.8249,
+      "caught_at_T2": 0.9945,
+      "incidents_caught_at_T2": 1.0,
+      "caught_at_T3": 0.9388,
+      "incidents_caught_at_T3": 0.9623,
+      "caught_at_T3_by_family": {
+       "COACHED": 0.7097,
+       "FIRST_PARTY": 0.8,
+       "UNAUTHORISED": 0.9906
+      },
+      "caught_at_T4": 0.8509,
+      "incidents_caught_at_T4": 0.8491
+     },
+     "upi_test": {
+      "fraud_rows": 388,
+      "genuine_rows": 18623,
+      "average_precision": 0.9004,
+      "caught_at_T2": 0.9974,
+      "incidents_caught_at_T2": 0.9913,
+      "caught_at_T3": 0.9562,
+      "incidents_caught_at_T3": 0.9478,
+      "caught_at_T3_by_family": {
+       "COACHED": 0.9479,
+       "PAYEE_RISK": 0.875,
+       "UNAUTHORISED": 0.9767
+      },
+      "caught_at_T4": 0.8943,
+      "incidents_caught_at_T4": 0.9304
+     }
+    },
+    "platform_both_data": {
+     "platform_test": {
+      "fraud_rows": 157,
+      "genuine_rows": 17097,
+      "average_precision": 0.8181,
+      "caught_at_T2": 0.9929,
+      "incidents_caught_at_T2": 0.9811,
+      "caught_at_T3": 0.9427,
+      "incidents_caught_at_T3": 0.9811,
+      "caught_at_T3_by_family": {
+       "COACHED": 0.7419,
+       "FIRST_PARTY": 0.8,
+       "UNAUTHORISED": 0.9906
+      },
+      "caught_at_T4": 0.8273,
+      "incidents_caught_at_T4": 0.8491
+     },
+     "upi_test": {
+      "fraud_rows": 388,
+      "genuine_rows": 18623,
+      "average_precision": 0.6989,
+      "caught_at_T2": 0.9021,
+      "incidents_caught_at_T2": 0.913,
+      "caught_at_T3": 0.7887,
+      "incidents_caught_at_T3": 0.8261,
+      "caught_at_T3_by_family": {
+       "COACHED": 0.7344,
+       "PAYEE_RISK": 0.5417,
+       "UNAUTHORISED": 0.8837
+      },
+      "caught_at_T4": 0.6907,
+      "incidents_caught_at_T4": 0.7043
+     }
+    }
+   },
+   "validation": {
+    "platform": {
+     "platform": {
+      "fraud_rows": 196,
+      "genuine_rows": 17771,
+      "average_precision": 0.8772,
+      "caught_at_T2": 1.0,
+      "incidents_caught_at_T2": 1.0,
+      "caught_at_T3": 0.9656,
+      "incidents_caught_at_T3": 0.9552,
+      "caught_at_T3_by_family": {
+       "COACHED": 0.7857,
+       "FIRST_PARTY": 0.9512,
+       "UNAUTHORISED": 1.0
+      },
+      "caught_at_T4": 0.8867,
+      "incidents_caught_at_T4": 0.8955
+     },
+     "upi": {
+      "fraud_rows": 275,
+      "genuine_rows": 18287,
+      "average_precision": 0.3878,
+      "caught_at_T2": 0.7636,
+      "incidents_caught_at_T2": 0.7527,
+      "caught_at_T3": 0.5964,
+      "incidents_caught_at_T3": 0.6022,
+      "caught_at_T3_by_family": {
+       "COACHED": 0.439,
+       "PAYEE_RISK": 0.0526,
+       "UNAUTHORISED": 0.8195
+      },
+      "caught_at_T4": 0.4473,
+      "incidents_caught_at_T4": 0.5054
+     }
+    },
+    "demopay": {
+     "platform": {
+      "fraud_rows": 196,
+      "genuine_rows": 17771,
+      "average_precision": 0.017,
+      "caught_at_T2": 0.2628,
+      "incidents_caught_at_T2": 0.2836,
+      "caught_at_T3": 0.0784,
+      "incidents_caught_at_T3": 0.0746,
+      "caught_at_T3_by_family": {
+       "COACHED": 0.0,
+       "FIRST_PARTY": 0.0488,
+       "UNAUTHORISED": 0.0887
+      },
+      "caught_at_T4": 0.006,
+      "incidents_caught_at_T4": 0.0149
+     },
+     "upi": {
+      "fraud_rows": 275,
+      "genuine_rows": 18287,
+      "average_precision": 0.7728,
+      "caught_at_T2": 0.9818,
+      "incidents_caught_at_T2": 0.957,
+      "caught_at_T3": 0.9491,
+      "incidents_caught_at_T3": 0.914,
+      "caught_at_T3_by_family": {
+       "COACHED": 0.9512,
+       "PAYEE_RISK": 0.5789,
+       "UNAUTHORISED": 1.0
+      },
+      "caught_at_T4": 0.8727,
+      "incidents_caught_at_T4": 0.8387
+     }
+    },
+    "merged": {
+     "platform": {
+      "fraud_rows": 196,
+      "genuine_rows": 17771,
+      "average_precision": 0.8801,
+      "caught_at_T2": 1.0,
+      "incidents_caught_at_T2": 1.0,
+      "caught_at_T3": 0.9717,
+      "incidents_caught_at_T3": 0.9701,
+      "caught_at_T3_by_family": {
+       "COACHED": 0.7857,
+       "FIRST_PARTY": 0.9512,
+       "UNAUTHORISED": 1.0
+      },
+      "caught_at_T4": 0.8987,
+      "incidents_caught_at_T4": 0.9104
+     },
+     "upi": {
+      "fraud_rows": 275,
+      "genuine_rows": 18287,
+      "average_precision": 0.7629,
+      "caught_at_T2": 0.9891,
+      "incidents_caught_at_T2": 0.9785,
+      "caught_at_T3": 0.9455,
+      "incidents_caught_at_T3": 0.9032,
+      "caught_at_T3_by_family": {
+       "COACHED": 0.9593,
+       "PAYEE_RISK": 0.5789,
+       "UNAUTHORISED": 0.985
+      },
+      "caught_at_T4": 0.8836,
+      "incidents_caught_at_T4": 0.828
+     }
+    },
+    "platform_both_data": {
+     "platform": {
+      "fraud_rows": 196,
+      "genuine_rows": 17771,
+      "average_precision": 0.8645,
+      "caught_at_T2": 1.0,
+      "incidents_caught_at_T2": 1.0,
+      "caught_at_T3": 0.9717,
+      "incidents_caught_at_T3": 1.0,
+      "caught_at_T3_by_family": {
+       "COACHED": 0.8571,
+       "FIRST_PARTY": 0.9512,
+       "UNAUTHORISED": 0.9919
+      },
+      "caught_at_T4": 0.8535,
+      "incidents_caught_at_T4": 0.9254
+     },
+     "upi": {
+      "fraud_rows": 275,
+      "genuine_rows": 18287,
+      "average_precision": 0.544,
+      "caught_at_T2": 0.88,
+      "incidents_caught_at_T2": 0.871,
+      "caught_at_T3": 0.7236,
+      "incidents_caught_at_T3": 0.7527,
+      "caught_at_T3_by_family": {
+       "COACHED": 0.6504,
+       "PAYEE_RISK": 0.3158,
+       "UNAUTHORISED": 0.8496
+      },
+      "caught_at_T4": 0.6255,
+      "incidents_caught_at_T4": 0.6452
+     }
+    }
+   },
+   "router": {
+    "merged_on_platform_test": {
+     "COACHED": 0.8065,
+     "FIRST_PARTY": 0.95,
+     "UNAUTHORISED": 0.9528
+    },
+    "merged_on_upi_test": {
+     "COACHED": 0.9948,
+     "PAYEE_RISK": 0.25,
+     "UNAUTHORISED": 0.814
+    },
+    "demopay_on_upi_test": {
+     "UNAUTHORISED": 0.8488,
+     "COACHED": 0.9688,
+     "PAYEE_RISK": 0.2083
+    }
+   }
+  },
+  "19": {
+   "data": {
+    "platform_rows": 121151,
+    "upi_rows": 88118,
+    "test_fraud_rows": {
+     "platform": 182,
+     "upi": 322
+    }
+   },
+   "params": {
+    "platform": {
+     "num_leaves": 63,
+     "min_child_samples": 60,
+     "lambda_l2": 5.0,
+     "learning_rate": 0.05
+    },
+    "demopay": "three detectors (DemoPay CONFIGS search)",
+    "merged": {
+     "general": {
+      "num_leaves": 63,
+      "min_child_samples": 60,
+      "lambda_l2": 5.0,
+      "learning_rate": 0.05
+     },
+     "specialists": [
+      "no_signals",
+      "signals"
+     ]
+    },
+    "platform_both_data": {
+     "num_leaves": 63,
+     "min_child_samples": 60,
+     "lambda_l2": 5.0,
+     "learning_rate": 0.05
+    }
+   },
+   "results": {
+    "platform": {
+     "platform_test": {
+      "fraud_rows": 182,
+      "genuine_rows": 17808,
+      "average_precision": 0.8819,
+      "caught_at_T2": 1.0,
+      "incidents_caught_at_T2": 1.0,
+      "caught_at_T3": 0.9579,
+      "incidents_caught_at_T3": 1.0,
+      "caught_at_T3_by_family": {
+       "COACHED": 0.975,
+       "FIRST_PARTY": 0.7895,
+       "UNAUTHORISED": 0.9833
+      },
+      "caught_at_T4": 0.8864,
+      "incidents_caught_at_T4": 0.871
+     },
+     "upi_test": {
+      "fraud_rows": 322,
+      "genuine_rows": 18408,
+      "average_precision": 0.4716,
+      "caught_at_T2": 0.7857,
+      "incidents_caught_at_T2": 0.7961,
+      "caught_at_T3": 0.6304,
+      "incidents_caught_at_T3": 0.6699,
+      "caught_at_T3_by_family": {
+       "COACHED": 0.5561,
+       "PAYEE_RISK": 0.0769,
+       "UNAUTHORISED": 0.92
+      },
+      "caught_at_T4": 0.4534,
+      "incidents_caught_at_T4": 0.534
+     }
+    },
+    "demopay": {
+     "platform_test": {
+      "fraud_rows": 182,
+      "genuine_rows": 17808,
+      "average_precision": 0.0163,
+      "caught_at_T2": 0.3717,
+      "incidents_caught_at_T2": 0.4032,
+      "caught_at_T3": 0.0989,
+      "incidents_caught_at_T3": 0.1129,
+      "caught_at_T3_by_family": {
+       "COACHED": 0.1,
+       "FIRST_PARTY": 0.0,
+       "UNAUTHORISED": 0.1167
+      },
+      "caught_at_T4": 0.0,
+      "incidents_caught_at_T4": 0.0
+     },
+     "upi_test": {
+      "fraud_rows": 322,
+      "genuine_rows": 18408,
+      "average_precision": 0.8525,
+      "caught_at_T2": 0.9876,
+      "incidents_caught_at_T2": 0.9806,
+      "caught_at_T3": 0.9627,
+      "incidents_caught_at_T3": 0.9612,
+      "caught_at_T3_by_family": {
+       "COACHED": 0.9541,
+       "PAYEE_RISK": 0.9615,
+       "UNAUTHORISED": 0.98
+      },
+      "caught_at_T4": 0.9099,
+      "incidents_caught_at_T4": 0.9126
+     }
+    },
+    "merged": {
+     "platform_test": {
+      "fraud_rows": 182,
+      "genuine_rows": 17808,
+      "average_precision": 0.8819,
+      "caught_at_T2": 1.0,
+      "incidents_caught_at_T2": 1.0,
+      "caught_at_T3": 0.9614,
+      "incidents_caught_at_T3": 1.0,
+      "caught_at_T3_by_family": {
+       "COACHED": 0.95,
+       "FIRST_PARTY": 0.8421,
+       "UNAUTHORISED": 0.9833
+      },
+      "caught_at_T4": 0.8899,
+      "incidents_caught_at_T4": 0.871
+     },
+     "upi_test": {
+      "fraud_rows": 322,
+      "genuine_rows": 18408,
+      "average_precision": 0.9122,
+      "caught_at_T2": 0.9938,
+      "incidents_caught_at_T2": 0.9903,
+      "caught_at_T3": 0.9783,
+      "incidents_caught_at_T3": 0.9709,
+      "caught_at_T3_by_family": {
+       "COACHED": 0.9745,
+       "PAYEE_RISK": 0.9231,
+       "UNAUTHORISED": 1.0
+      },
+      "caught_at_T4": 0.9037,
+      "incidents_caught_at_T4": 0.9029
+     }
+    },
+    "platform_both_data": {
+     "platform_test": {
+      "fraud_rows": 182,
+      "genuine_rows": 17808,
+      "average_precision": 0.8789,
+      "caught_at_T2": 1.0,
+      "incidents_caught_at_T2": 1.0,
+      "caught_at_T3": 0.9614,
+      "incidents_caught_at_T3": 1.0,
+      "caught_at_T3_by_family": {
+       "COACHED": 0.95,
+       "FIRST_PARTY": 0.8421,
+       "UNAUTHORISED": 0.9833
+      },
+      "caught_at_T4": 0.8794,
+      "incidents_caught_at_T4": 0.871
+     },
+     "upi_test": {
+      "fraud_rows": 322,
+      "genuine_rows": 18408,
+      "average_precision": 0.6129,
+      "caught_at_T2": 0.8665,
+      "incidents_caught_at_T2": 0.8835,
+      "caught_at_T3": 0.7019,
+      "incidents_caught_at_T3": 0.7379,
+      "caught_at_T3_by_family": {
+       "COACHED": 0.648,
+       "PAYEE_RISK": 0.2692,
+       "UNAUTHORISED": 0.92
+      },
+      "caught_at_T4": 0.6149,
+      "incidents_caught_at_T4": 0.6893
+     }
+    }
+   },
+   "validation": {
+    "platform": {
+     "platform": {
+      "fraud_rows": 248,
+      "genuine_rows": 19011,
+      "average_precision": 0.8495,
+      "caught_at_T2": 0.9923,
+      "incidents_caught_at_T2": 0.9886,
+      "caught_at_T3": 0.9433,
+      "incidents_caught_at_T3": 0.9659,
+      "caught_at_T3_by_family": {
+       "COACHED": 0.9804,
+       "FIRST_PARTY": 0.814,
+       "UNAUTHORISED": 0.9867
+      },
+      "caught_at_T4": 0.847,
+      "incidents_caught_at_T4": 0.8636
+     },
+     "upi": {
+      "fraud_rows": 313,
+      "genuine_rows": 18002,
+      "average_precision": 0.4633,
+      "caught_at_T2": 0.8371,
+      "incidents_caught_at_T2": 0.7981,
+      "caught_at_T3": 0.639,
+      "incidents_caught_at_T3": 0.6827,
+      "caught_at_T3_by_family": {
+       "COACHED": 0.5269,
+       "PAYEE_RISK": 0.125,
+       "UNAUTHORISED": 0.9009
+      },
+      "caught_at_T4": 0.4537,
+      "incidents_caught_at_T4": 0.4808
+     }
+    },
+    "demopay": {
+     "platform": {
+      "fraud_rows": 248,
+      "genuine_rows": 19011,
+      "average_precision": 0.0139,
+      "caught_at_T2": 0.236,
+      "incidents_caught_at_T2": 0.4773,
+      "caught_at_T3": 0.0057,
+      "incidents_caught_at_T3": 0.0341,
+      "caught_at_T3_by_family": {
+       "COACHED": 0.0784,
+       "FIRST_PARTY": 0.0,
+       "UNAUTHORISED": 0.0
+      },
+      "caught_at_T4": 0.001,
+      "incidents_caught_at_T4": 0.0114
+     },
+     "upi": {
+      "fraud_rows": 313,
+      "genuine_rows": 18002,
+      "average_precision": 0.7876,
+      "caught_at_T2": 0.9808,
+      "incidents_caught_at_T2": 0.9904,
+      "caught_at_T3": 0.9265,
+      "incidents_caught_at_T3": 0.9327,
+      "caught_at_T3_by_family": {
+       "COACHED": 0.9032,
+       "PAYEE_RISK": 0.8125,
+       "UNAUTHORISED": 0.982
+      },
+      "caught_at_T4": 0.8275,
+      "incidents_caught_at_T4": 0.8558
+     }
+    },
+    "merged": {
+     "platform": {
+      "fraud_rows": 248,
+      "genuine_rows": 19011,
+      "average_precision": 0.8574,
+      "caught_at_T2": 1.0,
+      "incidents_caught_at_T2": 1.0,
+      "caught_at_T3": 0.9356,
+      "incidents_caught_at_T3": 0.9545,
+      "caught_at_T3_by_family": {
+       "COACHED": 0.9608,
+       "FIRST_PARTY": 0.814,
+       "UNAUTHORISED": 0.98
+      },
+      "caught_at_T4": 0.8614,
+      "incidents_caught_at_T4": 0.8636
+     },
+     "upi": {
+      "fraud_rows": 313,
+      "genuine_rows": 18002,
+      "average_precision": 0.794,
+      "caught_at_T2": 1.0,
+      "incidents_caught_at_T2": 1.0,
+      "caught_at_T3": 0.9425,
+      "incidents_caught_at_T3": 0.9135,
+      "caught_at_T3_by_family": {
+       "COACHED": 0.9355,
+       "PAYEE_RISK": 0.75,
+       "UNAUTHORISED": 0.982
+      },
+      "caught_at_T4": 0.853,
+      "incidents_caught_at_T4": 0.875
+     }
+    },
+    "platform_both_data": {
+     "platform": {
+      "fraud_rows": 248,
+      "genuine_rows": 19011,
+      "average_precision": 0.8542,
+      "caught_at_T2": 0.9974,
+      "incidents_caught_at_T2": 1.0,
+      "caught_at_T3": 0.9356,
+      "incidents_caught_at_T3": 0.9545,
+      "caught_at_T3_by_family": {
+       "COACHED": 0.9412,
+       "FIRST_PARTY": 0.8372,
+       "UNAUTHORISED": 0.98
+      },
+      "caught_at_T4": 0.8563,
+      "incidents_caught_at_T4": 0.8636
+     },
+     "upi": {
+      "fraud_rows": 313,
+      "genuine_rows": 18002,
+      "average_precision": 0.6181,
+      "caught_at_T2": 0.9073,
+      "incidents_caught_at_T2": 0.875,
+      "caught_at_T3": 0.7764,
+      "incidents_caught_at_T3": 0.7981,
+      "caught_at_T3_by_family": {
+       "COACHED": 0.7097,
+       "PAYEE_RISK": 0.4375,
+       "UNAUTHORISED": 0.9369
+      },
+      "caught_at_T4": 0.607,
+      "incidents_caught_at_T4": 0.6827
+     }
+    }
+   },
+   "router": {
+    "merged_on_platform_test": {
+     "COACHED": 0.75,
+     "FIRST_PARTY": 0.9474,
+     "PAYEE_RISK": 0.6667,
+     "UNAUTHORISED": 0.9333
+    },
+    "merged_on_upi_test": {
+     "COACHED": 0.9388,
+     "PAYEE_RISK": 0.1923,
+     "UNAUTHORISED": 0.8
+    },
+    "demopay_on_upi_test": {
+     "UNAUTHORISED": 0.83,
+     "COACHED": 0.9541,
+     "PAYEE_RISK": 0.3846
+    }
+   }
+  },
+  "23": {
+   "data": {
+    "platform_rows": 119982,
+    "upi_rows": 89091,
+    "test_fraud_rows": {
+     "platform": 196,
+     "upi": 423
+    }
+   },
+   "params": {
+    "platform": {
+     "num_leaves": 15,
+     "min_child_samples": 60,
+     "lambda_l2": 5.0,
+     "learning_rate": 0.1
+    },
+    "demopay": "three detectors (DemoPay CONFIGS search)",
+    "merged": {
+     "general": {
+      "num_leaves": 15,
+      "min_child_samples": 60,
+      "lambda_l2": 5.0,
+      "learning_rate": 0.05
+     },
+     "specialists": [
+      "no_signals",
+      "signals"
+     ]
+    },
+    "platform_both_data": {
+     "num_leaves": 31,
+     "min_child_samples": 60,
+     "lambda_l2": 5.0,
+     "learning_rate": 0.05
+    }
+   },
+   "results": {
+    "platform": {
+     "platform_test": {
+      "fraud_rows": 196,
+      "genuine_rows": 17710,
+      "average_precision": 0.9136,
+      "caught_at_T2": 1.0,
+      "incidents_caught_at_T2": 1.0,
+      "caught_at_T3": 0.9816,
+      "incidents_caught_at_T3": 0.9714,
+      "caught_at_T3_by_family": {
+       "COACHED": 0.9286,
+       "FIRST_PARTY": 1.0,
+       "UNAUTHORISED": 0.9926
+      },
+      "caught_at_T4": 0.9099,
+      "incidents_caught_at_T4": 0.8857
+     },
+     "upi_test": {
+      "fraud_rows": 423,
+      "genuine_rows": 18091,
+      "average_precision": 0.6073,
+      "caught_at_T2": 0.8392,
+      "incidents_caught_at_T2": 0.8527,
+      "caught_at_T3": 0.6856,
+      "incidents_caught_at_T3": 0.7442,
+      "caught_at_T3_by_family": {
+       "COACHED": 0.5974,
+       "PAYEE_RISK": 0.2143,
+       "UNAUTHORISED": 0.8902
+      },
+      "caught_at_T4": 0.5839,
+      "incidents_caught_at_T4": 0.6279
+     }
+    },
+    "demopay": {
+     "platform_test": {
+      "fraud_rows": 196,
+      "genuine_rows": 17710,
+      "average_precision": 0.1973,
+      "caught_at_T2": 0.8364,
+      "incidents_caught_at_T2": 0.8429,
+      "caught_at_T3": 0.6336,
+      "incidents_caught_at_T3": 0.6143,
+      "caught_at_T3_by_family": {
+       "COACHED": 0.0714,
+       "FIRST_PARTY": 0.1429,
+       "UNAUTHORISED": 0.7647
+      },
+      "caught_at_T4": 0.1654,
+      "incidents_caught_at_T4": 0.2714
+     },
+     "upi_test": {
+      "fraud_rows": 423,
+      "genuine_rows": 18091,
+      "average_precision": 0.8774,
+      "caught_at_T2": 0.9693,
+      "incidents_caught_at_T2": 0.9922,
+      "caught_at_T3": 0.9291,
+      "incidents_caught_at_T3": 0.969,
+      "caught_at_T3_by_family": {
+       "COACHED": 0.8874,
+       "PAYEE_RISK": 0.8929,
+       "UNAUTHORISED": 0.9939
+      },
+      "caught_at_T4": 0.8913,
+      "incidents_caught_at_T4": 0.938
+     }
+    },
+    "merged": {
+     "platform_test": {
+      "fraud_rows": 196,
+      "genuine_rows": 17710,
+      "average_precision": 0.9188,
+      "caught_at_T2": 1.0,
+      "incidents_caught_at_T2": 1.0,
+      "caught_at_T3": 0.9755,
+      "incidents_caught_at_T3": 0.9714,
+      "caught_at_T3_by_family": {
+       "COACHED": 0.881,
+       "FIRST_PARTY": 1.0,
+       "UNAUTHORISED": 0.9926
+      },
+      "caught_at_T4": 0.9191,
+      "incidents_caught_at_T4": 0.8857
+     },
+     "upi_test": {
+      "fraud_rows": 423,
+      "genuine_rows": 18091,
+      "average_precision": 0.9029,
+      "caught_at_T2": 0.9858,
+      "incidents_caught_at_T2": 0.9767,
+      "caught_at_T3": 0.9385,
+      "incidents_caught_at_T3": 0.938,
+      "caught_at_T3_by_family": {
+       "COACHED": 0.9091,
+       "PAYEE_RISK": 0.8571,
+       "UNAUTHORISED": 0.9939
+      },
+      "caught_at_T4": 0.8913,
+      "incidents_caught_at_T4": 0.907
+     }
+    },
+    "platform_both_data": {
+     "platform_test": {
+      "fraud_rows": 196,
+      "genuine_rows": 17710,
+      "average_precision": 0.9159,
+      "caught_at_T2": 1.0,
+      "incidents_caught_at_T2": 1.0,
+      "caught_at_T3": 0.9724,
+      "incidents_caught_at_T3": 0.9714,
+      "caught_at_T3_by_family": {
+       "COACHED": 0.8571,
+       "FIRST_PARTY": 1.0,
+       "UNAUTHORISED": 0.9926
+      },
+      "caught_at_T4": 0.924,
+      "incidents_caught_at_T4": 0.8714
+     },
+     "upi_test": {
+      "fraud_rows": 423,
+      "genuine_rows": 18091,
+      "average_precision": 0.6928,
+      "caught_at_T2": 0.8818,
+      "incidents_caught_at_T2": 0.8992,
+      "caught_at_T3": 0.7565,
+      "incidents_caught_at_T3": 0.7829,
+      "caught_at_T3_by_family": {
+       "COACHED": 0.6537,
+       "PAYEE_RISK": 0.5,
+       "UNAUTHORISED": 0.9451
+      },
+      "caught_at_T4": 0.669,
+      "incidents_caught_at_T4": 0.7054
+     }
+    }
+   },
+   "validation": {
+    "platform": {
+     "platform": {
+      "fraud_rows": 201,
+      "genuine_rows": 18678,
+      "average_precision": 0.8443,
+      "caught_at_T2": 0.994,
+      "incidents_caught_at_T2": 1.0,
+      "caught_at_T3": 0.9263,
+      "incidents_caught_at_T3": 0.9492,
+      "caught_at_T3_by_family": {
+       "COACHED": 0.8889,
+       "FIRST_PARTY": 0.7778,
+       "UNAUTHORISED": 0.9922
+      },
+      "caught_at_T4": 0.832,
+      "incidents_caught_at_T4": 0.8983
+     },
+     "upi": {
+      "fraud_rows": 297,
+      "genuine_rows": 18214,
+      "average_precision": 0.3392,
+      "caught_at_T2": 0.7508,
+      "incidents_caught_at_T2": 0.7938,
+      "caught_at_T3": 0.5589,
+      "incidents_caught_at_T3": 0.6598,
+      "caught_at_T3_by_family": {
+       "COACHED": 0.4769,
+       "PAYEE_RISK": 0.2727,
+       "UNAUTHORISED": 0.7692
+      },
+      "caught_at_T4": 0.3636,
+      "incidents_caught_at_T4": 0.4845
+     }
+    },
+    "demopay": {
+     "platform": {
+      "fraud_rows": 201,
+      "genuine_rows": 18678,
+      "average_precision": 0.0741,
+      "caught_at_T2": 0.7263,
+      "incidents_caught_at_T2": 0.8475,
+      "caught_at_T3": 0.432,
+      "incidents_caught_at_T3": 0.5593,
+      "caught_at_T3_by_family": {
+       "COACHED": 0.037,
+       "FIRST_PARTY": 0.1111,
+       "UNAUTHORISED": 0.6047
+      },
+      "caught_at_T4": 0.0121,
+      "incidents_caught_at_T4": 0.0339
+     },
+     "upi": {
+      "fraud_rows": 297,
+      "genuine_rows": 18214,
+      "average_precision": 0.726,
+      "caught_at_T2": 0.9966,
+      "incidents_caught_at_T2": 1.0,
+      "caught_at_T3": 0.9495,
+      "incidents_caught_at_T3": 0.9485,
+      "caught_at_T3_by_family": {
+       "COACHED": 0.9282,
+       "PAYEE_RISK": 1.0,
+       "UNAUTHORISED": 0.989
+      },
+      "caught_at_T4": 0.8552,
+      "incidents_caught_at_T4": 0.8763
+     }
+    },
+    "merged": {
+     "platform": {
+      "fraud_rows": 201,
+      "genuine_rows": 18678,
+      "average_precision": 0.8514,
+      "caught_at_T2": 0.994,
+      "incidents_caught_at_T2": 1.0,
+      "caught_at_T3": 0.9323,
+      "incidents_caught_at_T3": 0.9661,
+      "caught_at_T3_by_family": {
+       "COACHED": 0.8889,
+       "FIRST_PARTY": 0.8,
+       "UNAUTHORISED": 0.9922
+      },
+      "caught_at_T4": 0.8441,
+      "incidents_caught_at_T4": 0.9153
+     },
+     "upi": {
+      "fraud_rows": 297,
+      "genuine_rows": 18214,
+      "average_precision": 0.7196,
+      "caught_at_T2": 0.9798,
+      "incidents_caught_at_T2": 0.9897,
+      "caught_at_T3": 0.9192,
+      "incidents_caught_at_T3": 0.9381,
+      "caught_at_T3_by_family": {
+       "COACHED": 0.9026,
+       "PAYEE_RISK": 0.8182,
+       "UNAUTHORISED": 0.967
+      },
+      "caught_at_T4": 0.8451,
+      "incidents_caught_at_T4": 0.8557
+     }
+    },
+    "platform_both_data": {
+     "platform": {
+      "fraud_rows": 201,
+      "genuine_rows": 18678,
+      "average_precision": 0.8458,
+      "caught_at_T2": 0.994,
+      "incidents_caught_at_T2": 1.0,
+      "caught_at_T3": 0.9221,
+      "incidents_caught_at_T3": 0.9492,
+      "caught_at_T3_by_family": {
+       "COACHED": 0.8148,
+       "FIRST_PARTY": 0.7778,
+       "UNAUTHORISED": 0.9922
+      },
+      "caught_at_T4": 0.8453,
+      "incidents_caught_at_T4": 0.9153
+     },
+     "upi": {
+      "fraud_rows": 297,
+      "genuine_rows": 18214,
+      "average_precision": 0.4816,
+      "caught_at_T2": 0.8249,
+      "incidents_caught_at_T2": 0.8763,
+      "caught_at_T3": 0.6633,
+      "incidents_caught_at_T3": 0.7423,
+      "caught_at_T3_by_family": {
+       "COACHED": 0.6051,
+       "PAYEE_RISK": 0.4545,
+       "UNAUTHORISED": 0.8132
+      },
+      "caught_at_T4": 0.5556,
+      "incidents_caught_at_T4": 0.6701
+     }
+    }
+   },
+   "router": {
+    "merged_on_platform_test": {
+     "COACHED": 0.9048,
+     "FIRST_PARTY": 1.0,
+     "PAYEE_RISK": 0.25,
+     "UNAUTHORISED": 0.9265
+    },
+    "merged_on_upi_test": {
+     "COACHED": 1.0,
+     "PAYEE_RISK": 0.1071,
+     "UNAUTHORISED": 0.8049
+    },
+    "demopay_on_upi_test": {
+     "UNAUTHORISED": 0.7012,
+     "COACHED": 0.9957,
+     "PAYEE_RISK": 0.0714
+    }
+   }
+  }
+ },
+ "seconds": 1917,
+ "note": "Per-resample bootstrap differences omitted; summary.difference_ci holds their 95% intervals. Re-run scripts/compare_merged_model.py for them."
+}

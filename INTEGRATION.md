@@ -8,7 +8,7 @@ Re-check with `git log integration..origin/<branch>` after every port.
 
 | Branch | Integrated up to | Status |
 |---|---|---|
-| `Research/face-auth` | `46244ad` | done, see below |
+| `Research/face-auth` | `2b057c5` (DemoPay risk model), `46244ad` (face) | done, see below |
 | `ueba-service` | `23910e1` | done, see below |
 | `voice-auth` | `c706875` | done, see below |
 
@@ -129,6 +129,27 @@ Left out on purpose:
 Tests: `test_features.py` ported unchanged apart from imports; `test_service.py` runs the real
 service against a small model trained once per session (about 10 s).
 Thresholds not re-measured on real users: all behaviour results use simulated typists and tracers.
+
+## Research/face-auth @ 2b057c5: DemoPay's risk model (`backend/ato`)
+
+The face port below stopped at `46244ad`; DemoPay's payment-risk model arrived later (`15f0baf`) and is merged here into the
+platform's risk model rather than run beside it. Full method and results: [docs/merged-risk-model.md](docs/merged-risk-model.md).
+
+| Branch item | In the platform |
+|---|---|
+| `ato/simulate.py`, `ato/features.py`, `ato/train.py` | `amfa/engine/risk/upi/`, unchanged apart from imports; a test checks the ported simulator reproduces DemoPay's dataset number for number |
+| On-device telemetry and payee intelligence (call in progress, screen sharing, tampered phone, fraud-risk band, complaints, payee fan-in, collect / QR) | 22 optional `SIGNALS` in `risk/features.py`, plus `escalating_to_payee` from history; `signals` on `POST /v1/transactions` (`RiskSignals`); missing when not sent, so every existing caller is unchanged |
+| 13 UPI scam types | training data next to the platform's simulator (`risk/merged_data.py`, `train.py --upi-users`) |
+| Fraud-family router | a multiclass LightGBM in the model folder (`router.txt`); `Result.family`, `Plan.threatFamily`; explains, never changes the checks |
+| Monotone directions for the new signals | added to `MONOTONE` |
+
+Left out on purpose:
+
+| Branch item | Why |
+|---|---|
+| Three one-vs-rest detectors with "surprise" severities | the platform's calibrated LightGBM with T0-T4 cut-offs is kept (general boosters plus a specialist per kind of payment), so the engine, reliefs, band switch and model card stay as they are. On fresh simulated data it beats DemoPay's detectors on DemoPay's own scams in average precision and payments caught, but catches 1.6 points fewer whole incidents at T3 (docs/merged-risk-model.md) |
+| `server_only` variant | the platform already fails closed and treats missing values as missing; a model per trust level can come later with device attestation |
+| DemoPay's decision engine (`authn/policy.py`, 11-check registry) | the platform's engine and factors decide; the router's family is available to it for later use |
 
 ## Research/face-auth @ 46244ad
 
