@@ -189,3 +189,87 @@ def test_an_old_model_scores_rows_built_in_the_new_order(tmp_path):
     m = RiskModel(tmp_path)
     f = build(_ev(NOW), [], Profile())
     assert m.raw(np.array([vector(f)]))[0] == pytest.approx(m.raw(np.array([vector(f, CORE_FEATURES)]))[0])
+
+
+# ---- one-way rules: two of DemoPay's signals are humps, not slopes (docs/merged-risk-model.md, "Whole scams caught") -----------
+
+# the platform's own one-way rules, and DemoPay's that stayed: none of these may be dropped without saying so here
+ONE_WAY = {
+    "amount_ratio": 1, "amount_vs_max": 1, "amount_24h_ratio": 1, "amount_z_self": 1, "payee_z": 1, "habit_surprise": 1,
+    "amount_vs_declared": 1, "declared_gap": 1, "velocity_1h": 1, "velocity_24h": 1, "new_payees_24h": 1,
+    "sensitive_actions_24h": 1, "failed_factors_24h": 1, "spoof_7d": 1, "payee_risk_flag": 1, "payee_seen": -1,
+    "amount_vs_payee_avg": 1, "device_seen": -1, "helper_device": -1, "network_seen": -1, "place_seen": -1,
+    "sim_changed_hours": -1, "contact_changed_hours": -1, "password_reset_hours": -1,
+    "remote_access_active": 1, "integrity_fail": 1, "overlay_accessibility": 1, "bio_similarity": -1, "failed_pin_attempts": 1,
+    "ip_geo_km": 1, "device_bound_hours": -1, "sideload_hours": -1, "payee_fri": 1, "payee_complaints": 1,
+    "amount_over_balance": 1, "outflow_24h_over_balance": 1, "new_payees_72h": 1,
+}
+
+
+def test_only_the_two_hump_shaped_signals_lost_their_one_way_rule():
+    assert F.MONOTONE == ONE_WAY
+    assert F.UNCONSTRAINED_SIGNALS == {"payee_account_age_days": -1, "payee_fan_in_24h": 1}
+    assert set(F.UNCONSTRAINED_SIGNALS) <= set(SIGNALS) and not set(F.UNCONSTRAINED_SIGNALS) & set(F.MONOTONE)
+    # every rule on the platform's own 44 inputs is as it was: the platform's model and its callers are untouched
+    assert {k: v for k, v in F.MONOTONE.items() if k in CORE_FEATURES} == {k: v for k, v in ONE_WAY.items() if k in CORE_FEATURES}
+
+
+def _hump_data(rng, n=6000):
+    """Fraud lives in the middle of both signals, as in DemoPay's simulator: rented accounts a few hundred days old among
+    payees of every age, and mules paid by a few dozen people among quiet contacts and busy merchants."""
+    X = np.full((n, len(FEATURES)), np.nan)
+    age, fan = rng.uniform(0, 3000, n), rng.uniform(0, 200, n)
+    X[:, FEATURES.index("payee_account_age_days")], X[:, FEATURES.index("payee_fan_in_24h")] = age, fan
+    X[:, FEATURES.index("amount_log")] = rng.normal(7, 1, n)
+    y = (((age > 100) & (age < 900) & (rng.random(n) < .5)) | ((fan > 6) & (fan < 40) & (rng.random(n) < .5))).astype(int)
+    return X, y
+
+
+def _row(**values):
+    x = np.full((1, len(FEATURES)), np.nan)
+    for k, v in values.items():
+        x[0, FEATURES.index(k)] = v
+    return x
+
+
+def test_the_trainer_can_flag_an_aged_account_and_a_mid_sized_fan_in():
+    """With the trainer's own settings (train._base_params) the model scores a 500-day-old receiving account above a
+    2500-day-old one, and a payee paid by 20 people above one paid by 150: the scams that the two old rules hid. With the
+    old rules it cannot, which is what the merged_before column of scripts/compare_merged_model.py measures."""
+    import lightgbm as lgb
+    from amfa.engine.risk.train import _base_params
+    X, y = _hump_data(np.random.default_rng(3))
+    cat = [FEATURES.index(c) for c in F.CATEGORICAL]
+    fit = lambda p: lgb.train(p | dict(num_leaves=15, min_child_samples=20), lgb.Dataset(X, y, feature_name=FEATURES, categorical_feature=cat), 60)  # noqa: E731
+    now = fit(_base_params(7))
+    aged, old = now.predict(_row(payee_account_age_days=500, payee_fan_in_24h=2)), now.predict(_row(payee_account_age_days=2500, payee_fan_in_24h=2))
+    mid, busy = now.predict(_row(payee_account_age_days=2500, payee_fan_in_24h=20)), now.predict(_row(payee_account_age_days=2500, payee_fan_in_24h=150))
+    assert aged[0] > old[0] + .2 and mid[0] > busy[0] + .2
+    before = dict(_base_params(7))
+    before["monotone_constraints"] = [(F.MONOTONE | F.UNCONSTRAINED_SIGNALS).get(f, 0) for f in FEATURES]
+    was = fit(before)
+    assert was.predict(_row(payee_account_age_days=500, payee_fan_in_24h=2))[0] <= was.predict(_row(payee_account_age_days=50, payee_fan_in_24h=2))[0]
+    assert was.predict(_row(payee_account_age_days=2500, payee_fan_in_24h=20))[0] <= was.predict(_row(payee_account_age_days=2500, payee_fan_in_24h=150))[0]
+
+
+def test_the_comparison_trains_the_merged_model_with_the_shipped_rules():
+    """scripts/compare_merged_model.py must measure the model train.py builds: same one-way rules by default, and the
+    merged_before ablation differs only by the two old rules."""
+    import importlib.util
+    from pathlib import Path
+    from amfa.engine.risk.train import _base_params
+    spec = importlib.util.spec_from_file_location("compare_merged_model", Path(__file__).parents[2] / "scripts" / "compare_merged_model.py")
+    cm = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cm)
+    assert cm.MONOTONE is F.MONOTONE and _base_params(7)["monotone_constraints"] == [F.MONOTONE.get(f, 0) for f in FEATURES]
+    seen = []
+    cm.lgb_model = lambda X, y, w, tr, va, names, log, monotone=None: (seen.append(monotone) or (lambda Xs: np.zeros(len(Xs)), {}))
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(800, len(FEATURES)))
+    X[:, FEATURES.index("signals_present")] = np.repeat([0, 1], 2).tolist() * 200      # each kind has fraud and genuine rows
+    y, w, half = np.tile([0, 1], 400), np.ones(800), np.arange(800) < 400
+    cm.merged_model(X, y, w, w, half, ~half, lambda m: None)
+    assert seen == [None, None, None]                       # general + two specialists, all with the shipped rules
+    seen.clear()
+    cm.merged_model(X, y, w, w, half, ~half, lambda m: None, F.MONOTONE | F.UNCONSTRAINED_SIGNALS)
+    assert len(seen) == 3 and all(m == F.MONOTONE | F.UNCONSTRAINED_SIGNALS for m in seen)

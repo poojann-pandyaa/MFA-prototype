@@ -38,9 +38,17 @@ MONOTONE = {
     "sim_changed_hours": -1, "contact_changed_hours": -1, "password_reset_hours": -1,
     # DemoPay's directions for its signals (same rule: only where the direction is unambiguous)
     "remote_access_active": 1, "integrity_fail": 1, "overlay_accessibility": 1, "bio_similarity": -1, "failed_pin_attempts": 1,
-    "ip_geo_km": 1, "payee_fan_in_24h": 1, "payee_account_age_days": -1, "device_bound_hours": -1, "sideload_hours": -1,
+    "ip_geo_km": 1, "device_bound_hours": -1, "sideload_hours": -1,
     "payee_fri": 1, "payee_complaints": 1, "amount_over_balance": 1, "outflow_24h_over_balance": 1, "new_payees_72h": 1,
 }
+# Two of DemoPay's signals are deliberately NOT constrained, because their direction is not unambiguous (each is a hump, and a
+# one-way rule hid whole scams whose only payment goes to such an account; see docs/merged-risk-model.md, "Whole scams caught"):
+#   payee_account_age_days  scammers rent aged accounts: "an older receiving account is safer" let an aged mule hide behind
+#                           every long-standing payee
+#   payee_fan_in_24h        a busy merchant is paid by hundreds of people a day and a mule by a few dozen: "more payers is
+#                           riskier" is false over most of the range
+# Until this fix they carried DemoPay's nominal directions (-1 and +1): the merged model before it is this dict plus these two.
+UNCONSTRAINED_SIGNALS = {"payee_account_age_days": -1, "payee_fan_in_24h": 1}
 
 CORE_FEATURES = [
     "amount_log", "amount_ratio", "amount_vs_max", "amount_24h_ratio", "amount_z_self", "payee_z", "habit_surprise", "amount_vs_declared", "declared_gap",

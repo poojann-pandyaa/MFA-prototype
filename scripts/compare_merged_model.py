@@ -13,6 +13,8 @@ uses the same settings, with "intermediate" monotone constraints for speed):
              trained on both simulators
   platform_both_data   ablation: the platform's 44 inputs trained on both simulators, to tell the gain from more data apart
              from the gain from the new inputs
+  merged_before        ablation: the merged model as it was before two of DemoPay's signals lost their one-way rule
+             (features.UNCONSTRAINED_SIGNALS); everything else identical, to show what that one change does
 
 Scored on each simulator's test days separately (the platform's attacks, and DemoPay's UPI scams), with the platform's own
 yardsticks: average precision, and the share of fraud caught when only 5% / 1% / 0.2% of genuine payments may be stepped up
@@ -31,7 +33,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from amfa.engine.risk import merged_data as M  # noqa: E402
-from amfa.engine.risk.features import CATEGORICAL, CORE_FEATURES, FEATURES, MONOTONE, vector  # noqa: E402
+from amfa.engine.risk.features import CATEGORICAL, CORE_FEATURES, FEATURES, MONOTONE, UNCONSTRAINED_SIGNALS, vector  # noqa: E402
 from amfa.engine.risk.threat import GENUINE_SHARE_AT_OR_ABOVE  # noqa: E402
 from amfa.engine.risk.upi import features as UF  # noqa: E402
 from amfa.engine.risk.upi import train as UT  # noqa: E402
@@ -43,15 +45,17 @@ BUDGETS = {"T2": GENUINE_SHARE_AT_OR_ABOVE["T2"], "T3": GENUINE_SHARE_AT_OR_ABOV
 DP_FAMILY = {"UNAUTHORISED": "takeover", "COACHED": "coached", "PAYEE_RISK": "payee", "FIRST_PARTY": "payee"}
 
 
-def lgb_model(X, y, w, tr, va, names, log):
-    """The platform's trainer (train._base_params, early stopping on validation PR-AUC), restricted to [names]."""
+def lgb_model(X, y, w, tr, va, names, log, monotone=None):
+    """The platform's trainer (train._base_params, early stopping on validation PR-AUC), restricted to [names].
+    [monotone]: the one-way rules to train with (default features.MONOTONE, as the shipped trainer)."""
     import lightgbm as lgb
+    monotone = MONOTONE if monotone is None else monotone
     cols = [FEATURES.index(n) for n in names]
     cat = [i for i, n in enumerate(names) if n in CATEGORICAL]
     # the same settings for every LightGBM model here; "intermediate" monotone constraints instead of main's "advanced",
     # which is ~16x slower on this data (minutes per fit) and gave similar validation scores in a timing check
     base = dict(objective="binary", feature_fraction=0.8, bagging_fraction=0.8, bagging_freq=1,
-                metric="average_precision", verbose=-1, monotone_constraints=[MONOTONE.get(n, 0) for n in names],
+                metric="average_precision", verbose=-1, monotone_constraints=[monotone.get(n, 0) for n in names],
                 monotone_constraints_method="intermediate")
     dtr = lgb.Dataset(X[tr][:, cols], y[tr], weight=w[tr], feature_name=list(names), categorical_feature=cat, free_raw_data=False)
     dva = lgb.Dataset(X[va][:, cols], y[va], weight=w[va], reference=dtr, free_raw_data=False)
@@ -67,17 +71,18 @@ def lgb_model(X, y, w, tr, va, names, log):
     return lambda Xs: np.mean([b.predict(Xs[:, cols], num_iteration=b.best_iteration) for b in boosters], axis=0), best[1]
 
 
-def merged_model(X, y, w, wb, tr, va, log):
+def merged_model(X, y, w, wb, tr, va, log, monotone=None):
     """The merged model as train.py builds it: general boosters on both simulators, plus a specialist for each kind of
-    payment (the bank sent phone/network signals, or it did not), each scoring with the general ones half and half."""
+    payment (the bank sent phone/network signals, or it did not), each scoring with the general ones half and half.
+    [monotone]: other one-way rules than features.MONOTONE, for the merged_before ablation only."""
     has = X[:, FEATURES.index("signals_present")] == 1
     log("    general (both simulators)")
-    gen, g = lgb_model(X, y, wb, tr, va, FEATURES, log)
+    gen, g = lgb_model(X, y, wb, tr, va, FEATURES, log, monotone)
     experts = {}
     for name, m in (("signals", has), ("no_signals", ~has)):
         if (tr & m & (y == 1)).sum() >= 50 and (tr & ~m).any():
             log(f"    specialist: {name}")
-            experts[name] = lgb_model(X, y, w, tr & m, va & m, FEATURES, log)[0]
+            experts[name] = lgb_model(X, y, w, tr & m, va & m, FEATURES, log, monotone)[0]
 
     def score(Xs):
         h = Xs[:, FEATURES.index("signals_present")] == 1
@@ -177,6 +182,9 @@ def run_one(customers: int, upi_users: int, seed: int, log) -> dict:
     log("  ablation: platform's 44 inputs, both simulators")
     f, models["platform_both_data"] = lgb_model(X, y, wb, tr, va, CORE_FEATURES, log)
     scores["platform_both_data"] = f(X)
+    log("  ablation: the merged model with the two one-way rules it had before (payee account age, payee fan-in)")
+    f, models["merged_before"] = merged_model(X, y, w, wb, tr, va, log, MONOTONE | UNCONSTRAINED_SIGNALS)
+    scores["merged_before"] = f(X)
     res = {"data": {"platform_rows": int(P.sum()), "upi_rows": int(U.sum()),
                     "test_fraud_rows": {"platform": int((te & P & (y == 1)).sum()), "upi": int((te & U & (y == 1)).sum())}},
            "params": models, "results": {}, "validation": {}}
